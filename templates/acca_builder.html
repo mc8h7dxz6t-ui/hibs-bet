@@ -135,7 +135,8 @@
             <button class="preset" onclick="setStake(100)">£100</button>
         </div>
 
-        <button class="btn-place" id="btn-place" onclick="placeBet()" disabled>🎯 Place Acca</button>
+        <button class="btn-place" id="btn-place" onclick="placeBet('wh')" disabled>🎯 Place on William Hill</button>
+        <button class="btn-place" style="background:linear-gradient(135deg,#e4002b,#a00020);margin-top:0;" id="btn-place-lb" onclick="placeBet('lb')" disabled>🎯 Place on Ladbrokes</button>
         <button class="btn-clear" onclick="clearSlip()">✕ Clear Slip</button>
 
         <div class="bookie-grid">
@@ -317,19 +318,55 @@ function setStake(v){
     recalc();
 }
 
-function placeBet(){
-    const keys=Object.keys(slip);
-    if(!keys.length) return;
-    const stake=parseFloat(document.getElementById('stake').value)||0;
-    const totalOdds=keys.reduce((a,k)=>a*slip[k].odds,1);
-    const ret=(stake*totalOdds).toFixed(2);
-    const lines=keys.map(k=>{
-        const s=slip[k];
-        const ol=s.outcome==='home'?s.home:s.outcome==='away'?s.away:'Draw';
+function buildSummary() {
+    const keys = Object.keys(slip);
+    const stake = parseFloat(document.getElementById('stake').value) || 0;
+    const totalOdds = keys.reduce((a, k) => a * slip[k].odds, 1);
+    const ret = (stake * totalOdds).toFixed(2);
+    const lines = keys.map(k => {
+        const s = slip[k];
+        const ol = s.outcome === 'home' ? s.home : s.outcome === 'away' ? s.away : 'Draw';
         return `${s.home} vs ${s.away} \u2014 ${ol} @ ${s.odds.toFixed(2)}`;
     });
-    const msg=`\ud83c\udfaf Your Acca:\n\n${lines.join('\n')}\n\nSelections: ${keys.length}\nTotal Odds: ${totalOdds.toFixed(2)}\nStake: \u00a3${stake.toFixed(2)}\nPotential Return: \u00a3${ret}\n\nClick OK to open Bet365.`;
-    if(confirm(msg)) window.open('https://www.bet365.com','_blank');
+    return { keys, stake, totalOdds, ret, lines };
+}
+
+function buildWHUrl(lines, stake, totalOdds, ret) {
+    // William Hill bet slip deep link
+    // WH supports a betslip URL with selections encoded
+    const params = new URLSearchParams({
+        action: 'betslip',
+        type: lines.length > 1 ? 'accumulator' : 'single',
+        stake: stake.toFixed(2),
+    });
+    // Append each selection as a readable label in the URL
+    lines.forEach((l, i) => params.append(`sel${i+1}`, l));
+    return `https://sports.williamhill.com/betting/en-gb?${params.toString()}`;
+}
+
+function buildLBUrl(lines, stake, totalOdds, ret) {
+    // Ladbrokes bet slip deep link
+    const params = new URLSearchParams({
+        betType: lines.length > 1 ? 'accumulator' : 'single',
+        stake: stake.toFixed(2),
+    });
+    lines.forEach((l, i) => params.append(`selection${i+1}`, l));
+    return `https://www.ladbrokes.com/sport/football?${params.toString()}`;
+}
+
+function placeBet(bookie) {
+    const keys = Object.keys(slip);
+    if (!keys.length) return;
+    const { stake, totalOdds, ret, lines } = buildSummary();
+
+    const betType = keys.length > 1 ? `${keys.length}-fold Acca` : 'Single';
+    const bookieName = bookie === 'wh' ? 'William Hill' : 'Ladbrokes';
+    const bookieUrl = bookie === 'wh'
+        ? buildWHUrl(lines, stake, totalOdds, ret)
+        : buildLBUrl(lines, stake, totalOdds, ret);
+
+    const msg = `\ud83c\udfaf ${betType} on ${bookieName}\n\n${lines.join('\n')}\n\nSelections: ${keys.length}\nTotal Odds: ${totalOdds.toFixed(2)}\nStake: \u00a3${stake.toFixed(2)}\nPotential Return: \u00a3${ret}\n\nClick OK to open ${bookieName}.`;
+    if (confirm(msg)) window.open(bookieUrl, '_blank');
 }
 
 function doFilter(f, btn){
