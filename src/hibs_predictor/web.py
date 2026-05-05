@@ -113,8 +113,11 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     if not fetched and "football_data_org" in aggregator.clients:
         comp = league.get("football_data_org_id")
         if comp:
+            # Only try current season - avoid hammering the rate limit
             for season in [now.year - 1, now.year]:
                 try:
+                    import time as _time
+                    _time.sleep(0.5)  # respect rate limit
                     raw = aggregator.clients["football_data_org"].fetch_fixtures(comp, season, status="SCHEDULED")
                     for m in raw or []:
                         norm = _normalize_fdo(m, league_code)
@@ -129,8 +132,8 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
                             continue
                     if fetched:
                         break
-                except Exception as e:
-                    print(f"[FDO] {league_code} {season}: {e}")
+                except Exception:
+                    break  # stop retrying on any error to avoid rate limit cascade
 
     fixtures = []
     for fixture in fetched.values():
