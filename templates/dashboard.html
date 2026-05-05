@@ -2,20 +2,22 @@
 {% block title %}hibs.bet — Live Dashboard{% endblock %}
 {% block content %}
 <header>
-    <div class="header-nav">
-        <a href="/">📊 Dashboard</a>
-        <a href="/acca">💰 Acca Builder</a>
+    <div class="brand">
+        <span class="brand-logo">hibs.bet</span>
+        <div>
+            <div class="brand-sub">Edinburgh Betting Intelligence</div>
+            <div class="brand-sub" style="margin-top:2px;font-size:0.65em;color:var(--green);">Tap any fixture to expand</div>
+        </div>
     </div>
-    <span class="brand-logo">hibs.bet</span>
-    <p class="brand-tagline">Advanced Betting Intelligence — Edinburgh, Scotland</p>
-    <div class="stats-bar">
-        <span class="stat-pill">⚽ {{ total }} fixtures in next 48h</span>
-        <span class="stat-pill gold">💰 {{ value_bet_count }} value bets detected</span>
+    <div class="header-right">
+        <span class="stat-pill">⚽ {{ total }} fixtures</span>
+        <span class="stat-pill gold">⚡ {{ value_bet_count }} value bets</span>
+        <a href="/acca" class="nav-btn">💰 Acca</a>
     </div>
 </header>
 
 <div class="tab-bar">
-    <button class="tab-btn gold-tab active" data-tab-group="main" onclick="switchTab('tab-value','main')">💰 Value Bets ({{ value_bet_count }})</button>
+    <button class="tab-btn gold-tab active" data-tab-group="main" onclick="switchTab('tab-value','main')">⚡ Value ({{ value_bet_count }})</button>
     <button class="tab-btn" data-tab-group="main" onclick="switchTab('tab-all','main')">⚽ All ({{ total }})</button>
     {% for region in league_regions %}
     <button class="tab-btn" data-tab-group="main" onclick="switchTab('tab-r{{ loop.index }}','main')">{{ region }}</button>
@@ -26,7 +28,7 @@
     {% if value_bets %}
     <div class="fixtures-grid">{% for fixture in value_bets %}{% include '_fixture_card.html' %}{% endfor %}</div>
     {% else %}
-    <div class="empty-state"><div class="icon">🔍</div><p>No value bets right now. Check back as odds update.</p></div>
+    <div class="empty-state"><div class="icon">🔍</div><p>No value bets right now. Tap All to see all fixtures.</p></div>
     {% endif %}
 </div>
 
@@ -34,7 +36,7 @@
     {% if all_fixtures %}
     <div class="fixtures-grid">{% for fixture in all_fixtures %}{% include '_fixture_card.html' %}{% endfor %}</div>
     {% else %}
-    <div class="empty-state"><div class="icon">📅</div><p>No fixtures found in the next 48 hours.</p></div>
+    <div class="empty-state"><div class="icon">📅</div><p>No fixtures in the next 48 hours.</p></div>
     {% endif %}
 </div>
 
@@ -51,10 +53,10 @@
 {% endblock %}
 {% block extra_js %}
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        if ({{ value_bet_count }} === 0) {
-            document.querySelectorAll('[data-group="main"]').forEach(p => p.classList.remove('active'));
-            document.querySelectorAll('[data-tab-group="main"]').forEach(b => b.classList.remove('active'));
+    document.addEventListener('DOMContentLoaded',function(){
+        if({{ value_bet_count }}===0){
+            document.querySelectorAll('[data-group="main"]').forEach(p=>p.classList.remove('active'));
+            document.querySelectorAll('[data-tab-group="main"]').forEach(b=>b.classList.remove('active'));
             document.getElementById('tab-all').classList.add('active');
             document.querySelectorAll('.tab-btn')[1].classList.add('active');
         }
