@@ -1,6 +1,8 @@
 {% set p = fixture.prediction %}
 {% set vb = p.value_bets if p else {} %}
 {% set best = p.best_bet if p else none %}
+{% set hp = fixture.home_position %}
+{% set ap = fixture.away_position %}
 
 <div class="fixture-card {% if fixture.has_value_bet %}value-card{% endif %}">
     {% if fixture.has_value_bet %}<div class="value-badge">💰 Value Bet</div>{% endif %}
@@ -10,16 +12,24 @@
         <span class="fixture-time">{{ fixture.date[:16].replace('T',' ') if fixture.date else '—' }}</span>
     </div>
 
+    <!-- Teams & League Position -->
     <div class="match">
-        <div class="team"><div class="team-name">{{ fixture.home }}</div></div>
+        <div class="team">
+            <div class="team-name">{{ fixture.home }}</div>
+            {% if hp and hp.position %}<div class="team-pos">🏆 {{ hp.position }}{% if hp.points %} &middot; {{ hp.points }}pts{% endif %}</div>{% endif %}
+        </div>
         <div class="vs">VS</div>
-        <div class="team"><div class="team-name">{{ fixture.away }}</div></div>
+        <div class="team">
+            <div class="team-name">{{ fixture.away }}</div>
+            {% if ap and ap.position %}<div class="team-pos">🏆 {{ ap.position }}{% if ap.points %} &middot; {{ ap.points }}pts{% endif %}</div>{% endif %}
+        </div>
     </div>
 
     {% if p %}
+    <!-- 1X2 Probability + Odds Row -->
     <div class="prob-row">
         <div class="prob-box {% if p.predicted_outcome == 'home' %}best-outcome{% endif %}">
-            <div class="prob-label">{{ fixture.home[:9] }}</div>
+            <div class="prob-label">{{ fixture.home[:10] }}</div>
             <div class="prob-value">{{ p.probabilities_pct.home }}%</div>
             <div class="prob-odds">{{ "%.2f"|format(p.bookmaker_odds.home) }}</div>
         </div>
@@ -29,20 +39,21 @@
             <div class="prob-odds">{{ "%.2f"|format(p.bookmaker_odds.draw) }}</div>
         </div>
         <div class="prob-box {% if p.predicted_outcome == 'away' %}best-outcome{% endif %}">
-            <div class="prob-label">{{ fixture.away[:9] }}</div>
+            <div class="prob-label">{{ fixture.away[:10] }}</div>
             <div class="prob-value">{{ p.probabilities_pct.away }}%</div>
             <div class="prob-odds">{{ "%.2f"|format(p.bookmaker_odds.away) }}</div>
         </div>
     </div>
 
+    <!-- Confidence -->
     <div class="conf-bar-wrap">
         <div class="conf-label"><span>Model Confidence</span><span>{{ p.confidence_pct }}%</span></div>
         <div class="conf-bar"><div class="conf-fill" style="width:{{ p.confidence_pct }}%"></div></div>
     </div>
 
+    <!-- Value Bet Panel -->
     {% if best and vb[best] %}
-    {% set bv = vb[best] %}
-    {% set kelly = bv.kelly %}
+    {% set bv = vb[best] %}{% set kelly = bv.kelly %}
     <div class="value-bet-panel">
         <div class="value-bet-title">💰 Value Bet — {{ best|upper }} WIN @ {{ "%.2f"|format(bv.odds) }}</div>
         <div class="value-bet-grid">
@@ -50,32 +61,101 @@
             <div class="vb-stat"><div class="vb-stat-label">Bookie Implies</div><div class="vb-stat-value">{{ bv.implied_probability_pct }}%</div></div>
             <div class="vb-stat"><div class="vb-stat-label">Edge</div><div class="vb-stat-value green">+{{ bv.edge_pct }}%</div></div>
             <div class="vb-stat"><div class="vb-stat-label">Expected ROI</div><div class="vb-stat-value gold">+{{ bv.roi_percent }}%</div></div>
-            <div class="vb-stat">
-                <div class="vb-stat-label">Stake Guidance</div>
-                <div class="vb-stat-value"><span class="kelly-label kelly-{{ kelly.confidence_label|lower }}">{{ kelly.confidence_label }}</span> {{ kelly.suggested_percent }}% of bank</div>
-            </div>
+            <div class="vb-stat"><div class="vb-stat-label">Stake Guidance</div><div class="vb-stat-value"><span class="kelly-label kelly-{{ kelly.confidence_label|lower }}">{{ kelly.confidence_label }}</span> {{ kelly.suggested_percent }}% of bank</div></div>
             <div class="vb-stat"><div class="vb-stat-label">e.g. on £100 bank</div><div class="vb-stat-value gold">{{ kelly.example_stake }}</div></div>
         </div>
         <div style="margin-top:7px;font-size:0.72em;color:var(--muted);">{{ kelly.explanation }}</div>
     </div>
     {% endif %}
 
+    <!-- Quick Stats -->
     <div class="mini-stats">
-        <div class="mini-stat"><div class="mini-stat-label">xG</div><div class="mini-stat-value">{{ p.expected_goals_home }} — {{ p.expected_goals_away }}</div></div>
+        <div class="mini-stat"><div class="mini-stat-label">xG (Home — Away)</div><div class="mini-stat-value">{{ p.expected_goals_home }} — {{ p.expected_goals_away }}</div></div>
         <div class="mini-stat"><div class="mini-stat-label">BTTS</div><div class="mini-stat-value">{{ p.btts_probability_pct }}%</div></div>
-        <div class="mini-stat"><div class="mini-stat-label">Over 2.5</div><div class="mini-stat-value">{{ p.over25_probability_pct }}%</div></div>
+        <div class="mini-stat"><div class="mini-stat-label">Over 2.5 Goals</div><div class="mini-stat-value">{{ p.over25_probability_pct }}%</div></div>
         <div class="mini-stat"><div class="mini-stat-label">Poisson (H/D/A)</div><div class="mini-stat-value">{{ p.poisson_probs.home }}% / {{ p.poisson_probs.draw }}% / {{ p.poisson_probs.away }}%</div></div>
     </div>
 
+    <!-- DROPDOWN -->
     <div class="dropdown">
-        <button class="dropdown-toggle" onclick="toggleDropdown(this)">▶ Show Form &amp; Details</button>
+        <button class="dropdown-toggle" onclick="toggleDropdown(this)">▶ Full Analysis &amp; Form</button>
         <div class="dropdown-content"><div class="dropdown-inner">
 
+            <!-- LEAGUE TABLE POSITION -->
+            {% if hp or ap %}
             <div class="form-section">
-                <div class="form-section-title">{{ fixture.home }} — Last 10</div>
+                <div class="form-section-title">📊 League Table</div>
+                <table class="form-table">
+                    <tr><th>Team</th><th>Pos</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th></tr>
+                    {% if hp and hp.position %}
+                    <tr style="color:var(--green);">
+                        <td><strong>{{ fixture.home }}</strong></td>
+                        <td>{{ hp.position }}</td><td>{{ hp.played }}</td><td>{{ hp.won }}</td>
+                        <td>{{ hp.drawn }}</td><td>{{ hp.lost }}</td>
+                        <td>{{ hp.goals_for }}</td><td>{{ hp.goals_against }}</td>
+                        <td>{{ hp.goal_diff }}</td><td><strong>{{ hp.points }}</strong></td>
+                    </tr>
+                    {% endif %}
+                    {% if ap and ap.position %}
+                    <tr style="color:var(--blue);">
+                        <td><strong>{{ fixture.away }}</strong></td>
+                        <td>{{ ap.position }}</td><td>{{ ap.played }}</td><td>{{ ap.won }}</td>
+                        <td>{{ ap.drawn }}</td><td>{{ ap.lost }}</td>
+                        <td>{{ ap.goals_for }}</td><td>{{ ap.goals_against }}</td>
+                        <td>{{ ap.goal_diff }}</td><td><strong>{{ ap.points }}</strong></td>
+                    </tr>
+                    {% endif %}
+                </table>
+            </div>
+            {% endif %}
+
+            <!-- BOOKMAKER ODDS COMPARISON -->
+            {% if fixture.all_bookmaker_odds %}
+            <div class="form-section">
+                <div class="form-section-title">💷 Bookmaker Odds Comparison</div>
+                <table class="form-table">
+                    <tr><th>Bookmaker</th><th>Home</th><th>Draw</th><th>Away</th></tr>
+                    {% for bm in fixture.all_bookmaker_odds[:8] %}
+                    <tr>
+                        <td style="color:var(--muted);">{{ bm.bookmaker }}</td>
+                        <td style="color:var(--green);font-weight:700;">{{ "%.2f"|format(bm.home) if bm.home else '—' }}</td>
+                        <td>{{ "%.2f"|format(bm.draw) if bm.draw else '—' }}</td>
+                        <td style="color:var(--blue);font-weight:700;">{{ "%.2f"|format(bm.away) if bm.away else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+                <div style="font-size:0.7em;color:var(--muted);margin-top:4px;">Best odds shown in card above</div>
+            </div>
+            {% endif %}
+
+            <!-- ALL VALUE BETS -->
+            {% if vb %}
+            <div class="form-section">
+                <div class="form-section-title">💰 All Value Bets Detected</div>
+                {% for outcome, bdata in vb.items() %}
+                <div class="vb-full-row">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                        <strong style="color:var(--gold);">{{ outcome|upper }} WIN</strong>
+                        <span class="kelly-label kelly-{{ bdata.kelly.confidence_label|lower }}">{{ bdata.kelly.confidence_label }}</span>
+                    </div>
+                    <div class="mini-stats" style="margin:0;">
+                        <div class="mini-stat"><div class="mini-stat-label">Odds</div><div class="mini-stat-value">{{ "%.2f"|format(bdata.odds) }}</div></div>
+                        <div class="mini-stat"><div class="mini-stat-label">Our Prob</div><div class="mini-stat-value green">{{ bdata.model_probability_pct }}%</div></div>
+                        <div class="mini-stat"><div class="mini-stat-label">Bookie Prob</div><div class="mini-stat-value">{{ bdata.implied_probability_pct }}%</div></div>
+                        <div class="mini-stat"><div class="mini-stat-label">Edge / ROI</div><div class="mini-stat-value gold">+{{ bdata.edge_pct }}% / +{{ bdata.roi_percent }}%</div></div>
+                        <div class="mini-stat" style="grid-column:span 2;"><div class="mini-stat-label">Stake Guidance</div><div class="mini-stat-value">{{ bdata.kelly.explanation }}</div></div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <!-- HOME FORM -->
+            <div class="form-section">
+                <div class="form-section-title">{{ fixture.home }} — Last 10 Results</div>
                 <div class="form-strip">
                     {% for r in fixture.home_last10 %}<div class="form-dot {{ r.result }}" title="{{ r.home_away }} vs {{ r.opponent }} {{ r.score }} ({{ r.date }})">{{ r.result }}</div>
-                    {% else %}<span style="font-size:0.75em;color:var(--muted);">No data</span>{% endfor %}
+                    {% else %}<span style="font-size:0.75em;color:var(--muted);">No data available</span>{% endfor %}
                 </div>
                 {% if fixture.home_last10 %}
                 <table class="form-table">
@@ -87,11 +167,12 @@
                 {% endif %}
             </div>
 
+            <!-- AWAY FORM -->
             <div class="form-section">
-                <div class="form-section-title">{{ fixture.away }} — Last 10</div>
+                <div class="form-section-title">{{ fixture.away }} — Last 10 Results</div>
                 <div class="form-strip">
                     {% for r in fixture.away_last10 %}<div class="form-dot {{ r.result }}" title="{{ r.home_away }} vs {{ r.opponent }} {{ r.score }} ({{ r.date }})">{{ r.result }}</div>
-                    {% else %}<span style="font-size:0.75em;color:var(--muted);">No data</span>{% endfor %}
+                    {% else %}<span style="font-size:0.75em;color:var(--muted);">No data available</span>{% endfor %}
                 </div>
                 {% if fixture.away_last10 %}
                 <table class="form-table">
@@ -103,26 +184,20 @@
                 {% endif %}
             </div>
 
-            <div class="form-section-title" style="margin-top:8px;">Team Analysis</div>
-            <div class="mini-stats">
-                <div class="mini-stat"><div class="mini-stat-label">{{ fixture.home }} Strength</div><div class="mini-stat-value">{{ p.team_strength_home }}%</div></div>
-                <div class="mini-stat"><div class="mini-stat-label">{{ fixture.away }} Strength</div><div class="mini-stat-value">{{ p.team_strength_away }}%</div></div>
-                <div class="mini-stat"><div class="mini-stat-label">{{ fixture.home }} Form</div><div class="mini-stat-value">{{ p.form_home }}%</div></div>
-                <div class="mini-stat"><div class="mini-stat-label">{{ fixture.away }} Form</div><div class="mini-stat-value">{{ p.form_away }}%</div></div>
+            <!-- TEAM STRENGTH ANALYSIS -->
+            <div class="form-section">
+                <div class="form-section-title">📊 Team Strength Analysis</div>
+                <div class="mini-stats">
+                    <div class="mini-stat"><div class="mini-stat-label">{{ fixture.home }} Strength</div><div class="mini-stat-value">{{ p.team_strength_home }}%</div></div>
+                    <div class="mini-stat"><div class="mini-stat-label">{{ fixture.away }} Strength</div><div class="mini-stat-value">{{ p.team_strength_away }}%</div></div>
+                    <div class="mini-stat"><div class="mini-stat-label">{{ fixture.home }} Form</div><div class="mini-stat-value">{{ p.form_home }}%</div></div>
+                    <div class="mini-stat"><div class="mini-stat-label">{{ fixture.away }} Form</div><div class="mini-stat-value">{{ p.form_away }}%</div></div>
+                    <div class="mini-stat"><div class="mini-stat-label">xG Home</div><div class="mini-stat-value">{{ p.expected_goals_home }}</div></div>
+                    <div class="mini-stat"><div class="mini-stat-label">xG Away</div><div class="mini-stat-value">{{ p.expected_goals_away }}</div></div>
+                    <div class="mini-stat"><div class="mini-stat-label">BTTS Probability</div><div class="mini-stat-value">{{ p.btts_probability_pct }}%</div></div>
+                    <div class="mini-stat"><div class="mini-stat-label">Over 2.5 Goals</div><div class="mini-stat-value">{{ p.over25_probability_pct }}%</div></div>
+                </div>
             </div>
-
-            {% if vb %}
-            <div class="form-section-title" style="margin-top:8px;">All Value Bets</div>
-            {% for outcome, bdata in vb.items() %}
-            <div style="background:rgba(255,215,0,0.04);border:1px solid rgba(255,215,0,0.14);border-radius:7px;padding:9px;margin-bottom:7px;font-size:0.75em;">
-                <strong style="color:var(--gold);">{{ outcome|upper }}</strong> @ {{ "%.2f"|format(bdata.odds) }}<br>
-                Model: <strong>{{ bdata.model_probability_pct }}%</strong> &nbsp;|&nbsp; Implied: {{ bdata.implied_probability_pct }}% &nbsp;|&nbsp;
-                Edge: <span style="color:var(--green);">+{{ bdata.edge_pct }}%</span> &nbsp;|&nbsp; ROI: <span style="color:var(--gold);">+{{ bdata.roi_percent }}%</span><br>
-                <span class="kelly-label kelly-{{ bdata.kelly.confidence_label|lower }}">{{ bdata.kelly.confidence_label }}</span>
-                &nbsp;<span style="color:var(--muted);">{{ bdata.kelly.explanation }}</span>
-            </div>
-            {% endfor %}
-            {% endif %}
 
         </div></div>
     </div>

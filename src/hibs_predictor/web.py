@@ -157,6 +157,9 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
                 "prediction": prediction,
                 "home_last10": home_last10,
                 "away_last10": away_last10,
+                "home_position": enriched.get("home_position", {}),
+                "away_position": enriched.get("away_position", {}),
+                "all_bookmaker_odds": enriched.get("all_bookmaker_odds", []),
                 "has_value_bet": bool(prediction.get("value_bets")),
             })
         except Exception as e:

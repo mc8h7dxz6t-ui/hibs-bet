@@ -163,9 +163,11 @@ class ApiSportsFootballClient(BaseApiClient):
         data = self._get_json(endpoint, params=params)
         return data.get("response", [])
 
-    def fetch_team_statistics(self, team_id: int, season: int) -> Dict[str, Any]:
+    def fetch_team_statistics(self, team_id: int, season: int, league_id: int = None) -> Dict[str, Any]:
         endpoint = "teams/statistics"
         params = {"team": team_id, "season": season}
+        if league_id:
+            params["league"] = league_id
         data = self._get_json(endpoint, params=params)
         return data.get("response", {})
 
@@ -176,32 +178,105 @@ class ApiSportsFootballClient(BaseApiClient):
         standings = data.get("response", [])
         return standings[0].get("league", {}).get("standings", [[]]) if standings else [[]]
 
+    def fetch_team_position(self, team_id: int, league_id: int, season: int) -> Dict[str, Any]:
+        """Get a team's current league position and stats."""
+        cache_key = f"team_position_{team_id}_{league_id}_{season}"
+        cached = self.cache.get(cache_key, ttl_hours=6)
+        if cached:
+            return cached
+        try:
+            all_standings = self.fetch_standings(league_id, season)
+            for group in all_standings:
+                for entry in group:
+                    if entry.get("team", {}).get("id") == team_id:
+                        result = {
+                            "position": entry.get("rank", "?"),
+                            "played": entry.get("all", {}).get("played", 0),
+                            "won": entry.get("all", {}).get("win", 0),
+                            "drawn": entry.get("all", {}).get("draw", 0),
+                            "lost": entry.get("all", {}).get("lose", 0),
+                            "goals_for": entry.get("all", {}).get("goals", {}).get("for", 0),
+                            "goals_against": entry.get("all", {}).get("goals", {}).get("against", 0),
+                            "goal_diff": entry.get("goalsDiff", 0),
+                            "points": entry.get("points", 0),
+                            "form": entry.get("form", ""),
+                        }
+                        self.cache.set(cache_key, result)
+                        return result
+        except Exception:
+            pass
+        return {}
+
 
 class OddsApiClient(BaseApiClient):
+    # Map our league codes to The Odds API sport keys
+    SPORT_KEYS = {
+        "EPL": "soccer_england_league1",
+        "CHAMPIONSHIP": "soccer_england_league2",
+        "LEAGUE_ONE": "soccer_england_efl_trophy",
+        "SCOTLAND": "soccer_scotland_premiership",
+        "SCOTLAND_CHAMP": "soccer_scotland_championship",
+        "UCL": "soccer_uefa_champs_league",
+        "EUROPA_LEAGUE": "soccer_uefa_europa_league",
+        "UECL": "soccer_uefa_europa_conference_league",
+        "LA_LIGA": "soccer_spain_la_liga",
+        "SERIE_A": "soccer_italy_serie_a",
+        "BUNDESLIGA": "soccer_germany_bundesliga",
+        "LIGUE_1": "soccer_france_ligue_one",
+        "EREDIVISIE": "soccer_netherlands_eredivisie",
+        "PRIMEIRA": "soccer_portugal_primeira_liga",
+    }
+
     def __init__(self, api_key: str) -> None:
         super().__init__(api_key, "https://api.the-odds-api.com/v4", "Authorization", "odds_api")
 
-    def fetch_odds_by_event(self, event_id: str, bookmakers: str = "all") -> Dict[str, Any]:
-        endpoint = f"sports/soccer_epl/events/{event_id}/odds"
-        params = {
-            "apiKey": self.api_key,
-            "regions": "uk",
-            "markets": "h2h",
-            "oddsFormat": "decimal",
-            "bookmakers": bookmakers,
-        }
-        return self._get_json(endpoint, params=params)
+    def _get_headers(self) -> Dict[str, str]:
+        return {}  # OddsAPI uses apiKey as query param
+
+    def fetch_odds_for_league(self, league_code: str) -> List[Dict[str, Any]]:
+        """Fetch all upcoming odds for a league. Returns list of events with bookmaker odds."""
+        sport_key = self.SPORT_KEYS.get(league_code)
+        if not sport_key:
+            return []
+        cache_key = f"odds_api_league_{league_code}"
+        cached = self.cache.get(cache_key, ttl_hours=1)
+        if cached is not None:
+            return cached
+        try:
+            url = f"{self.base_url}/sports/{sport_key}/odds"
+            params = {
+                "apiKey": self.api_key,
+                "regions": "uk",
+                "markets": "h2h,totals",
+                "oddsFormat": "decimal",
+                "dateFormat": "iso",
+            }
+            import requests as _req
+            resp = _req.get(url, params=params, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            self.cache.set(cache_key, data)
+            return data if isinstance(data, list) else []
+        except Exception:
+            return []
 
     def fetch_live_odds(self, league_key: str = "soccer_epl") -> List[Dict[str, Any]]:
         endpoint = f"sports/{league_key}/odds"
         params = {
             "apiKey": self.api_key,
             "regions": "uk,eu",
-            "markets": "h2h,totals,spreads",
+            "markets": "h2h,totals",
             "oddsFormat": "decimal",
         }
-        data = self._get_json(endpoint, params=params)
-        return data.get("events", [])
+        try:
+            url = f"{self.base_url}/{endpoint}"
+            import requests as _req
+            resp = _req.get(url, params=params, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            return data if isinstance(data, list) else []
+        except Exception:
+            return []
 
 
 class StatsApiClient(BaseApiClient):
