@@ -1,417 +1,348 @@
 {% extends "base.html" %}
-
-{% block title %}HibsBetting Acca Builder — Advanced Betting Platform{% endblock %}
+{% block title %}hibs.bet — Acca Builder{% endblock %}
 
 {% block extra_css %}
 <style>
-    .main-grid {
-        display: grid;
-        grid-template-columns: 1fr 2fr;
-        gap: 20px;
-        margin-bottom: 30px;
-    }
-    
-    @media (max-width: 1200px) {
-        .main-grid {
-            grid-template-columns: 1fr;
-        }
-    }
-    
-    .acca-stats {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
-        margin-bottom: 15px;
-    }
-    
-    .stat-card {
-        background: #f0f0f0;
-        padding: 12px;
-        border-radius: 4px;
-        text-align: center;
-    }
-    
-    .stat-label {
-        font-size: 0.85em;
-        color: #666;
-    }
-    
-    .stat-value {
-        font-size: 1.4em;
-        font-weight: 700;
-        color: #dc241f;
-        margin-top: 5px;
-    }
-    
-    .empty-acca {
-        color: #999;
-        text-align: center;
-        padding: 20px;
-        background: #f5f5f5;
-        border-radius: 4px;
-        font-size: 0.95em;
-    }
-    
-    .selection-outcome {
-        padding: 6px 8px;
-        border: 1px solid #ddd;
-        border-radius: 3px;
-        font-size: 0.85em;
-        flex: 1;
-    }
-    
-    .selection-team {
-        font-weight: 600;
-        flex: 1.5;
-    }
-    
-    .fixtures-list {
-        display: flex;
-        flex-direction: column;
-        gap: 15px;
-    }
-    
-    .fixture-row {
-        background: white;
-        border-radius: 6px;
-        padding: 15px;
-        display: flex;
-        align-items: center;
-        gap: 15px;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.08);
-        transition: transform 0.2s;
-    }
-    
-    .fixture-row:hover {
-        transform: translateX(5px);
-    }
-    
-    .fixture-teams {
-        flex: 2;
-        min-width: 200px;
-    }
-    
-    .fixture-teams strong {
-        display: block;
-        margin-bottom: 4px;
-    }
-    
-    .fixture-odds {
-        display: flex;
-        gap: 8px;
-        flex: 1;
-    }
-    
-    .odds-button {
-        padding: 6px 10px;
-        border: 1px solid #ddd;
-        border-radius: 3px;
-        background: white;
-        cursor: pointer;
-        font-size: 0.8em;
-        transition: all 0.2s;
-        flex: 1;
-        text-align: center;
-    }
-    
-    .odds-button:hover {
-        background: #ffd700;
-        border-color: #ffb81c;
-    }
-    
-    .fixture-add {
-        flex: 0.5;
-    }
-    
-    .prediction-small {
-        display: inline-block;
-        background: #f0f0f0;
-        padding: 3px 8px;
-        border-radius: 3px;
-        font-size: 0.75em;
-        color: #666;
-        margin-right: 5px;
-    }
-    
-    .prediction-small.strong {
-        background: #dc241f;
-        color: white;
-        font-weight: 600;
-    }
+.acca-layout{display:grid;grid-template-columns:320px 1fr;gap:12px;align-items:start;}
+@media(max-width:860px){.acca-layout{grid-template-columns:1fr;}}
 
-    .odds-format-toggle {
-        display: inline-flex;
-        gap: 2px;
-        background: rgba(255,255,255,0.1);
-        border-radius: 6px;
-        padding: 4px;
-        margin-top: 10px;
-        border: 1px solid rgba(255,255,255,0.2);
-    }
+/* SLIP */
+.slip{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;position:sticky;top:10px;}
+.slip-title{font-family:'Orbitron',monospace;font-size:0.95em;color:var(--green);font-weight:700;letter-spacing:0.08em;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;}
+.slip-count{background:var(--green);color:#000;font-size:0.68em;font-weight:800;padding:2px 8px;border-radius:999px;min-width:22px;text-align:center;}
+.slip-empty{text-align:center;padding:20px 10px;color:var(--muted);font-size:0.78em;border:1px dashed rgba(124,252,0,0.12);border-radius:8px;margin-bottom:10px;}
+.slip-sel{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:9px 10px;margin-bottom:7px;position:relative;}
+.slip-sel-league{font-size:0.62em;color:var(--muted);margin-bottom:2px;}
+.slip-sel-match{font-size:0.78em;font-weight:700;color:var(--text);margin-bottom:5px;padding-right:20px;}
+.slip-sel-row{display:flex;justify-content:space-between;align-items:center;}
+.outcome-pill{font-size:0.68em;font-weight:700;padding:2px 9px;border-radius:999px;text-transform:uppercase;}
+.op-home{background:rgba(124,252,0,0.12);color:var(--green);border:1px solid rgba(124,252,0,0.22);}
+.op-draw{background:rgba(255,165,0,0.12);color:#FFA500;border:1px solid rgba(255,165,0,0.22);}
+.op-away{background:rgba(55,204,255,0.12);color:var(--blue);border:1px solid rgba(55,204,255,0.22);}
+.slip-odds{font-size:0.95em;font-weight:800;color:var(--gold);}
+.slip-rm{position:absolute;top:7px;right:7px;background:rgba(255,68,68,0.1);border:none;color:var(--red);width:18px;height:18px;border-radius:50%;cursor:pointer;font-size:0.7em;font-weight:800;display:flex;align-items:center;justify-content:center;}
+.slip-rm:hover{background:rgba(255,68,68,0.22);}
 
-    .odds-format-btn {
-        padding: 6px 14px;
-        border: none;
-        background: transparent;
-        color: #fff;
-        cursor: pointer;
-        border-radius: 4px;
-        font-size: 0.85em;
-        font-weight: 600;
-        transition: all 0.3s;
-    }
+/* TOTALS */
+.slip-totals{background:rgba(124,252,0,0.04);border:1px solid var(--border);border-radius:8px;padding:10px;margin:10px 0;}
+.tot-row{display:flex;justify-content:space-between;font-size:0.78em;margin-bottom:5px;}
+.tot-row:last-child{margin-bottom:0;}
+.tot-lbl{color:var(--muted);}
+.tot-val{font-weight:700;color:var(--text);}
+.tot-val.big{font-size:1.15em;color:var(--green);}
+.tot-val.gold{color:var(--gold);font-size:1.05em;}
 
-    .odds-format-btn.active {
-        background: #4caf50;
-        color: white;
-    }
+/* STAKE */
+.stake-lbl{font-size:0.68em;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:5px;}
+.stake-input{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:8px 12px;color:var(--text);font-size:0.92em;font-family:'Inter',sans-serif;font-weight:700;outline:none;margin-bottom:6px;}
+.stake-input:focus{border-color:var(--green);}
+.presets{display:flex;gap:5px;margin-bottom:10px;}
+.preset{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);color:var(--muted);border-radius:6px;padding:5px 8px;cursor:pointer;font-size:0.72em;font-weight:700;font-family:'Inter',sans-serif;transition:all 0.2s;flex:1;}
+.preset:hover{background:rgba(124,252,0,0.08);color:var(--green);border-color:var(--border);}
 
-    .odds-format-btn:hover:not(.active) {
-        background: rgba(255,255,255,0.1);
-    }
+/* BUTTONS */
+.btn-place{width:100%;padding:11px;border:none;border-radius:8px;background:linear-gradient(135deg,var(--green),#3a7000);color:#000;font-size:0.84em;font-weight:800;font-family:'Inter',sans-serif;cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:7px;transition:opacity 0.2s;}
+.btn-place:hover{opacity:0.85;}
+.btn-place:disabled{opacity:0.3;cursor:not-allowed;}
+.btn-clear{width:100%;padding:7px;border:1px solid rgba(255,68,68,0.18);border-radius:8px;background:rgba(255,68,68,0.05);color:var(--red);font-size:0.72em;font-weight:700;font-family:'Inter',sans-serif;cursor:pointer;margin-bottom:10px;}
+.btn-clear:hover{background:rgba(255,68,68,0.1);}
+
+/* BOOKIES */
+.bookie-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:10px;}
+.bookie-a{padding:7px;border-radius:7px;text-align:center;text-decoration:none;font-size:0.7em;font-weight:700;display:block;}
+.bk-wh{background:#003087;color:#fff;}
+.bk-lb{background:#e4002b;color:#fff;}
+.bk-b365{background:#1a6b3c;color:#fff;}
+.bk-pp{background:#004833;color:#fff;}
+.disclaimer{font-size:0.62em;color:var(--muted);text-align:center;line-height:1.5;}
+.disclaimer a{color:var(--muted);}
+
+/* FIXTURE LIST */
+.filter-bar{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px;}
+.fbtn{padding:5px 11px;border:1px solid rgba(255,255,255,0.07);background:rgba(255,255,255,0.03);color:var(--muted);border-radius:6px;cursor:pointer;font-size:0.7em;font-weight:600;font-family:'Inter',sans-serif;transition:all 0.2s;}
+.fbtn:hover{color:var(--text);}
+.fbtn.active{background:rgba(124,252,0,0.08);color:var(--green);border-color:var(--border);}
+.fbtn.fgold.active{background:var(--gold-dim);color:var(--gold);border-color:rgba(255,215,0,0.22);}
+
+.fix-list{display:flex;flex-direction:column;gap:8px;}
+.afix{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;transition:border-color 0.2s;}
+.afix.in-slip{border-color:rgba(124,252,0,0.35);background:rgba(124,252,0,0.02);}
+.afix-top{display:flex;justify-content:space-between;margin-bottom:7px;}
+.afix-league{font-size:0.62em;color:var(--blue);font-weight:700;text-transform:uppercase;letter-spacing:0.04em;}
+.afix-time{font-size:0.62em;color:var(--muted);}
+.afix-teams{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px;gap:6px;}
+.afix-home{font-weight:700;font-size:0.86em;flex:1;}
+.afix-away{font-weight:700;font-size:0.86em;flex:1;text-align:right;}
+.afix-vs{font-size:0.65em;color:var(--muted);flex-shrink:0;}
+.odds-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;}
+.odd-btn{padding:7px 4px;border-radius:7px;border:1px solid rgba(255,255,255,0.07);background:rgba(255,255,255,0.03);cursor:pointer;font-family:'Inter',sans-serif;text-align:center;transition:all 0.2s;position:relative;}
+.odd-btn:hover{border-color:rgba(124,252,0,0.28);background:rgba(124,252,0,0.05);}
+.odd-btn.sel{border-color:var(--green);background:rgba(124,252,0,0.1);}
+.odd-btn.sel .odd-price{color:var(--green);}
+.odd-btn.vbet{border-color:rgba(255,215,0,0.35);}
+.odd-lbl{font-size:0.58em;color:var(--muted);text-transform:uppercase;font-weight:700;}
+.odd-price{font-size:0.9em;font-weight:800;color:var(--text);}
+.odd-pct{font-size:0.56em;color:var(--muted);}
+.vpip{position:absolute;top:-4px;right:-4px;background:var(--gold);color:#000;font-size:0.48em;font-weight:800;padding:1px 4px;border-radius:999px;}
+.afix-meta{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px;}
+.mpill{font-size:0.6em;color:var(--muted);background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05);border-radius:5px;padding:2px 6px;}
+.mpill strong{color:var(--text);}
+.mpill.vp{color:var(--gold);border-color:rgba(255,215,0,0.18);}
 </style>
 {% endblock %}
 
 {% block content %}
 <header>
-    <div class="header-nav">
-        <a href="/">📊 Dashboard</a>
-        <a href="/acca">💰 Acca Builder</a>
+    <div class="brand">
+        <span class="brand-logo">hibs.bet</span>
+        <div>
+            <div class="brand-sub">Acca Builder</div>
+            <div class="brand-sub" style="font-size:0.65em;color:var(--green);margin-top:2px;">Click any odds to add to your slip</div>
+        </div>
     </div>
-    <h1><span class="brand-logo">hibs.bet</span> Acca Builder</h1>
-    <p class="brand-tagline">Professional Betting Platform — Build Accas and Track Value Bets</p>
-    <div class="odds-format-toggle">
-        <button class="odds-format-btn active" onclick="setOddsFormat('decimal')">Decimal</button>
-        <button class="odds-format-btn" onclick="setOddsFormat('percentage')">Percentage</button>
+    <div class="header-right">
+        <a href="/" class="nav-btn">← Dashboard</a>
     </div>
 </header>
 
-<div class="main-grid">
-    <!-- LEFT PANEL: Acca Builder -->
-    <div class="betting-panel">
-        <h3>💰 Your Acca</h3>
-        
-        <div class="acca-stats">
-            <div class="stat-card">
-                <div class="stat-label">Selections</div>
-                <div class="stat-value" id="acca-count">0</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Total Odds</div>
-                <div class="stat-value" id="acca-total-odds">1.00</div>
-            </div>
+<div class="acca-layout">
+
+    <!-- BET SLIP -->
+    <div class="slip">
+        <div class="slip-title">
+            📝 Bet Slip
+            <span class="slip-count" id="sc">0</span>
         </div>
-        
-        <div class="acca-selections">
-            <strong style="display: block; margin-bottom: 10px;">Selections:</strong>
-            <div id="acca-selections-list">
-                <div class="empty-acca">👇 Add selections from right</div>
-            </div>
+
+        <div id="slip-body">
+            <div class="slip-empty" id="slip-empty">⚽ Click any odds button to add a selection</div>
         </div>
-        
-        <div style="margin-top: 15px;">
-            <label><strong>Stake (£):</strong></label>
-            <input type="number" id="bet-stake" class="bet-input" placeholder="Enter stake" value="10" min="0.01" step="0.01">
+
+        <div class="slip-totals">
+            <div class="tot-row"><span class="tot-lbl">Selections</span><span class="tot-val" id="t-count">0</span></div>
+            <div class="tot-row"><span class="tot-lbl">Total Odds</span><span class="tot-val big" id="t-odds">—</span></div>
+            <div class="tot-row"><span class="tot-lbl">Potential Return</span><span class="tot-val gold" id="t-return">£—</span></div>
+            <div class="tot-row"><span class="tot-lbl">Profit</span><span class="tot-val" id="t-profit">—</span></div>
         </div>
-        
-        <div class="acca-odds">
-            <div class="odds-item">
-                <div class="odds-label">Potential Returns</div>
-                <div class="odds-value">£<span id="acca-return">10.00</span></div>
-            </div>
+
+        <div class="stake-lbl">Stake (£)</div>
+        <input type="number" class="stake-input" id="stake" value="10" min="0.01" step="0.5" oninput="recalc()">
+        <div class="presets">
+            <button class="preset" onclick="setStake(5)">£5</button>
+            <button class="preset" onclick="setStake(10)">£10</button>
+            <button class="preset" onclick="setStake(25)">£25</button>
+            <button class="preset" onclick="setStake(50)">£50</button>
+            <button class="preset" onclick="setStake(100)">£100</button>
         </div>
-        
-        <button class="place-bet-btn" onclick="placeBet()">🎯 Place Acca</button>
-        
-        <div class="bet-links">
-            <a href="https://www.williamhill.com" target="_blank" class="bet-link william-hill">William Hill</a>
-            <a href="https://www.ladbrokes.com" target="_blank" class="bet-link ladbrokes">Ladbrokes</a>
+
+        <button class="btn-place" id="btn-place" onclick="placeBet()" disabled>🎯 Place Acca</button>
+        <button class="btn-clear" onclick="clearSlip()">✕ Clear Slip</button>
+
+        <div class="bookie-grid">
+            <a href="https://www.williamhill.com" target="_blank" class="bookie-a bk-wh">William Hill</a>
+            <a href="https://www.ladbrokes.com" target="_blank" class="bookie-a bk-lb">Ladbrokes</a>
+            <a href="https://www.bet365.com" target="_blank" class="bookie-a bk-b365">Bet365</a>
+            <a href="https://www.paddypower.com" target="_blank" class="bookie-a bk-pp">Paddy Power</a>
         </div>
-        
-        <p style="margin-top: 15px; font-size: 0.8em; color: #666; line-height: 1.4;">
-            <strong>⚠️ Disclaimer:</strong> For analysis only. Gamble responsibly. 
-            <a href="https://www.begambleaware.org" target="_blank" style="color: #dc241f;">BeGambleAware</a>
-        </p>
+
+        <div class="disclaimer">⚠️ For analysis only. Gamble responsibly. 18+<br>
+            <a href="https://www.begambleaware.org" target="_blank">BeGambleAware.org</a></div>
     </div>
-    
-    <!-- RIGHT PANEL: Fixtures with Quick Add -->
+
+    <!-- FIXTURES -->
     <div>
-        <div style="background: white; padding: 15px; border-radius: 6px; margin-bottom: 15px; box-shadow: 0 2px 6px rgba(0,0,0,0.08);">
-            <strong>Next 48 Hours</strong>
-            <p style="font-size: 0.9em; color: #666; margin-top: 5px;">Click outcome odds to add to acca</p>
+        <div class="filter-bar">
+            <button class="fbtn fgold active" onclick="doFilter('value',this)">⚡ Value Bets</button>
+            <button class="fbtn" onclick="doFilter('all',this)">All Fixtures</button>
+            <button class="fbtn" onclick="doFilter('scotland',this)">🏴󠁧󠁢󠁳󠁣󠁴󠁿 Scotland</button>
+            <button class="fbtn" onclick="doFilter('england',this)">🏴󠁧󠁢󠁥󠁮󠁧󠁿 England</button>
+            <button class="fbtn" onclick="doFilter('european',this)">🏆 European</button>
+            <button class="fbtn" onclick="doFilter('international',this)">🌍 Intl</button>
         </div>
-        
-        {% if fixtures %}
-        <div class="fixtures-list">
-            {% for fixture in fixtures %}
-            <div class="fixture-row">
-                <div class="fixture-teams">
-                    <strong>{{ fixture.home }} vs {{ fixture.away }}</strong>
-                    <span style="font-size: 0.8em; color: #999;">{{ fixture.league_name }}</span>
-                    {% if fixture.prediction %}
-                        <div style="margin-top: 5px;">
-                            {% if fixture.prediction.best_bet %}
-                            <span class="prediction-small strong">{{ fixture.prediction.best_bet | upper }}</span>
-                            {% endif %}
-                            <span class="prediction-small">{{ fixture.prediction.confidence * 100 | round(0) | int }}%</span>
-                        </div>
-                    {% endif %}
-                </div>
-                
-                {% if fixture.prediction %}
-                <div class="fixture-odds">
-                    <button class="odds-button" onclick="addToAcca({{ fixture.id }}, '{{ fixture.home }}', '{{ fixture.away }}', {{ fixture.prediction.bookmaker_odds.home }}, 'home'); updateAccaCount();" data-decimal="{{ "%.2f" | format(fixture.prediction.bookmaker_odds.home) }}">
-                        {{ fixture.home }}<br><strong class="odds-display-value">{{ "%.2f" | format(fixture.prediction.bookmaker_odds.home) }}</strong>
-                    </button>
-                    <button class="odds-button" onclick="addToAcca({{ fixture.id }}, '{{ fixture.home }}', '{{ fixture.away }}', {{ fixture.prediction.bookmaker_odds.draw }}, 'draw'); updateAccaCount();" data-decimal="{{ "%.2f" | format(fixture.prediction.bookmaker_odds.draw) }}">
-                        Draw<br><strong class="odds-display-value">{{ "%.2f" | format(fixture.prediction.bookmaker_odds.draw) }}</strong>
-                    </button>
-                    <button class="odds-button" onclick="addToAcca({{ fixture.id }}, '{{ fixture.home }}', '{{ fixture.away }}', {{ fixture.prediction.bookmaker_odds.away }}, 'away'); updateAccaCount();" data-decimal="{{ "%.2f" | format(fixture.prediction.bookmaker_odds.away) }}">
-                        {{ fixture.away }}<br><strong class="odds-display-value">{{ "%.2f" | format(fixture.prediction.bookmaker_odds.away) }}</strong>
-                    </button>
-                </div>
-                {% endif %}
+
+        <div class="fix-list" id="fix-list">
+        {% for fixture in fixtures %}
+        {% set p = fixture.prediction %}
+        {% set vb = p.value_bets if p else {} %}
+        {% set fid = fixture.id | string %}
+        {% set region = 'scotland' if 'SCOTLAND' in fixture.league else 'england' if fixture.league in ['EPL','CHAMPIONSHIP','LEAGUE_ONE','LEAGUE_TWO','FA_CUP'] else 'european' if fixture.league in ['UCL','EUROPA_LEAGUE','UECL','LA_LIGA','SERIE_A','BUNDESLIGA','LIGUE_1','EREDIVISIE','PRIMEIRA'] else 'international' %}
+        <div class="afix"
+             id="afix-{{ fid }}"
+             data-region="{{ region }}"
+             data-value="{{ 'true' if fixture.has_value_bet else 'false' }}">
+
+            <div class="afix-top">
+                <span class="afix-league">{{ fixture.league_flag }} {{ fixture.league_name }}</span>
+                <span class="afix-time">{{ fixture.date[8:10] }}/{{ fixture.date[5:7] }} {{ fixture.date[11:16] if fixture.date and 'T' in fixture.date else '' }}</span>
             </div>
-            {% endfor %}
+
+            <div class="afix-teams">
+                <span class="afix-home">{{ fixture.home }}</span>
+                <span class="afix-vs">vs</span>
+                <span class="afix-away">{{ fixture.away }}</span>
+            </div>
+
+            {% if p %}
+            <div class="odds-row">
+                <button class="odd-btn {% if vb and 'home' in vb %}vbet{% endif %}"
+                        id="ob-{{ fid }}-home"
+                        onclick="toggle('{{ fid }}','{{ fixture.home|e }}','{{ fixture.away|e }}','{{ fixture.league_name|e }}','home',{{ p.bookmaker_odds.home }})">
+                    {% if vb and 'home' in vb %}<span class="vpip">⚡</span>{% endif %}
+                    <div class="odd-lbl">1 Home</div>
+                    <div class="odd-price">{{ "%.2f"|format(p.bookmaker_odds.home) }}</div>
+                    <div class="odd-pct">{{ p.probabilities_pct.home }}%</div>
+                </button>
+                <button class="odd-btn {% if vb and 'draw' in vb %}vbet{% endif %}"
+                        id="ob-{{ fid }}-draw"
+                        onclick="toggle('{{ fid }}','{{ fixture.home|e }}','{{ fixture.away|e }}','{{ fixture.league_name|e }}','draw',{{ p.bookmaker_odds.draw }})">
+                    {% if vb and 'draw' in vb %}<span class="vpip">⚡</span>{% endif %}
+                    <div class="odd-lbl">X Draw</div>
+                    <div class="odd-price">{{ "%.2f"|format(p.bookmaker_odds.draw) }}</div>
+                    <div class="odd-pct">{{ p.probabilities_pct.draw }}%</div>
+                </button>
+                <button class="odd-btn {% if vb and 'away' in vb %}vbet{% endif %}"
+                        id="ob-{{ fid }}-away"
+                        onclick="toggle('{{ fid }}','{{ fixture.home|e }}','{{ fixture.away|e }}','{{ fixture.league_name|e }}','away',{{ p.bookmaker_odds.away }})">
+                    {% if vb and 'away' in vb %}<span class="vpip">⚡</span>{% endif %}
+                    <div class="odd-lbl">2 Away</div>
+                    <div class="odd-price">{{ "%.2f"|format(p.bookmaker_odds.away) }}</div>
+                    <div class="odd-pct">{{ p.probabilities_pct.away }}%</div>
+                </button>
+            </div>
+            <div class="afix-meta">
+                <span class="mpill">BTTS <strong>{{ p.btts_probability_pct }}%</strong></span>
+                <span class="mpill">O2.5 <strong>{{ p.over25_probability_pct }}%</strong></span>
+                <span class="mpill">xG <strong>{{ p.expected_goals_home }}/{{ p.expected_goals_away }}</strong></span>
+                <span class="mpill">Conf <strong>{{ p.confidence_pct }}%</strong></span>
+                {% if fixture.has_value_bet %}<span class="mpill vp">⚡ +{{ p.best_bet_roi }}% ROI</span>{% endif %}
+            </div>
+            {% endif %}
         </div>
-        {% else %}
-        <div style="background: white; padding: 30px; border-radius: 8px; text-align: center;">
-            <p style="color: #666;">No fixtures in next 48 hours</p>
+        {% endfor %}
         </div>
-        {% endif %}
     </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-    function addToAcca(fixtureId, homeTeam, awayTeam, odds, outcome) {
-        const accaList = document.getElementById('acca-selections-list');
-        if (!accaList) return;
-        
-        // Remove empty message if exists
-        const emptyMsg = accaList.querySelector('.empty-acca');
-        if (emptyMsg) emptyMsg.remove();
-        
-        // Check if already exists
-        const existing = document.querySelector(`[data-fixture-id="${fixtureId}"]`);
-        if (existing) {
-            existing.remove();
-        } else {
-            const selection = document.createElement('div');
-            selection.className = 'selection-item';
-            selection.setAttribute('data-fixture-id', fixtureId);
-            selection.setAttribute('data-odds', odds);
-            selection.innerHTML = `
-                <span class="selection-team">${homeTeam} vs ${awayTeam}</span>
-                <span style="flex: 0.6; font-size: 0.85em; font-weight: 600;">
-                    <span style="color: #dc241f;">${outcome.toUpperCase()}</span>
-                    <span style="color: #666;"> @ ${odds.toFixed(2)}</span>
-                </span>
-                <button class="remove-btn" onclick="this.parentElement.remove(); updateAccaCount();">✕</button>
-            `;
-            accaList.appendChild(selection);
-            updateAccaCount();
-        }
-    }
-    
-    function updateAccaCount() {
-        const selections = document.querySelectorAll('.selection-item');
-        const count = selections.length;
-        document.getElementById('acca-count').textContent = count;
-        
-        let totalOdds = 1;
-        selections.forEach(sel => {
-            const odds = parseFloat(sel.getAttribute('data-odds'));
-            totalOdds *= odds;
+const slip = {};
+
+function toggle(fid, home, away, league, outcome, odds) {
+    if (slip[fid] && slip[fid].outcome === outcome) {
+        delete slip[fid];
+        ['home','draw','away'].forEach(o => {
+            const b = document.getElementById('ob-'+fid+'-'+o);
+            if(b) b.classList.remove('sel');
         });
-        
-        const oddsDisplay = document.getElementById('acca-total-odds');
-        if (oddsDisplay) oddsDisplay.textContent = totalOdds.toFixed(2);
-        
-        const returnDisplay = document.getElementById('acca-return');
-        const stakeInput = document.getElementById('bet-stake');
-        if (returnDisplay && stakeInput) {
-            const stake = parseFloat(stakeInput.value) || 0;
-            returnDisplay.textContent = (stake * totalOdds).toFixed(2);
-        }
-        
-        if (count === 0) {
-            document.getElementById('acca-selections-list').innerHTML = '<div class="empty-acca">👇 Add selections from right</div>';
-        }
+        document.getElementById('afix-'+fid).classList.remove('in-slip');
+    } else {
+        slip[fid] = {home, away, league, outcome, odds};
+        ['home','draw','away'].forEach(o => {
+            const b = document.getElementById('ob-'+fid+'-'+o);
+            if(b) b.classList.toggle('sel', o===outcome);
+        });
+        document.getElementById('afix-'+fid).classList.add('in-slip');
     }
-    
-    function placeBet() {
-        const selections = document.querySelectorAll('.selection-item').length;
-        const stake = parseFloat(document.getElementById('bet-stake').value) || 0;
-        
-        if (selections === 0) {
-            alert('Please add at least one selection');
-            return;
-        }
-        
-        if (stake <= 0) {
-            alert('Please enter a valid stake');
-            return;
-        }
-        
-        const totalOdds = parseFloat(document.getElementById('acca-total-odds').textContent);
-        const returns = (stake * totalOdds).toFixed(2);
-        
-        const bets = Array.from(document.querySelectorAll('.selection-item')).map(s => {
-            const text = s.textContent.trim();
-            const match = text.match(/(.+?)\s+@\s+([\d.]+)/);
-            return match ? `${match[1]} @ ${match[2]}` : text;
-        }).join('\n');
-        
-        const message = `Acca Summary:\n\n${bets}\n\nSelections: ${selections}\nTotal Odds: ${totalOdds.toFixed(2)}\nStake: £${stake.toFixed(2)}\nPotential Returns: £${returns}`;
-        
-        if (confirm(message + '\n\nClick OK to visit a betting site')) {
-            window.open('https://www.williamhill.com', '_blank');
-        }
-    }
-    
-    // Initialize odds format from localStorage
-    document.addEventListener('DOMContentLoaded', function() {
-        const stakeInput = document.getElementById('bet-stake');
-        if (stakeInput) {
-            stakeInput.addEventListener('input', updateAccaCount);
-        }
-        
-        const savedFormat = localStorage.getItem('oddsFormat') || 'decimal';
-        updateOddsFormat(savedFormat);
+    renderSlip();
+}
+
+function renderSlip() {
+    const body = document.getElementById('slip-body');
+    const empty = document.getElementById('slip-empty');
+    body.querySelectorAll('.slip-sel').forEach(e=>e.remove());
+    const keys = Object.keys(slip);
+    empty.style.display = keys.length ? 'none' : 'block';
+    keys.forEach(fid => {
+        const s = slip[fid];
+        const ol = s.outcome==='home' ? s.home : s.outcome==='away' ? s.away : 'Draw';
+        const oc = 'op-'+s.outcome;
+        const d = document.createElement('div');
+        d.className = 'slip-sel';
+        d.innerHTML = `
+            <button class="slip-rm" onclick="removeSel('${fid}')">✕</button>
+            <div class="slip-sel-league">${s.league}</div>
+            <div class="slip-sel-match">${s.home} vs ${s.away}</div>
+            <div class="slip-sel-row">
+                <span class="outcome-pill ${oc}">${ol}</span>
+                <span class="slip-odds">${s.odds.toFixed(2)}</span>
+            </div>`;
+        body.appendChild(d);
     });
+    recalc();
+}
 
-    function setOddsFormat(format) {
-        // Save preference to localStorage
-        localStorage.setItem('oddsFormat', format);
-        updateOddsFormat(format);
-    }
-
-    function updateOddsFormat(format) {
-        // Update button states
-        document.querySelectorAll('.odds-format-btn').forEach(btn => {
-            if ((format === 'decimal' && btn.textContent === 'Decimal') ||
-                (format === 'percentage' && btn.textContent === 'Percentage')) {
-                btn.classList.add('active');
-            } else {
-                btn.classList.remove('active');
-            }
+function removeSel(fid) {
+    if(slip[fid]) {
+        ['home','draw','away'].forEach(o=>{
+            const b=document.getElementById('ob-'+fid+'-'+o);
+            if(b) b.classList.remove('sel');
         });
-
-        // Update all odds displays on buttons
-        document.querySelectorAll('.odds-button').forEach(button => {
-            const decimalValue = parseFloat(button.dataset.decimal);
-            const display = button.querySelector('.odds-display-value');
-            if (display) {
-                if (format === 'percentage') {
-                    const percentage = (1 / decimalValue * 100).toFixed(1);
-                    display.textContent = percentage + '%';
-                } else {
-                    display.textContent = decimalValue.toFixed(2);
-                }
-            }
-        });
+        const c=document.getElementById('afix-'+fid);
+        if(c) c.classList.remove('in-slip');
     }
+    delete slip[fid];
+    renderSlip();
+}
+
+function clearSlip() {
+    Object.keys(slip).forEach(k=>removeSel(k));
+}
+
+function recalc() {
+    const keys = Object.keys(slip);
+    const stake = parseFloat(document.getElementById('stake').value)||0;
+    document.getElementById('sc').textContent = keys.length;
+    document.getElementById('t-count').textContent = keys.length;
+    if(!keys.length){
+        document.getElementById('t-odds').textContent='—';
+        document.getElementById('t-return').textContent='£—';
+        document.getElementById('t-profit').textContent='—';
+        document.getElementById('btn-place').disabled=true;
+        return;
+    }
+    const totalOdds = keys.reduce((a,k)=>a*slip[k].odds,1);
+    const ret = stake*totalOdds;
+    const profit = ret-stake;
+    document.getElementById('t-odds').textContent=totalOdds.toFixed(2);
+    document.getElementById('t-return').textContent='£'+ret.toFixed(2);
+    const pp = document.getElementById('t-profit');
+    pp.textContent=(profit>=0?'+£':'-£')+Math.abs(profit).toFixed(2);
+    pp.style.color=profit>=0?'var(--green)':'var(--red)';
+    document.getElementById('btn-place').disabled=false;
+}
+
+function setStake(v){
+    document.getElementById('stake').value=v;
+    recalc();
+}
+
+function placeBet(){
+    const keys=Object.keys(slip);
+    if(!keys.length) return;
+    const stake=parseFloat(document.getElementById('stake').value)||0;
+    const totalOdds=keys.reduce((a,k)=>a*slip[k].odds,1);
+    const ret=(stake*totalOdds).toFixed(2);
+    const lines=keys.map(k=>{
+        const s=slip[k];
+        const ol=s.outcome==='home'?s.home:s.outcome==='away'?s.away:'Draw';
+        return `${s.home} vs ${s.away} \u2014 ${ol} @ ${s.odds.toFixed(2)}`;
+    });
+    const msg=`\ud83c\udfaf Your Acca:\n\n${lines.join('\n')}\n\nSelections: ${keys.length}\nTotal Odds: ${totalOdds.toFixed(2)}\nStake: \u00a3${stake.toFixed(2)}\nPotential Return: \u00a3${ret}\n\nClick OK to open Bet365.`;
+    if(confirm(msg)) window.open('https://www.bet365.com','_blank');
+}
+
+function doFilter(f, btn){
+    document.querySelectorAll('.fbtn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.afix').forEach(card=>{
+        const r=card.dataset.region;
+        const v=card.dataset.value==='true';
+        card.style.display=(f==='all'||( f==='value'&&v)||(f===r))?'block':'none';
+    });
+}
+
+// Default: show value bets
+doFilter('value', document.querySelector('.fbtn.fgold'));
 </script>
 {% endblock %}
