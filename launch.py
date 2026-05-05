@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""HibsBetting One-Click Launcher - Double-click to launch!"""
+"""hibs.bet — One-Click Launcher"""
 
 import os
 import sys
@@ -8,82 +8,70 @@ import webbrowser
 import subprocess
 from pathlib import Path
 
+BANNER = """
+┌────────────────────────────────────────────────────┐
+│                                                    │
+│   ██╗  ██╗██╗██████╗ ███████╗  .bet          │
+│   ██║  ██║██║██╔══██╗██╔════╝               │
+│   ███████║██║██████╔╝███████╗               │
+│   ██╔══██║██║██╔══██╗╚════██║               │
+│   ██║  ██║██║██████╔╝███████║               │
+│   ╚═╝  ╚═╝╚═╝╚═────╝ ╚══════╝               │
+│                                                    │
+│   Edinburgh Betting Intelligence                   │
+│   Scottish · English · European · International   │
+└────────────────────────────────────────────────────┘
+"""
+
 def main():
-    """Launch HibsBetting with browser auto-open."""
     script_dir = Path(__file__).parent
-
-    print("🟤💛 HibsBetting — Advanced Betting Intelligence")
-    print("═══════════════════════════════════════════════════")
-    print()
-
-    # Check for .env file
+    print(BANNER)
     env_file = script_dir / ".env"
     if not env_file.exists():
-        print("❌ No .env file found!")
-        print("Please create .env file with your API keys:")
-        print("1. Copy .env.example to .env")
-        print("2. Edit .env with your actual API keys")
-        print()
+        print("\u274c  No .env file found! Copy .env.example to .env and add your API keys.")
         input("Press Enter to exit...")
         return
-
-    # Activate virtual environment
-    venv_path = script_dir / ".venv" / "bin" / "activate"
-    if venv_path.exists():
-        print("🔧 Activating virtual environment...")
-        # We'll use subprocess to run the command with activated venv
-        cmd = f"source {venv_path} && python src/hibs_predictor/web.py"
-    else:
-        print("⚠️  Virtual environment not found, using system Python...")
-        cmd = "python src/hibs_predictor/web.py"
-
-    print("🚀 Starting Flask server...")
-
-    # Start Flask in subprocess
+    with open(env_file) as f:
+        if "your_" in f.read():
+            print("\u26a0\ufe0f   .env has placeholder values. App will run with limited data.\n")
+    venv_pip = script_dir / ".venv" / "bin" / "pip"
+    req = script_dir / "requirements.txt"
+    if venv_pip.exists() and req.exists():
+        print("\U0001f4e6  Checking dependencies...")
+        subprocess.run([str(venv_pip), "install", "-q", "-r", str(req)], check=False)
+    venv_python = script_dir / ".venv" / "bin" / "python"
+    python_cmd = str(venv_python) if venv_python.exists() else sys.executable
+    web_script = script_dir / "src" / "hibs_predictor" / "web.py"
+    print("\U0001f680  Starting hibs.bet...")
     process = subprocess.Popen(
-        cmd,
-        shell=True,
+        [python_cmd, str(web_script)],
         cwd=str(script_dir),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
-
-    # Wait for server to start
-    print("⏳ Waiting for server to start...")
-    time.sleep(4)
-
-    # Check if server is running
-    try:
-        import requests
-        response = requests.get("http://127.0.0.1:5000", timeout=5)
-        if response.status_code == 200:
-            print("✅ Server started successfully!")
-        else:
-            print("⚠️  Server responded but with status:", response.status_code)
-    except:
-        print("❌ Server failed to start. Check console for errors.")
-
-    # Open browser
     url = "http://127.0.0.1:5000"
-    print(f"🌐 Opening {url} in your browser...")
+    print(f"\u23f3  Waiting for server at {url}...")
+    for _ in range(30):
+        time.sleep(0.5)
+        try:
+            import urllib.request
+            urllib.request.urlopen(url, timeout=2)
+            break
+        except Exception:
+            pass
+    print(f"\u2705  Ready \u2014 opening {url}")
     webbrowser.open(url)
-
-    print()
-    print("🎯 Dashboard loaded with next 48h fixtures!")
-    print("📊 Features: ML predictions, odds, BTTS, form data")
-    print()
-    print("Press Ctrl+C in terminal to stop the server")
-    print()
-
+    print("\n   Press Ctrl+C to stop\n")
     try:
-        process.wait()
+        for line in process.stdout:
+            print("   ", line, end="")
     except KeyboardInterrupt:
-        print("\n\n🛑 Shutting down server...")
+        print("\n\U0001f6d1  Shutting down...")
         process.terminate()
         try:
             process.wait(timeout=5)
-        except:
+        except Exception:
             process.kill()
+    print("\U0001f44b  Goodbye!")
 
 if __name__ == "__main__":
     main()
