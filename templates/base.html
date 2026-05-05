@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}HibsBetting - Bet Predictor{% endblock %}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, rgba(10, 30, 18, 0.95) 0%, rgba(20, 60, 42, 0.92) 50%, rgba(12, 24, 14, 0.96) 100%),
+                        url('/static/edinburgh_bg.svg') center/cover no-repeat fixed;
+            color: #f4f4f4;
+            min-height: 100vh;
+            padding: 20px;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        header {
+            background: rgba(5, 9, 24, 0.92);
+            border: 1px solid rgba(255,255,255,0.08);
+            color: #f8fbff;
+            padding: 32px;
+            border-radius: 18px;
+            margin-bottom: 30px;
+            box-shadow: 0 18px 50px rgba(0,0,0,0.35);
+            text-align: center;
+            position: relative;
+            backdrop-filter: blur(16px);
+        }
+        
+        .header-nav {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            display: flex;
+            gap: 10px;
+        }
+        
+        .header-nav a {
+            background: rgba(255,255,255,0.12);
+            color: #edf7ff;
+            padding: 10px 18px;
+            border-radius: 999px;
+            text-decoration: none;
+            font-size: 0.95em;
+            font-weight: 700;
+            border: 1px solid rgba(255,255,255,0.12);
+            transition: background 0.25s, transform 0.2s, border-color 0.25s;
+        }
+        .header-nav a:hover {
+            background: rgba(55, 204, 255, 0.18);
+            border-color: rgba(55, 204, 255, 0.4);
+            transform: translateY(-1px);
+        }
+        
+        .header-nav a:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        header::before {
+            content: "⚽";
+            display: block;
+            font-size: 2em;
+            margin-bottom: 10px;
+            text-shadow: 0 0 10px rgba(124, 252, 0, 0.6);
+        }
+        
+        header h1 {
+            margin-bottom: 5px;
+        }
+
+        .brand-logo {
+            display: inline-block;
+            font-size: 3em;
+            font-weight: 900;
+            color: #7CFC00;
+            text-transform: lowercase;
+            letter-spacing: 0.15em;
+            text-shadow: 0 0 18px rgba(124, 252, 0, 0.35), 2px 2px 6px rgba(0,0,0,0.35);
+        }
+
+        .brand-tagline {
+            display: block;
+            margin-top: 8px;
+            font-size: 1rem;
+            color: #c9ffd6;
+            opacity: 0.95;
+            letter-spacing: 0.04em;
+        }
+        
+        header p {
+            font-size: 1.1em;
+            opacity: 0.95;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        
+        .betting-panel {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-left: 4px solid #dc241f;
+        }
+        
+        .betting-panel h3 {
+            color: #dc241f;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .acca-builder {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        .acca-selections {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        
+        .acca-odds {
+            background: #f0f0f0;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+        
+        .selection-item {
+            background: white;
+            padding: 10px;
+            margin: 8px 0;
+            border-radius: 4px;
+            border-left: 3px solid #ffd700;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.9em;
+        }
+        
+        .remove-btn {
+            background: #f44336;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 0.8em;
+        }
+        
+        .odds-summary {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin: 15px 0;
+        }
+        
+        .odds-item {
+            background: white;
+            padding: 12px;
+            border-radius: 4px;
+            border-left: 3px solid #dc241f;
+        }
+        
+        .odds-label {
+            font-size: 0.85em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        
+        .odds-value {
+            font-size: 1.3em;
+            font-weight: 700;
+            color: #dc241f;
+        }
+        
+        .bet-input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 1em;
+        }
+        
+        .place-bet-btn {
+            background: linear-gradient(to right, #dc241f, #ffb81c);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 600;
+            width: 100%;
+            transition: transform 0.2s;
+        }
+        
+        .place-bet-btn:hover {
+            transform: scale(1.02);
+        }
+        
+        .bet-links {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .bet-link {
+            flex: 1;
+            padding: 10px;
+            border-radius: 4px;
+            text-decoration: none;
+            color: white;
+            text-align: center;
+            font-weight: 600;
+            font-size: 0.9em;
+            transition: opacity 0.3s;
+        }
+        
+        .bet-link:hover {
+            opacity: 0.8;
+        }
+        
+        .william-hill {
+            background: #003366;
+        }
+        
+        .ladbrokes {
+            background: #FF6600;
+        }
+        
+        .fixtures-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .fixture-card {
+            background: rgba(12, 18, 35, 0.96);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 18px;
+            padding: 26px;
+            box-shadow: 0 24px 65px rgba(0,0,0,0.35);
+            transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+            position: relative;
+            color: #f7fbff;
+        }
+        
+        .fixture-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .fixture-card.selected {
+            border: 3px solid #dc241f;
+            box-shadow: 0 0 15px rgba(220, 36, 31, 0.3);
+        }
+        
+        .add-to-acca {
+            background: #ffd700;
+            color: #333;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.85em;
+            position: absolute;
+            top: 15px;
+            right: 15px;
+        }
+        
+        .fixture-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+        }
+        
+        .fixture-league {
+            font-size: 0.82em;
+            color: #a7e8ff;
+            font-weight: 700;
+            background: rgba(24, 97, 131, 0.2);
+            padding: 6px 12px;
+            border-radius: 999px;
+            border: 1px solid rgba(167, 232, 255, 0.25);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+        
+        .fixture-time {
+            font-size: 0.92em;
+            color: #c2e7ff;
+            font-weight: 600;
+        }
+        
+        .match {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 20px 0;
+            gap: 15px;
+        }
+        
+        .team {
+            flex: 1;
+            text-align: center;
+        }
+        
+        .team-name {
+            font-weight: 700;
+            font-size: 1.1em;
+            margin-bottom: 8px;
+        }
+        
+        .vs {
+            font-weight: bold;
+            color: #82d4ff;
+            font-size: 1.2em;
+            letter-spacing: 0.16em;
+        }
+        
+        .prediction-badge {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+            margin: 5px 5px 5px 0;
+        }
+        
+        .prediction-home {
+            background: #4caf50;
+            color: white;
+        }
+        
+        .prediction-draw {
+            background: #ff9800;
+            color: white;
+        }
+        
+        .prediction-away {
+            background: #f44336;
+            color: white;
+        }
+        
+        .value-bet {
+            background: #2196f3;
+            color: white;
+            padding: 10px;
+            border-left: 4px solid #1976d2;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        
+        .roi-positive {
+            color: #4caf50;
+            font-weight: 700;
+        }
+        
+        .confidence-bar {
+            width: 100%;
+            height: 20px;
+            background: #ddd;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 8px 0;
+        }
+        
+        .confidence-fill {
+            height: 100%;
+            background: linear-gradient(to right, #ff9800, #4caf50);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 0.75em;
+            font-weight: 700;
+        }
+        
+        .dropdown {
+            margin-top: 15px;
+            border-top: 1px solid #eee;
+            padding-top: 15px;
+        }
+        
+        .dropdown-toggle {
+            background: #dc241f;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            width: 100%;
+            transition: background 0.3s;
+        }
+        
+        .dropdown-toggle:hover {
+            background: #b01e17;
+        }
+        
+        .dropdown-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+        
+        .dropdown-content.open {
+            max-height: 1000px;
+        }
+        
+        footer {
+            text-align: center;
+            color: white;
+            margin-top: 40px;
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+    
+    <footer>
+        <p>hibs.bet — Edinburgh-Inspired Advanced Betting Intelligence for Scottish Football</p>
+    </footer>
+    
+    <script>
+        function toggleDropdown(button) {
+            const content = button.nextElementSibling;
+            content.classList.toggle('open');
+            button.textContent = content.classList.contains('open') ? '▼ Hide Details' : '▶ Show Details';
+        }
+        
+        function addToAcca(fixtureId, homeTeam, awayTeam, homeOdds, drawOdds, awayOdds) {
+            const accaList = document.getElementById('acca-selections-list');
+            if (!accaList) return;
+            
+            const existing = document.querySelector(`[data-fixture-id="${fixtureId}"]`);
+            if (existing) {
+                existing.remove();
+            } else {
+                const selection = document.createElement('div');
+                selection.className = 'selection-item';
+                selection.setAttribute('data-fixture-id', fixtureId);
+                selection.setAttribute('data-odds', homeOdds);
+                selection.innerHTML = `
+                    <span>${homeTeam} vs ${awayTeam}</span>
+                    <select class="selection-outcome" onchange="updateAccaOdds()">
+                        <option value="home" data-odds="${homeOdds}">${homeTeam} Win (${homeOdds})</option>
+                        <option value="draw" data-odds="${drawOdds}">Draw (${drawOdds})</option>
+                        <option value="away" data-odds="${awayOdds}">${awayTeam} Win (${awayOdds})</option>
+                    </select>
+                    <button class="remove-btn" onclick="this.parentElement.remove(); updateAccaOdds();">Remove</button>
+                `;
+                accaList.appendChild(selection);
+                updateAccaOdds();
+            }
+        }
+        
+        function updateAccaOdds() {
+            const selections = document.querySelectorAll('.selection-item');
+            let totalOdds = 1;
+            selections.forEach(sel => {
+                const select = sel.querySelector('.selection-outcome');
+                const selectedOption = select.options[select.selectedIndex];
+                const odds = parseFloat(selectedOption.getAttribute('data-odds'));
+                totalOdds *= odds;
+            });
+            
+            const oddsDisplay = document.getElementById('acca-total-odds');
+            if (oddsDisplay) oddsDisplay.textContent = totalOdds.toFixed(2);
+            
+            const returnDisplay = document.getElementById('acca-return');
+            const stakeInput = document.getElementById('bet-stake');
+            if (returnDisplay && stakeInput) {
+                const stake = parseFloat(stakeInput.value) || 0;
+                returnDisplay.textContent = (stake * totalOdds).toFixed(2);
+            }
+        }
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            const stakeInput = document.getElementById('bet-stake');
+            if (stakeInput) {
+                stakeInput.addEventListener('input', updateAccaOdds);
+            }
+        });
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

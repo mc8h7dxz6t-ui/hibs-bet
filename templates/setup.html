@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}HibsBetting Setup{% endblock %}
+
+{% block content %}
+<header>
+    <h1><span class="brand-logo">hibs.bet</span></h1>
+    <p class="brand-tagline">Edinburgh-Inspired Bet Predictor Setup</p>
+</header>
+
+<div style="background: white; padding: 40px; border-radius: 8px; max-width: 600px; margin: 40px auto;">
+    <h2 style="color: #dc241f; margin-bottom: 20px; text-align: center;">First-Time Setup</h2>
+    
+    <p style="margin-bottom: 20px; color: #666; line-height: 1.6;">
+        To get started, you need to provide your API keys for accessing football data. 
+        All services offer free tiers — no payment required.
+    </p>
+    
+    <form method="GET" action="/" style="display: flex; flex-direction: column; gap: 15px;">
+        <div>
+            <label for="api_sports_key" style="display: block; font-weight: 600; margin-bottom: 8px; color: #333;">
+                API-Sports Football Key
+            </label>
+            <input 
+                type="password" 
+                id="api_sports_key" 
+                name="api_sports_key" 
+                placeholder="Your API-Sports-Football key"
+                style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 1em;"
+            >
+            <small style="color: #999; display: block; margin-top: 5px;">
+                Get free key at <a href="https://www.api-football.com" target="_blank" style="color: #dc241f;">api-football.com</a>
+            </small>
+        </div>
+        
+        <div>
+            <label for="food_key" style="display: block; font-weight: 600; margin-bottom: 8px; color: #333;">
+                Football-Data.org Key (Optional)
+            </label>
+            <input 
+                type="password" 
+                id="food_key" 
+                name="food_key" 
+                placeholder="Your Football-Data.org key"
+                style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 1em;"
+            >
+            <small style="color: #999; display: block; margin-top: 5px;">
+                Get free key at <a href="https://www.football-data.org" target="_blank" style="color: #dc241f;">football-data.org</a>
+            </small>
+        </div>
+        
+        <button 
+            type="submit" 
+            style="background: linear-gradient(to right, #dc241f, #ffb81c); color: white; border: none; padding: 14px; border-radius: 4px; font-size: 1.1em; font-weight: 600; cursor: pointer; transition: opacity 0.3s;"
+            onmouseover="this.style.opacity='0.9'"
+            onmouseout="this.style.opacity='1'"
+        >
+            Load Dashboard
+        </button>
+    </form>
+    
+    <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+    
+    <div style="background: #f9f9f9; padding: 15px; border-radius: 4px; margin-top: 20px;">
+        <h3 style="color: #666; margin-bottom: 10px;">About</h3>
+        <p style="color: #666; font-size: 0.95em; line-height: 1.6;">
+            HibsBetting is a free-tier bet predictor focused on UK and European football leagues 
+            with a Hibernian (Hibs) theme. It uses public APIs to fetch fixtures, form data, and 
+            odds to help you analyze potential bets.
+        </p>
+    </div>
+</div>
+{% endblock %}

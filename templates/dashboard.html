@@ -1,0 +1,393 @@
+{% extends "base.html" %}
+
+{% block title %}HibsBetting Dashboard — Advanced Betting Intelligence{% endblock %}
+
+{% block extra_css %}
+<style>
+    .dashboard-summary {
+        margin-top: 18px;
+        font-size: 1em;
+        color: #ffe9a8;
+        letter-spacing: 0.02em;
+    }
+
+    .prediction-badge {
+        display: inline-block;
+        padding: 8px 16px;
+        border-radius: 999px;
+        font-size: 0.9em;
+        font-weight: 700;
+        margin: 5px 5px 5px 0;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    }
+    .fixture-header {
+        gap: 10px;
+    }
+    .fixture-league {
+        font-size: 0.85em;
+        color: #2c3e50;
+        background: #ffeb3b;
+    }
+    .fixture-time {
+        color: #7b1fa2;
+        font-weight: 700;
+    }
+    .team-name {
+        font-size: 1.2em;
+        letter-spacing: 0.02em;
+        color: #111;
+    }
+    
+    .prediction-home {
+        background: #4caf50;
+        color: white;
+    }
+    
+    .prediction-draw {
+        background: #ff9800;
+        color: white;
+    }
+    
+    .prediction-away {
+        background: #f44336;
+        color: white;
+    }
+    
+    .value-bet {
+        background: #2196f3;
+        color: white;
+        padding: 10px;
+        border-left: 4px solid #1976d2;
+        margin: 10px 0;
+        border-radius: 4px;
+    }
+    
+    .roi-positive {
+        color: #4caf50;
+        font-weight: 700;
+    }
+    
+    .odds-comparison {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 8px;
+        margin: 10px 0;
+    }
+    
+    .odds-box {
+        background: #f5f5f5;
+        padding: 8px;
+        border-radius: 4px;
+        text-align: center;
+        font-size: 0.9em;
+    }
+    
+    .odds-label {
+        font-size: 0.75em;
+        color: #666;
+    }
+    
+    .odds-value {
+        font-weight: 700;
+        color: #333;
+        font-size: 1.1em;
+    }
+    
+    .confidence-bar {
+        width: 100%;
+        height: 20px;
+        background: #ddd;
+        border-radius: 10px;
+        overflow: hidden;
+        margin: 8px 0;
+    }
+    
+    .confidence-fill {
+        height: 100%;
+        background: linear-gradient(to right, #ff9800, #4caf50);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 0.75em;
+        font-weight: 700;
+    }
+    
+    .stats-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin: 10px 0;
+    }
+    
+    .stat-box {
+        background: #f9f9f9;
+        padding: 10px;
+        border-radius: 4px;
+        border-left: 3px solid #dc241f;
+        font-size: 0.85em;
+    }
+    
+    .tab-buttons {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 15px;
+        border-bottom: 2px solid #eee;
+    }
+    
+    .tab-btn {
+        padding: 10px 15px;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        font-weight: 600;
+        color: #999;
+        border-bottom: 3px solid transparent;
+        transition: all 0.3s;
+    }
+    
+    .tab-btn.active {
+        color: #dc241f;
+        border-bottom-color: #dc241f;
+    }
+    
+    .tab-content {
+        display: none;
+    }
+    
+    .tab-content.active {
+        display: block;
+    }
+
+    .odds-format-toggle {
+        display: inline-flex;
+        gap: 2px;
+        background: rgba(255,255,255,0.1);
+        border-radius: 6px;
+        padding: 4px;
+        margin-top: 10px;
+        border: 1px solid rgba(255,255,255,0.2);
+    }
+
+    .odds-format-btn {
+        padding: 6px 14px;
+        border: none;
+        background: transparent;
+        color: #fff;
+        cursor: pointer;
+        border-radius: 4px;
+        font-size: 0.85em;
+        font-weight: 600;
+        transition: all 0.3s;
+    }
+
+    .odds-format-btn.active {
+        background: #4caf50;
+        color: white;
+    }
+
+    .odds-format-btn:hover:not(.active) {
+        background: rgba(255,255,255,0.1);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<header>
+    <div class="header-nav">
+        <a href="/">📊 Dashboard</a>
+        <a href="/acca">💰 Acca Builder</a>
+    </div>
+    <h1><span class="brand-logo">hibs.bet</span></h1>
+    <p class="brand-tagline">All Upcoming Fixtures — Full Odds, Form, xG, BTTS and Match Analytics</p>
+    <div class="dashboard-summary">
+        <strong>{{ fixtures|length }}</strong> upcoming fixtures across your selected leagues
+        <div class="odds-format-toggle">
+            <button class="odds-format-btn active" onclick="setOddsFormat('decimal')">Decimal</button>
+            <button class="odds-format-btn" onclick="setOddsFormat('percentage')">Percentage</button>
+        </div>
+    </div>
+</header>
+
+{% if not fixtures %}
+<div style="background: rgba(255,255,255,0.95); padding: 30px; border-radius: 12px; text-align: center; color: #111;">
+    <p style="font-size: 1.2em; color: #222;">
+        No upcoming fixtures were found right now. Try again in a few minutes or add more leagues.
+    </p>
+</div>
+{% else %}
+<div class="fixtures-grid">
+    {% for fixture in fixtures %}
+    <div class="fixture-card">
+        <div class="fixture-header">
+            <span class="fixture-league">{{ fixture.league_name }}</span>
+            <span class="fixture-time">{{ fixture.date[:16] }}</span>
+        </div>
+        
+        <div class="match">
+            <div class="team">
+                <div class="team-name">{{ fixture.home }}</div>
+            </div>
+            <div class="vs">VS</div>
+            <div class="team">
+                <div class="team-name">{{ fixture.away }}</div>
+            </div>
+        </div>
+        
+        {% if fixture.prediction %}
+        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
+            <!-- PREDICTION BADGES -->
+            {% set probs = fixture.prediction.probabilities %}
+            <div>
+                <span class="prediction-badge prediction-home">
+                    {{ fixture.home }} Win: {{ "%.1f" | format(probs.home * 100) }}%
+                </span>
+                <span class="prediction-badge prediction-draw">
+                    Draw: {{ "%.1f" | format(probs.draw * 100) }}%
+                </span>
+                <span class="prediction-badge prediction-away">
+                    {{ fixture.away }} Win: {{ "%.1f" | format(probs.away * 100) }}%
+                </span>
+            </div>
+            
+            <!-- CONFIDENCE SCORE -->
+            <div style="margin-top: 10px;">
+                <strong>Model Confidence:</strong>
+                <div class="confidence-bar">
+                    <div class="confidence-fill" style="width: {{ fixture.prediction.confidence * 100 }}%;">
+                        {{ "%.1f" | format(fixture.prediction.confidence * 100) }}%
+                    </div>
+                </div>
+                <strong>Predicted Outcome: {{ fixture.prediction.predicted_outcome | upper }}</strong>
+            </div>
+            
+            <!-- BOOKMAKER ODDS -->
+            <div style="margin-top: 12px;">
+                <strong style="font-size: 0.9em;">Bookmaker Odds:</strong>
+                <div class="odds-comparison">
+                    <div class="odds-box">
+                        <div class="odds-label">{{ fixture.home }}</div>
+                        <div class="odds-value odds-display" data-decimal="{{ "%.2f" | format(fixture.prediction.bookmaker_odds.home) }}">{{ "%.2f" | format(fixture.prediction.bookmaker_odds.home) }}</div>
+                    </div>
+                    <div class="odds-box">
+                        <div class="odds-label">Draw</div>
+                        <div class="odds-value odds-display" data-decimal="{{ "%.2f" | format(fixture.prediction.bookmaker_odds.draw) }}">{{ "%.2f" | format(fixture.prediction.bookmaker_odds.draw) }}</div>
+                    </div>
+                    <div class="odds-box">
+                        <div class="odds-label">{{ fixture.away }}</div>
+                        <div class="odds-value odds-display" data-decimal="{{ "%.2f" | format(fixture.prediction.bookmaker_odds.away) }}">{{ "%.2f" | format(fixture.prediction.bookmaker_odds.away) }}</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- VALUE BETS -->
+            {% if fixture.prediction.best_bet %}
+            <div class="value-bet">
+                <strong>💰 Value Bet Found!</strong>
+                <div style="margin-top: 8px; font-size: 0.9em;">
+                    <strong>{{ fixture.prediction.best_bet | upper }}</strong><br>
+                    Expected ROI: <span class="roi-positive">+{{ "%.1f" | format(fixture.prediction.best_bet_roi) }}%</span><br>
+                    Odds: <span class="odds-display" data-decimal="{{ "%.2f" | format(fixture.prediction.value_bets[fixture.prediction.best_bet].odds) }}">{{ "%.2f" | format(fixture.prediction.value_bets[fixture.prediction.best_bet].odds) }}</span><br>
+                    Model Prob: {{ "%.1f" | format(fixture.prediction.value_bets[fixture.prediction.best_bet].model_probability * 100) }}%
+                </div>
+            </div>
+            {% endif %}
+            
+            <!-- MATCH STATS -->
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <strong>{{ fixture.home }}</strong><br>
+                    Form: {{ "%.1f" | format(fixture.prediction.form_home * 100) }}%<br>
+                    Strength: {{ "%.1f" | format(fixture.prediction.team_strength_home * 100) }}%
+                </div>
+                <div class="stat-box">
+                    <strong>{{ fixture.away }}</strong><br>
+                    Form: {{ "%.1f" | format(fixture.prediction.form_away * 100) }}%<br>
+                    Strength: {{ "%.1f" | format(fixture.prediction.team_strength_away * 100) }}%
+                </div>
+            </div>
+            
+            <!-- EXPECTED GOALS & BTTS -->
+            <div style="margin-top: 10px; padding: 10px; background: #f9f9f9; border-radius: 4px; font-size: 0.85em;">
+                <strong>Expected Goals:</strong> {{ fixture.home }} {{ "%.2f" | format(fixture.prediction.expected_goals_home) }} - {{ "%.2f" | format(fixture.prediction.expected_goals_away) }} {{ fixture.away }}<br>
+                <strong>BTTS Probability:</strong> {{ "%.1f" | format(fixture.prediction.btts_probability * 100) }}%
+            </div>
+        </div>
+        {% endif %}
+        
+        <div class="dropdown">
+            <button class="dropdown-toggle" onclick="toggleDropdown(this)">
+                ▶ Show All Bets
+            </button>
+            
+            <div class="dropdown-content">
+                {% if fixture.prediction.value_bets %}
+                    <div style="padding: 10px; background: #f5f5f5; border-radius: 4px;">
+                        <strong>Value Bets (ROI > 3%):</strong>
+                        {% for outcome, bet_data in fixture.prediction.value_bets.items() %}
+                        <div style="margin-top: 10px; padding: 8px; background: white; border-radius: 4px;">
+                            <strong>{{ outcome | upper }}</strong><br>
+                            Odds: <span class="odds-display" data-decimal="{{ "%.2f" | format(bet_data.odds) }}">{{ "%.2f" | format(bet_data.odds) }}</span><br>
+                            Model Probability: {{ "%.1f" | format(bet_data.model_probability * 100) }}%<br>
+                            Implied Probability: {{ "%.1f" | format(bet_data.implied_probability * 100) }}%<br>
+                            Value Edge: <span class="roi-positive">+{{ "%.1f" | format(bet_data.value * 100) }}%</span><br>
+                            Expected ROI: <span class="roi-positive">+{{ "%.1f" | format(bet_data.roi_percent) }}%</span><br>
+                            Kelly Bet Size: {{ "%.2f" | format(bet_data.bet_size * 100) }}% of bankroll
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p style="color: #999; font-size: 0.9em;">No value bets found. Bookmaker odds are fair.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Initialize odds format from localStorage
+    document.addEventListener('DOMContentLoaded', function() {
+        const savedFormat = localStorage.getItem('oddsFormat') || 'decimal';
+        updateOddsFormat(savedFormat);
+    });
+
+    function toggleDropdown(button) {
+        const content = button.nextElementSibling;
+        content.classList.toggle('open');
+        button.textContent = content.classList.contains('open') ? '▼ Hide Bets' : '▶ Show All Bets';
+    }
+
+    function setOddsFormat(format) {
+        // Save preference to localStorage
+        localStorage.setItem('oddsFormat', format);
+        updateOddsFormat(format);
+    }
+
+    function updateOddsFormat(format) {
+        // Update button states
+        document.querySelectorAll('.odds-format-btn').forEach(btn => {
+            if ((format === 'decimal' && btn.textContent === 'Decimal') ||
+                (format === 'percentage' && btn.textContent === 'Percentage')) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+
+        // Update all odds displays
+        document.querySelectorAll('.odds-display').forEach(element => {
+            const decimalValue = parseFloat(element.dataset.decimal);
+            if (format === 'percentage') {
+                const percentage = (1 / decimalValue * 100).toFixed(1);
+                element.textContent = percentage + '%';
+            } else {
+                element.textContent = decimalValue.toFixed(2);
+            }
+        });
+    }
+</script>
+{% endblock %}
