@@ -80,7 +80,7 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
 
     league = LEAGUES.get(league_code, {})
     now = datetime.now(timezone.utc)
-    cutoff = now + timedelta(hours=48)
+    cutoff = now + timedelta(days=5)
     fetched: Dict[str, Dict] = {}
 
     def add(candidate: Dict) -> None:
@@ -172,7 +172,7 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
 
 def fetch_all_fixtures() -> Dict:
     cache = Cache()
-    cached = cache.get("all_fixtures_grouped", ttl_hours=1)
+    cached = cache.get("all_fixtures_grouped_5d", ttl_hours=1)
     if cached:
         return cached
 
@@ -203,7 +203,7 @@ def fetch_all_fixtures() -> Dict:
         "total": len(all_fixtures),
         "value_bet_count": len(value_bets_only),
     }
-    cache.set("all_fixtures_grouped", result)
+    cache.set("all_fixtures_grouped_5d", result)
     return result
 
 
