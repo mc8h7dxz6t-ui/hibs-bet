@@ -194,6 +194,46 @@ LEAGUES = {
         "sportsmonk_id": None,
         "strength_factor": 0.85,
     },
+    "BELGIUM_FIRST": {
+        "name": "Belgium Pro League",
+        "country": "Belgium",
+        "region": "European",
+        "flag": "🇧🇪",
+        "football_data_org_id": None,
+        "api_sports_id": 144,
+        "sportsmonk_id": None,
+        "strength_factor": 0.82,
+    },
+    "DENMARK_SL": {
+        "name": "Denmark Superliga",
+        "country": "Denmark",
+        "region": "European",
+        "flag": "🇩🇰",
+        "football_data_org_id": None,
+        "api_sports_id": 119,
+        "sportsmonk_id": None,
+        "strength_factor": 0.78,
+    },
+    "GREECE_SL": {
+        "name": "Greece Super League",
+        "country": "Greece",
+        "region": "European",
+        "flag": "🇬🇷",
+        "football_data_org_id": None,
+        "api_sports_id": 197,
+        "sportsmonk_id": None,
+        "strength_factor": 0.76,
+    },
+    "AUSTRIA_BL": {
+        "name": "Austria Bundesliga",
+        "country": "Austria",
+        "region": "European",
+        "flag": "🇦🇹",
+        "football_data_org_id": None,
+        "api_sports_id": 218,
+        "sportsmonk_id": None,
+        "strength_factor": 0.78,
+    },
     # International
     "WORLD_CUP": {
         "name": "FIFA World Cup",
@@ -232,13 +272,18 @@ ALL_LEAGUE_CODES = [
     "EPL", "CHAMPIONSHIP", "LEAGUE_ONE", "LEAGUE_TWO", "FA_CUP",
     "UCL", "EUROPA_LEAGUE", "UECL",
     "LA_LIGA", "SERIE_A", "BUNDESLIGA", "LIGUE_1", "EREDIVISIE", "PRIMEIRA",
+    "BELGIUM_FIRST", "DENMARK_SL", "GREECE_SL", "AUSTRIA_BL",
     "WORLD_CUP", "EUROS", "NATIONS_LEAGUE",
 ]
 
 LEAGUE_REGIONS = {
     "🏴󠁧󠁢󠁳󠁣󠁴󠁿 Scotland": ["SCOTLAND", "SCOTLAND_CHAMP", "SCOTLAND_L1", "SCOTLAND_L2", "SCOTTISH_CUP"],
     "🏴󠁧󠁢󠁥󠁮󠁧󠁿 England": ["EPL", "CHAMPIONSHIP", "LEAGUE_ONE", "LEAGUE_TWO", "FA_CUP"],
-    "🏆 European": ["UCL", "EUROPA_LEAGUE", "UECL", "LA_LIGA", "SERIE_A", "BUNDESLIGA", "LIGUE_1", "EREDIVISIE", "PRIMEIRA"],
+    "🏆 European": [
+        "UCL", "EUROPA_LEAGUE", "UECL",
+        "LA_LIGA", "SERIE_A", "BUNDESLIGA", "LIGUE_1", "EREDIVISIE", "PRIMEIRA",
+        "BELGIUM_FIRST", "DENMARK_SL", "GREECE_SL", "AUSTRIA_BL",
+    ],
     "🌍 International": ["WORLD_CUP", "EUROS", "NATIONS_LEAGUE"],
 }
 
@@ -251,3 +296,6 @@ MAX_REQUESTS_PER_HOUR = {
     "odds_api": 500,
     "stats_api": 150,
 }
+
+# Default leagues for Streamlit / launcher multiselect
+HIBS_LEAGUE_FOCUS = ["SCOTLAND", "EPL", "EUROPA_LEAGUE"]

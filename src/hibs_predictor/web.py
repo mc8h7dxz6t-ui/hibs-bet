@@ -13,6 +13,7 @@ from hibs_predictor.config import LEAGUES, ALL_LEAGUE_CODES, LEAGUE_REGIONS
 from hibs_predictor.cache import Cache
 from hibs_predictor.data_aggregator import DataAggregator
 from hibs_predictor.betting_engine import BettingEngine, OddsAnalyzer, TeamStrengthCalculator
+from hibs_predictor.health_probe import gather_health
 
 TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -22,6 +23,14 @@ app.config["JSON_SORT_KEYS"] = False
 
 aggregator = DataAggregator()
 betting_engine = BettingEngine(aggregator.get_all_clients())
+
+_health_cache: Dict[str, Any] = {"t": 0.0, "payload": None}
+_HEALTH_TTL_SEC = 90.0
+
+
+def _api_football_season_year(now: datetime) -> int:
+    """API-Football season id is the year the competition season starts (e.g. 2025 for 2025–26)."""
+    return now.year if now.month >= 7 else now.year - 1
 
 
 def _fixture_key(fixture: Dict[str, Any]) -> str:
@@ -82,39 +91,48 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     now = datetime.now(timezone.utc)
     cutoff = now + timedelta(days=5)
     fetched: Dict[str, Dict] = {}
+    date_from = now.strftime("%Y-%m-%d")
+    date_to = cutoff.strftime("%Y-%m-%d")
+    season_primary = _api_football_season_year(now)
 
     def add(candidate: Dict) -> None:
         key = _fixture_key(candidate)
         if key and key not in fetched:
             fetched[key] = candidate
 
-    if "api_sports" in aggregator.clients:
+    league_api_id = league.get("api_sports_id")
+    if "api_sports" in aggregator.clients and league_api_id:
         try:
-            for season in [now.year, now.year - 1]:
+            for season in [season_primary, season_primary - 1]:
                 raw = aggregator.clients["api_sports"].fetch_fixtures_by_league(
-                    league.get("api_sports_id", 39), season
+                    int(league_api_id),
+                    int(season),
+                    date_from=date_from,
+                    date_to=date_to,
                 )
                 for f in raw or []:
                     norm = _normalize_api_sports(f, league_code)
                     if not norm:
                         continue
                     try:
-                        fd = datetime.fromisoformat(norm["date"].replace("Z", "+00:00"))
+                        raw_date = norm.get("date") or ""
+                        fd = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
                         if now <= fd <= cutoff:
                             norm["date"] = fd.isoformat()
                             add(norm)
-                    except Exception:
+                    except (TypeError, ValueError, OSError) as parse_err:
+                        print(f"[API-Sports date] {league_code}: {parse_err} raw={norm.get('date')!r}")
                         continue
                 if fetched:
                     break
         except Exception as e:
-            print(f"[API-Sports] {league_code}: {e}")
+            print(f"[API-Sports] {league_code}: {e!r}")
 
     if not fetched and "football_data_org" in aggregator.clients:
         comp = league.get("football_data_org_id")
         if comp:
             # Only try current season - avoid hammering the rate limit
-            for season in [now.year - 1, now.year]:
+            for season in [season_primary, season_primary - 1]:
                 try:
                     import time as _time
                     _time.sleep(0.5)  # respect rate limit
@@ -160,13 +178,13 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
                 "home_position": enriched.get("home_position", {}),
                 "away_position": enriched.get("away_position", {}),
                 "all_bookmaker_odds": enriched.get("all_bookmaker_odds", []),
-                "has_value_bet": bool(prediction.get("value_bets")),
+                "has_value_bet": bool(prediction.get("has_any_value", prediction.get("value_bets"))),
             })
         except Exception as e:
             print(f"[Enrich] {league_code}: {e}")
 
     fixtures.sort(key=lambda x: x.get("date") or "")
-    cache.set(f"next_48h_{league_code}", fixtures)
+    cache.set(f"next_48h_{league_code}", fixtures, ttl_hours=1)
     return fixtures
 
 
@@ -203,8 +221,15 @@ def fetch_all_fixtures() -> Dict:
         "total": len(all_fixtures),
         "value_bet_count": len(value_bets_only),
     }
-    cache.set("all_fixtures_grouped_5d", result)
+    cache.set("all_fixtures_grouped_5d", result, ttl_hours=1)
     return result
+
+
+def _leagues_for_filter() -> List[tuple]:
+    return sorted(
+        [(c, LEAGUES[c].get("name", c)) for c in ALL_LEAGUE_CODES if c in LEAGUES],
+        key=lambda x: x[1].lower(),
+    )
 
 
 @app.route("/")
@@ -218,7 +243,22 @@ def index():
         total=data["total"],
         value_bet_count=data["value_bet_count"],
         league_regions=LEAGUE_REGIONS,
+        leagues_for_filter=_leagues_for_filter(),
     )
+
+
+@app.route("/api/health")
+def api_health():
+    """API + scraper probes for dashboard status panel (short TTL cache)."""
+    import time as _time
+
+    now = _time.monotonic()
+    if _health_cache["payload"] is not None and (now - float(_health_cache["t"])) < _HEALTH_TTL_SEC:
+        return jsonify(_health_cache["payload"])
+    payload = gather_health()
+    _health_cache["t"] = now
+    _health_cache["payload"] = payload
+    return jsonify(payload)
 
 
 @app.route("/api/fixtures")

@@ -6,9 +6,12 @@
 {% set hl10 = fixture.home_last10 %}
 {% set al10 = fixture.away_last10 %}
 
-<div class="fixture-card {% if fixture.has_value_bet %}value-card{% endif %}" onclick="toggleCard(this)">
+<div class="fixture-card {% if fixture.has_value_bet %}value-card value-multi{% endif %}"
+     data-league="{{ fixture.league }}"
+     data-has-value="{% if fixture.has_value_bet %}1{% else %}0{% endif %}"
+     onclick="toggleCard(this)">
 
-    {% if fixture.has_value_bet %}<div class="value-badge">⚡ VALUE</div>{% endif %}
+    {% if fixture.has_value_bet %}<div class="value-badge">⚡ VALUE{% if p and p.value_highlights|length > 1 %} · {{ p.value_highlights|length }} mkts{% endif %}</div>{% endif %}
 
     <!-- TOP ROW -->
     <div class="card-top">
@@ -21,8 +24,8 @@
         <div class="team-block">
             <div class="team-nm">{{ fixture.home }}</div>
             {% if hp and hp.position %}<div class="team-meta">🏆 {{ hp.position }}{% if hp.points is defined %} &middot; {{ hp.points }}pts{% endif %}</div>{% endif %}
-            <div class="form-dots">
-                {% for r in hl10[:6] %}<span class="fd fd-{{ r.result }}" title="{{ r.home_away }} vs {{ r.opponent }} {{ r.score }}">{{ r.result }}</span>{% endfor %}
+            <div class="form-dots form-dots-compact">
+                {% for r in hl10 %}<span class="fd fd-{{ r.result }}" title="{{ r.home_away }} vs {{ r.opponent }} {{ r.score }}">{{ r.result }}</span>{% endfor %}
             </div>
         </div>
 
@@ -31,17 +34,17 @@
             <div class="odds-trio">
                 <div class="odd-box {% if p.predicted_outcome=='home' %}best{% endif %}">
                     <div class="odd-lbl">1</div>
-                    <div class="odd-val">{{ "%.2f"|format(p.bookmaker_odds.home) }}</div>
+                    <div class="odd-val">{% if p.bookmaker_odds.home is not none %}{{ "%.2f"|format(p.bookmaker_odds.home) }}{% else %}—{% endif %}</div>
                     <div class="odd-pct">{{ p.probabilities_pct.home }}%</div>
                 </div>
                 <div class="odd-box {% if p.predicted_outcome=='draw' %}best{% endif %}">
                     <div class="odd-lbl">X</div>
-                    <div class="odd-val">{{ "%.2f"|format(p.bookmaker_odds.draw) }}</div>
+                    <div class="odd-val">{% if p.bookmaker_odds.draw is not none %}{{ "%.2f"|format(p.bookmaker_odds.draw) }}{% else %}—{% endif %}</div>
                     <div class="odd-pct">{{ p.probabilities_pct.draw }}%</div>
                 </div>
                 <div class="odd-box {% if p.predicted_outcome=='away' %}best{% endif %}">
                     <div class="odd-lbl">2</div>
-                    <div class="odd-val">{{ "%.2f"|format(p.bookmaker_odds.away) }}</div>
+                    <div class="odd-val">{% if p.bookmaker_odds.away is not none %}{{ "%.2f"|format(p.bookmaker_odds.away) }}{% else %}—{% endif %}</div>
                     <div class="odd-pct">{{ p.probabilities_pct.away }}%</div>
                 </div>
             </div>
@@ -51,8 +54,8 @@
         <div class="team-block team-right">
             <div class="team-nm">{{ fixture.away }}</div>
             {% if ap and ap.position %}<div class="team-meta">🏆 {{ ap.position }}{% if ap.points is defined %} &middot; {{ ap.points }}pts{% endif %}</div>{% endif %}
-            <div class="form-dots" style="justify-content:flex-end;">
-                {% for r in al10[:6] %}<span class="fd fd-{{ r.result }}" title="{{ r.home_away }} vs {{ r.opponent }} {{ r.score }}">{{ r.result }}</span>{% endfor %}
+            <div class="form-dots form-dots-compact" style="justify-content:flex-end;">
+                {% for r in al10 %}<span class="fd fd-{{ r.result }}" title="{{ r.home_away }} vs {{ r.opponent }} {{ r.score }}">{{ r.result }}</span>{% endfor %}
             </div>
         </div>
     </div>
@@ -64,6 +67,14 @@
         <span class="mpill">O2.5 <strong>{{ p.over25_probability_pct }}%</strong></span>
         <span class="mpill">xG <strong>{{ p.expected_goals_home }}/{{ p.expected_goals_away }}</strong></span>
         <span class="mpill conf">Conf <strong>{{ p.confidence_pct }}%</strong></span>
+        {% if p.score_and_btts_pct is defined %}
+        <span class="mpill" title="Poisson joint">H+BTTS <strong>{{ p.score_and_btts_pct.home_win_and_btts }}%</strong></span>
+        <span class="mpill" title="Poisson joint">D+BTTS <strong>{{ p.score_and_btts_pct.draw_and_btts }}%</strong></span>
+        <span class="mpill" title="Poisson joint">A+BTTS <strong>{{ p.score_and_btts_pct.away_win_and_btts }}%</strong></span>
+        {% endif %}
+        {% if p.odds_cross_max_implied_diff_pct is defined and p.odds_cross_max_implied_diff_pct > 0.5 %}
+        <span class="mpill" title="Primary vs secondary 1X2 implied">Δimp <strong>{{ p.odds_cross_max_implied_diff_pct }}%</strong></span>
+        {% endif %}
         {% if fixture.has_value_bet and best %}<span class="mpill vbpill">⚡ +{{ p.best_bet_roi }}% ROI</span>{% endif %}
     </div>
     {% endif %}
@@ -83,7 +94,7 @@
         {% if best and vb[best] %}
         {% set bv = vb[best] %}{% set kelly = bv.kelly %}
         <div class="value-bet-panel" style="margin-bottom:14px;">
-            <div class="value-bet-title">⚡ VALUE BET — {{ best|upper }} @ {{ "%.2f"|format(bv.odds) }}</div>
+            <div class="value-bet-title">⚡ TOP VALUE — {{ bv.market_label }} @ {{ "%.2f"|format(bv.odds) }}</div>
             <div class="vb-row">
                 <span>Our prob: <strong class="green">{{ bv.model_probability_pct }}%</strong></span>
                 <span>Bookie: {{ bv.implied_probability_pct }}%</span>
@@ -112,7 +123,7 @@
                 <td><strong>{{ hp.points }}</strong></td>
                 <td>
                     {% if hp.form %}
-                    {% for ch in hp.form[-5:] %}
+                    {% for ch in hp.form[-10:] %}
                     <span class="fd fd-{{ ch }}" style="width:14px;height:14px;font-size:0.5em;">{{ ch }}</span>
                     {% endfor %}
                     {% endif %}
@@ -129,13 +140,30 @@
                 <td><strong>{{ ap.points }}</strong></td>
                 <td>
                     {% if ap.form %}
-                    {% for ch in ap.form[-5:] %}
+                    {% for ch in ap.form[-10:] %}
                     <span class="fd fd-{{ ch }}" style="width:14px;height:14px;font-size:0.5em;">{{ ch }}</span>
                     {% endfor %}
                     {% endif %}
                 </td>
             </tr>
             {% endif %}
+        </table>
+        {% endif %}
+
+        {% if fixture.fixture_injuries is defined and fixture.fixture_injuries %}
+        <div class="section-title" style="margin-top:14px;">🏥 Injuries &amp; absences (API)</div>
+        <table class="data-table" style="margin-bottom:14px;">
+            <tr><th>Player</th><th>Team</th><th>Type</th><th>Reason</th></tr>
+            {% for inj in fixture.fixture_injuries[:12] %}
+            {% set pl = inj.player or {} %}
+            {% set tm = inj.team or {} %}
+            <tr>
+                <td>{{ pl.name or '—' }}</td>
+                <td>{{ tm.name or '—' }}</td>
+                <td>{{ inj.type or '—' }}</td>
+                <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;">{{ inj.reason or '—' }}</td>
+            </tr>
+            {% endfor %}
         </table>
         {% endif %}
 
@@ -247,9 +275,9 @@
         <div class="market-pills" style="margin-bottom:12px;">
             {% if p %}
             <span class="mpill">BTTS <strong>{{ p.btts_probability_pct }}%</strong></span>
-            <span class="mpill">O1.5 <strong>{{ [p.over25_probability_pct + 15, 99]|min|round(1) }}%</strong></span>
+            <span class="mpill">O1.5 <strong>{{ p.over15_probability_pct }}%</strong></span>
             <span class="mpill">O2.5 <strong>{{ p.over25_probability_pct }}%</strong></span>
-            <span class="mpill">O3.5 <strong>{{ [p.over25_probability_pct - 22, 3]|max|round(1) }}%</strong></span>
+            <span class="mpill">O3.5 <strong>{{ p.over35_probability_pct }}%</strong></span>
             <span class="mpill">xG Home <strong>{{ p.expected_goals_home }}</strong></span>
             <span class="mpill">xG Away <strong>{{ p.expected_goals_away }}</strong></span>
             {% endif %}
@@ -272,13 +300,22 @@
         </table>
         {% endif %}
 
+        {% if p.value_highlights is defined and p.value_highlights %}
+        <div class="section-title" style="margin-top:10px;">✨ Value by market</div>
+        <div class="value-highlight-strip">
+            {% for h in p.value_highlights %}
+            <span class="vh-pill">+{{ "%.1f"|format(h.roi) }}% <em>{{ h.label }}</em></span>
+            {% endfor %}
+        </div>
+        {% endif %}
+
         <!-- ALL VALUE BETS -->
         {% if vb %}
         <div class="section-title">⚡ All Value Bets</div>
         {% for outcome, bdata in vb.items() %}
         <div style="background:rgba(255,215,0,0.04);border:1px solid rgba(255,215,0,0.14);border-radius:8px;padding:10px;margin-bottom:8px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                <strong style="color:var(--gold);font-size:0.8em;">{{ outcome|upper }} WIN @ {{ "%.2f"|format(bdata.odds) }}</strong>
+                <strong style="color:var(--gold);font-size:0.8em;">{{ bdata.market_label }} @ {{ "%.2f"|format(bdata.odds) }}</strong>
                 <span class="kelly-label kelly-{{ bdata.kelly.confidence_label|lower }}">{{ bdata.kelly.confidence_label }}</span>
             </div>
             <div class="market-pills" style="margin-bottom:5px;">

@@ -47,11 +47,23 @@ def test_cache():
     """Test cache system."""
     print("\nTesting cache system...")
     try:
+        import tempfile
+        import time
         from hibs_predictor.cache import Cache
+
         cache = Cache()
         cache.set("test_key", {"value": 123})
         retrieved = cache.get("test_key")
         assert retrieved == {"value": 123}, "Cache retrieval mismatch"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            c2 = Cache(cache_dir=tmp)
+            c2.set("expire_me", 1, ttl_hours=1e-9)
+            time.sleep(0.02)
+            pruned = c2.prune_stale(legacy_unknown_ttl_hours=1e-9)
+            assert pruned >= 1, "prune should remove expired entry"
+            assert c2.get("expire_me", ttl_hours=1) is None
+
         print("  ✓ Cache working correctly")
         return True
     except Exception as e:

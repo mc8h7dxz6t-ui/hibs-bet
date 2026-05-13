@@ -1,65 +1,158 @@
 {% extends "base.html" %}
 {% block title %}hibs.bet — Live Dashboard{% endblock %}
+{% block container_class %} dash-outer{% endblock %}
 {% block content %}
-<header>
-    <div class="brand">
-        <span class="brand-logo">hibs.bet</span>
-        <div>
-            <div class="brand-sub">Edinburgh Betting Intelligence</div>
-            <div class="brand-sub" style="margin-top:2px;font-size:0.65em;color:var(--green);">Tap any fixture to expand</div>
+<div class="dash-layout">
+    <aside class="dash-sidebar" aria-label="Navigation and data health">
+        <div class="dash-side-brand">
+            <span class="brand-logo">hibs.bet</span>
+            <div class="dash-side-sub">Edinburgh Betting Intelligence</div>
         </div>
-    </div>
-    <div class="header-right">
-        <span class="stat-pill">⚽ {{ total }} fixtures</span>
-        <span class="stat-pill gold">⚡ {{ value_bet_count }} value bets</span>
-        <a href="/acca" class="nav-btn">💰 Acca</a>
-    </div>
-</header>
+        <nav class="dash-nav">
+            <a href="/acca" class="nav-btn">💰 Acca Builder</a>
+        </nav>
+        <div class="health-panel-title">API &amp; scraper health</div>
+        <div id="health-grid" class="health-grid">
+            <div class="health-row"><span class="health-name">Checking services…</span></div>
+        </div>
+    </aside>
 
-<div class="tab-bar">
-    <button class="tab-btn gold-tab active" data-tab-group="main" onclick="switchTab('tab-value','main')">⚡ Value ({{ value_bet_count }})</button>
-    <button class="tab-btn" data-tab-group="main" onclick="switchTab('tab-all','main')">⚽ All ({{ total }})</button>
-    {% for region in league_regions %}
-    <button class="tab-btn" data-tab-group="main" onclick="switchTab('tab-r{{ loop.index }}','main')">{{ region }}</button>
-    {% endfor %}
-</div>
+    <main class="dash-main">
+        <div class="sticky-stack">
+            <header>
+                <div class="brand">
+                    <span class="brand-logo" style="font-size:1.5em;">hibs.bet</span>
+                    <div>
+                        <div class="brand-sub">Live fixtures</div>
+                        <div class="brand-sub" style="margin-top:2px;font-size:0.65em;color:var(--muted);">Tap any card to expand</div>
+                    </div>
+                </div>
+                <div class="header-right">
+                    <span class="stat-pill">⚽ {{ total }} fixtures</span>
+                    <span class="stat-pill gold">⚡ {{ value_bet_count }} value bets</span>
+                    <a href="/acca" class="nav-btn">💰 Acca</a>
+                </div>
+            </header>
 
-<div id="tab-value" class="tab-panel active" data-group="main">
-    {% if value_bets %}
-    <div class="fixtures-grid">{% for fixture in value_bets %}{% include '_fixture_card.html' %}{% endfor %}</div>
-    {% else %}
-    <div class="empty-state"><div class="icon">🔍</div><p>No value bets right now. Tap All to see all fixtures.</p></div>
-    {% endif %}
-</div>
+            <div class="filter-toolbar" role="region" aria-label="Fixture filters">
+                <label for="flt-league">League</label>
+                <select id="flt-league" aria-label="Filter by league">
+                    <option value="">All leagues</option>
+                    {% for code, name in leagues_for_filter %}
+                    <option value="{{ code }}">{{ name }}</option>
+                    {% endfor %}
+                </select>
+                <label><input type="checkbox" id="flt-value" aria-label="Show only fixtures with value bets"> Verified value bets only</label>
+            </div>
 
-<div id="tab-all" class="tab-panel" data-group="main">
-    {% if all_fixtures %}
-    <div class="fixtures-grid">{% for fixture in all_fixtures %}{% include '_fixture_card.html' %}{% endfor %}</div>
-    {% else %}
-    <div class="empty-state"><div class="icon">📅</div><p>No fixtures in the next 48 hours.</p></div>
-    {% endif %}
-</div>
+            <div class="tab-bar">
+                <button class="tab-btn gold-tab active" data-tab-group="main" onclick="switchTab(event,'tab-value','main')">⚡ Value ({{ value_bet_count }})</button>
+                <button class="tab-btn" data-tab-group="main" onclick="switchTab(event,'tab-all','main')">⚽ All ({{ total }})</button>
+                {% for region in league_regions %}
+                <button class="tab-btn" data-tab-group="main" onclick="switchTab(event,'tab-r{{ loop.index }}','main')">{{ region }}</button>
+                {% endfor %}
+            </div>
+        </div>
 
-{% for region, codes in league_regions.items() %}
-<div id="tab-r{{ loop.index }}" class="tab-panel" data-group="main">
-    {% set rf = by_region[region] %}
-    {% if rf %}
-    <div class="fixtures-grid">{% for fixture in rf %}{% include '_fixture_card.html' %}{% endfor %}</div>
-    {% else %}
-    <div class="empty-state"><div class="icon">📅</div><p>No {{ region }} fixtures in the next 48 hours.</p></div>
-    {% endif %}
+        <div id="tab-value" class="tab-panel active" data-group="main">
+            {% if value_bets %}
+            <div class="fixtures-grid">{% for fixture in value_bets %}{% include '_fixture_card.html' %}{% endfor %}</div>
+            {% else %}
+            <div class="empty-state"><div class="icon">🔍</div><p>No value bets right now. Open All fixtures or adjust filters.</p></div>
+            {% endif %}
+        </div>
+
+        <div id="tab-all" class="tab-panel" data-group="main">
+            {% if all_fixtures %}
+            <div class="fixtures-grid">{% for fixture in all_fixtures %}{% include '_fixture_card.html' %}{% endfor %}</div>
+            {% else %}
+            <div class="empty-state"><div class="icon">📅</div><p>No fixtures in the next few days.</p></div>
+            {% endif %}
+        </div>
+
+        {% for region, codes in league_regions.items() %}
+        <div id="tab-r{{ loop.index }}" class="tab-panel" data-group="main">
+            {% set rf = by_region[region] %}
+            {% if rf %}
+            <div class="fixtures-grid">{% for fixture in rf %}{% include '_fixture_card.html' %}{% endfor %}</div>
+            {% else %}
+            <div class="empty-state"><div class="icon">📅</div><p>No {{ region }} fixtures in the window.</p></div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </main>
 </div>
-{% endfor %}
 {% endblock %}
 {% block extra_js %}
 <script>
-    document.addEventListener('DOMContentLoaded',function(){
-        if({{ value_bet_count }}===0){
-            document.querySelectorAll('[data-group="main"]').forEach(p=>p.classList.remove('active'));
-            document.querySelectorAll('[data-tab-group="main"]').forEach(b=>b.classList.remove('active'));
-            document.getElementById('tab-all').classList.add('active');
-            document.querySelectorAll('.tab-btn')[1].classList.add('active');
+(function () {
+    function applyDashFilters() {
+        var leagueSel = document.getElementById('flt-league');
+        var valCb = document.getElementById('flt-value');
+        if (!leagueSel || !valCb) return;
+        var lg = leagueSel.value || '';
+        var valOnly = valCb.checked;
+        document.querySelectorAll('.tab-panel .fixture-card').forEach(function (card) {
+            var okL = !lg || card.getAttribute('data-league') === lg;
+            var okV = !valOnly || card.getAttribute('data-has-value') === '1';
+            card.style.display = (okL && okV) ? '' : 'none';
+        });
+    }
+
+    function wireFilters() {
+        var leagueSel = document.getElementById('flt-league');
+        var valCb = document.getElementById('flt-value');
+        if (leagueSel) leagueSel.addEventListener('change', applyDashFilters);
+        if (valCb) valCb.addEventListener('change', applyDashFilters);
+        document.addEventListener('hibs-tab-change', applyDashFilters);
+    }
+
+    async function loadHealth() {
+        var root = document.getElementById('health-grid');
+        if (!root) return;
+        var okMs = 200;
+        try {
+            var res = await fetch('/api/health');
+            var d = await res.json();
+            okMs = d.latency_ok_ms || 200;
+            var html = '';
+            (d.apis || []).forEach(function (a) {
+                var dotClass = 'dot ';
+                if (a.ok && a.ms != null && a.ms < okMs) dotClass += 'dot-pulse';
+                else if (a.ok) dotClass += 'dot-warn';
+                else dotClass += 'dot-bad';
+                var ms = a.ms != null ? '<span class="health-ms">' + a.ms + 'ms</span>' : '<span class="health-ms">—</span>';
+                var err = a.error ? '<span class="health-ms" title="' + String(a.error).replace(/"/g, '&quot;') + '">!</span>' : '';
+                html += '<div class="health-row"><span class="health-name">' + (a.label || a.id) + '</span><div class="health-meta"><span class="' + dotClass + '"></span>' + ms + err + '</div></div>';
+            });
+            (d.scrapers || []).forEach(function (s) {
+                var dotClass = 'dot ';
+                if (s.ok && s.ms != null && s.ms < okMs) dotClass += 'dot-pulse';
+                else if (s.ok) dotClass += 'dot-warn';
+                else dotClass += 'dot-bad';
+                var ms = s.ms != null ? '<span class="health-ms">' + s.ms + 'ms</span>' : '<span class="health-ms">—</span>';
+                var badge = (s.error_code === 'LAYOUT_BROKEN') ? '<span class="badge-layout">LAYOUT_BROKEN</span>' : '';
+                html += '<div class="health-row"><span class="health-name">' + (s.label || s.id) + '</span><div class="health-meta">' + badge + '<span class="' + dotClass + '"></span>' + ms + '</div></div>';
+            });
+            root.innerHTML = html || '<div class="health-row"><span class="health-name">No health rows</span></div>';
+        } catch (e) {
+            root.innerHTML = '<div class="health-row"><span class="health-name">Health check unavailable</span><span class="dot dot-bad"></span></div>';
         }
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        if ({{ value_bet_count }} === 0) {
+            document.querySelectorAll('[data-group="main"]').forEach(function (p) { p.classList.remove('active'); });
+            document.querySelectorAll('[data-tab-group="main"]').forEach(function (b) { b.classList.remove('active'); });
+            var allPanel = document.getElementById('tab-all');
+            if (allPanel) allPanel.classList.add('active');
+            var btns = document.querySelectorAll('.tab-bar .tab-btn');
+            if (btns[1]) btns[1].classList.add('active');
+        }
+        wireFilters();
+        applyDashFilters();
+        loadHealth();
     });
+})();
 </script>
 {% endblock %}

@@ -7,6 +7,18 @@ from hibs_predictor.cache import Cache
 from hibs_predictor.rate_limiter import RateLimiter
 
 
+def _api_football_errors_truthy(errors: Any) -> bool:
+    if errors is None:
+        return False
+    if isinstance(errors, str):
+        return bool(errors.strip())
+    if isinstance(errors, list):
+        return len(errors) > 0
+    if isinstance(errors, dict):
+        return len(errors) > 0
+    return bool(errors)
+
+
 class BaseApiClient:
     def __init__(self, api_key: str, base_url: str, header_name: str, service_name: str) -> None:
         self.api_key = api_key
@@ -31,11 +43,14 @@ class BaseApiClient:
             return {"error": "Rate limit exceeded. Try again later."}
 
         url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
-        response = requests.get(url, headers=self._get_headers(), params=params, timeout=15)
+        response = requests.get(url, headers=self._get_headers(), params=params, timeout=20)
         response.raise_for_status()
-        data = response.json()
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise ValueError(f"Invalid JSON from {self.service_name} {endpoint}: {exc}") from exc
         self.rate_limiter.record_request(self.service_name)
-        self.cache.set(cache_key, data)
+        self.cache.set(cache_key, data, ttl_hours=4)
         return data
 
 
@@ -47,7 +62,12 @@ class FootballDataOrgClient(BaseApiClient):
         endpoint = f"competitions/{competition_code}/matches"
         params = {"season": season, "status": status}
         data = self._get_json(endpoint, params=params)
-        return data.get("matches", [])
+        if not isinstance(data, dict):
+            return []
+        if data.get("errorCode") or data.get("message"):
+            print(f"[Football-Data.org] {competition_code}: {data.get('message', data)}")
+            return []
+        return data.get("matches", []) or []
 
     def fetch_team(self, team_id: int) -> Dict[str, Any]:
         endpoint = f"teams/{team_id}"
@@ -137,6 +157,49 @@ class ApiSportsFootballClient(BaseApiClient):
     def __init__(self, api_key: str) -> None:
         super().__init__(api_key, "https://v3.football.api-sports.io", "x-apisports-key", "api_sports")
 
+    def _get_json(self, endpoint: str, params: Optional[Dict[str, Any]] = None, use_cache: bool = True) -> Dict[str, Any]:
+        """API-Football: validate body, avoid caching hard errors, surface rate/token issues."""
+        cache_key = f"{self.service_name}_{endpoint}_{str(params)}"
+        if use_cache:
+            cached = self.cache.get(cache_key, ttl_hours=4)
+            if cached is not None:
+                return cached
+
+        if not self.rate_limiter.check_rate_limit(self.service_name):
+            return {"response": [], "errors": {"rate_limit": "local guard"}}
+
+        url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
+        try:
+            response = requests.get(url, headers=self._get_headers(), params=params or {}, timeout=25)
+            response.raise_for_status()
+            data = response.json()
+        except requests.RequestException as exc:
+            print(f"[API-Sports HTTP] {endpoint}: {exc}")
+            return {"response": [], "errors": {"http": str(exc)}}
+        except ValueError as exc:
+            print(f"[API-Sports JSON] {endpoint}: {exc}")
+            return {"response": [], "errors": {"json": str(exc)}}
+
+        if not isinstance(data, dict):
+            print(f"[API-Sports] {endpoint}: unexpected payload type {type(data)}")
+            return {"response": [], "errors": {"shape": "non-object JSON"}}
+
+        if _api_football_errors_truthy(data.get("errors")):
+            print(f"[API-Sports errors] {endpoint} params={params}: {data.get('errors')}")
+            self.rate_limiter.record_request(self.service_name)
+            return {"response": [], "errors": data.get("errors"), "results": data.get("results", 0)}
+
+        self.rate_limiter.record_request(self.service_name)
+        self.cache.set(cache_key, data, ttl_hours=4)
+        return data
+
+    def fetch_injuries(self, fixture_id: int) -> List[Dict[str, Any]]:
+        """Injuries / absences for a fixture (API-Football)."""
+        endpoint = "injuries"
+        params = {"fixture": fixture_id}
+        data = self._get_json(endpoint, params=params)
+        return data.get("response", []) if isinstance(data.get("response"), list) else []
+
     def fetch_odds(self, fixture_id: int) -> List[Dict[str, Any]]:
         endpoint = "odds"
         params = {"fixture": fixture_id}
@@ -149,17 +212,30 @@ class ApiSportsFootballClient(BaseApiClient):
         data = self._get_json(endpoint, params=params)
         return data.get("response", [{}])[0] if data.get("response") else {}
 
-    def fetch_fixtures_by_league(self, league_id: int, season: int, status: Optional[str] = None) -> List[Dict[str, Any]]:
+    def fetch_fixtures_by_league(
+        self,
+        league_id: int,
+        season: int,
+        status: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         endpoint = "fixtures"
-        params = {"league": league_id, "season": season}
+        params: Dict[str, Any] = {"league": league_id, "season": season}
         if status:
             params["status"] = status
+        if date_from:
+            params["from"] = date_from
+        if date_to:
+            params["to"] = date_to
         data = self._get_json(endpoint, params=params)
-        return data.get("response", [])
+        resp = data.get("response", [])
+        return resp if isinstance(resp, list) else []
 
     def fetch_team_last_matches(self, team_id: int, limit: int = 10) -> List[Dict[str, Any]]:
+        """Last *finished* league/cup matches for this team (scores present)."""
         endpoint = "fixtures"
-        params = {"team": team_id, "last": limit}
+        params = {"team": team_id, "last": limit, "status": "FT"}
         data = self._get_json(endpoint, params=params)
         return data.get("response", [])
 
@@ -201,7 +277,7 @@ class ApiSportsFootballClient(BaseApiClient):
                             "points": entry.get("points", 0),
                             "form": entry.get("form", ""),
                         }
-                        self.cache.set(cache_key, result)
+                        self.cache.set(cache_key, result, ttl_hours=6)
                         return result
         except Exception:
             pass
@@ -209,11 +285,13 @@ class ApiSportsFootballClient(BaseApiClient):
 
 
 class OddsApiClient(BaseApiClient):
-    # Map our league codes to The Odds API sport keys
+    # Map our league codes to The Odds API v4 sport keys (see https://the-odds-api.com/liveapi/guides/v4/)
     SPORT_KEYS = {
-        "EPL": "soccer_england_league1",
-        "CHAMPIONSHIP": "soccer_england_league2",
-        "LEAGUE_ONE": "soccer_england_efl_trophy",
+        "EPL": "soccer_epl",
+        "CHAMPIONSHIP": "soccer_england_efl_championship",
+        "LEAGUE_ONE": "soccer_england_league1",
+        "LEAGUE_TWO": "soccer_england_league2",
+        "FA_CUP": "soccer_fa_cup",
         "SCOTLAND": "soccer_scotland_premiership",
         "SCOTLAND_CHAMP": "soccer_scotland_championship",
         "UCL": "soccer_uefa_champs_league",
@@ -225,6 +303,13 @@ class OddsApiClient(BaseApiClient):
         "LIGUE_1": "soccer_france_ligue_one",
         "EREDIVISIE": "soccer_netherlands_eredivisie",
         "PRIMEIRA": "soccer_portugal_primeira_liga",
+        "BELGIUM_FIRST": "soccer_belgium_first_div",
+        "DENMARK_SL": "soccer_denmark_superliga",
+        "GREECE_SL": "soccer_greece_super_league",
+        "AUSTRIA_BL": "soccer_austria_bundesliga",
+        "WORLD_CUP": "soccer_fifa_world_cup",
+        "EUROS": "soccer_uefa_european_championship",
+        "NATIONS_LEAGUE": "soccer_uefa_nations_league",
     }
 
     def __init__(self, api_key: str) -> None:
@@ -255,7 +340,7 @@ class OddsApiClient(BaseApiClient):
             resp = _req.get(url, params=params, timeout=15)
             resp.raise_for_status()
             data = resp.json()
-            self.cache.set(cache_key, data)
+            self.cache.set(cache_key, data, ttl_hours=1)
             return data if isinstance(data, list) else []
         except Exception:
             return []

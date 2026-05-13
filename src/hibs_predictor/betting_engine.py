@@ -75,17 +75,25 @@ class TeamStrengthCalculator:
         return max(0.5, min(1.5, 1.0 + (win_rate - 0.33)))
 
     @staticmethod
-    def parse_last_10_results(matches: List[Dict[str, Any]], team_id: int) -> List[Dict[str, Any]]:
+    def parse_last_10_results(matches: List[Dict[str, Any]], team_id: Optional[int]) -> List[Dict[str, Any]]:
         """Parse last 10 matches into readable result rows for the UI."""
+        if not team_id:
+            return []
         results = []
         for match in matches[:10]:
+            status_short = (match.get("fixture", {}) or {}).get("status", {}) or {}
+            if status_short.get("short") and status_short.get("short") != "FT":
+                continue
             teams = match.get("teams", {})
-            goals = match.get("goals", {})
+            goals = match.get("goals", {}) or {}
             home_id = teams.get("home", {}).get("id")
             home_name = teams.get("home", {}).get("name", "?")
             away_name = teams.get("away", {}).get("name", "?")
-            home_goals = float(goals.get("home", 0) or 0)
-            away_goals = float(goals.get("away", 0) or 0)
+            gh, ga = goals.get("home"), goals.get("away")
+            if gh is None or ga is None:
+                continue
+            home_goals = float(gh)
+            away_goals = float(ga)
             is_home = home_id == team_id
             gf, ga = (home_goals, away_goals) if is_home else (away_goals, home_goals)
             opponent = away_name if is_home else home_name
@@ -155,8 +163,8 @@ class OddsAnalyzer:
         for outcome, model_prob in model_probabilities.items():
             if outcome not in bookmaker_odds:
                 continue
-            odds = bookmaker_odds[outcome]
-            if odds <= 1.0:
+            odds = bookmaker_odds.get(outcome)
+            if odds is None or odds <= 1.0:
                 continue
             implied_prob = OddsAnalyzer.decimal_to_probability(odds)
             edge = model_prob - implied_prob
@@ -208,6 +216,66 @@ class BettingEngine:
             return {"home": home_win / total, "draw": draw / total, "away": away_win / total}
         return {"home": 0.33, "draw": 0.34, "away": 0.33}
 
+    @staticmethod
+    def _fair_decimal_from_prob(p: float) -> float:
+        """Decimal odds with no vig from a win probability (for feature fill-in only)."""
+        p = max(0.03, min(0.97, float(p)))
+        return max(1.02, min(80.0, 1.0 / p))
+
+    def _poisson_btts_probability(self, lam_h: float, lam_a: float) -> float:
+        """Independent Poisson: both teams score at least once."""
+        lam_h = max(0.08, float(lam_h))
+        lam_a = max(0.08, float(lam_a))
+        p_home_scores = 1.0 - self._poisson_prob(lam_h, 0)
+        p_away_scores = 1.0 - self._poisson_prob(lam_a, 0)
+        return max(0.02, min(0.98, p_home_scores * p_away_scores))
+
+    def _poisson_over_goals_probability(self, lam_h: float, lam_a: float, line: float) -> float:
+        """P(total goals > line) for half-goal lines (e.g. 2.5 → sum P(T<=2) subtracted from 1)."""
+        lam_h = max(0.08, float(lam_h))
+        lam_a = max(0.08, float(lam_a))
+        max_total = int(math.floor(float(line)))
+        p_at_most = 0.0
+        cap = 12
+        for h in range(cap + 1):
+            for a in range(cap + 1):
+                if h + a <= max_total:
+                    p_at_most += self._poisson_prob(lam_h, h) * self._poisson_prob(lam_a, a)
+        p_at_most = min(1.0, p_at_most)
+        over = 1.0 - p_at_most
+        return max(0.02, min(0.98, over))
+
+    def _poisson_joint_home_win_and_btts(self, lam_h: float, lam_a: float) -> float:
+        lam_h = max(0.08, float(lam_h))
+        lam_a = max(0.08, float(lam_a))
+        s = 0.0
+        cap = 10
+        for h in range(1, cap + 1):
+            for a in range(1, cap + 1):
+                if h > a:
+                    s += self._poisson_prob(lam_h, h) * self._poisson_prob(lam_a, a)
+        return max(0.001, min(0.95, s))
+
+    def _poisson_joint_draw_and_btts(self, lam_h: float, lam_a: float) -> float:
+        lam_h = max(0.08, float(lam_h))
+        lam_a = max(0.08, float(lam_a))
+        s = 0.0
+        cap = 10
+        for g in range(1, cap + 1):
+            s += self._poisson_prob(lam_h, g) * self._poisson_prob(lam_a, g)
+        return max(0.001, min(0.95, s))
+
+    def _poisson_joint_away_win_and_btts(self, lam_h: float, lam_a: float) -> float:
+        lam_h = max(0.08, float(lam_h))
+        lam_a = max(0.08, float(lam_a))
+        s = 0.0
+        cap = 10
+        for h in range(1, cap + 1):
+            for a in range(1, cap + 1):
+                if a > h:
+                    s += self._poisson_prob(lam_h, h) * self._poisson_prob(lam_a, a)
+        return max(0.001, min(0.95, s))
+
     def build_advanced_features(self, fixture: Dict[str, Any]) -> Tuple[List[float], Dict[str, Any]]:
         home = fixture.get("home", {})
         away = fixture.get("away", {})
@@ -228,11 +296,20 @@ class BettingEngine:
         home_strength = max(0.0, min(1.0, home_attack * 0.4 + home_defence * 0.2 + home_form * 0.3 + (home_home_factor - 1.0) * 0.1))
         away_strength = max(0.0, min(1.0, away_attack * 0.4 + away_defence * 0.2 + away_form * 0.3 + (away_away_factor - 1.0) * 0.1))
         league_factor = float(fixture.get("league_factor", 1.0) or 1.0)
-        odds_home = float(fixture.get("odds_home", 2.0) or 2.0)
-        odds_draw = float(fixture.get("odds_draw", 3.2) or 3.2)
-        odds_away = float(fixture.get("odds_away", 3.0) or 3.0)
-        xg_home = float(fixture.get("xg_home", 1.5) or 1.5)
-        xg_away = float(fixture.get("xg_away", 1.2) or 1.2)
+        xg_home = float(fixture.get("xg_home", 1.2) or 1.2)
+        xg_away = float(fixture.get("xg_away", 1.1) or 1.1)
+        poisson_pre = self._poisson_match_probs(xg_home, xg_away)
+        raw_oh = fixture.get("odds_home")
+        raw_od = fixture.get("odds_draw")
+        raw_oa = fixture.get("odds_away")
+        try:
+            odds_home = float(raw_oh) if raw_oh is not None and float(raw_oh) > 1.0 else self._fair_decimal_from_prob(poisson_pre["home"])
+            odds_draw = float(raw_od) if raw_od is not None and float(raw_od) > 1.0 else self._fair_decimal_from_prob(poisson_pre["draw"])
+            odds_away = float(raw_oa) if raw_oa is not None and float(raw_oa) > 1.0 else self._fair_decimal_from_prob(poisson_pre["away"])
+        except (TypeError, ValueError):
+            odds_home = self._fair_decimal_from_prob(poisson_pre["home"])
+            odds_draw = self._fair_decimal_from_prob(poisson_pre["draw"])
+            odds_away = self._fair_decimal_from_prob(poisson_pre["away"])
         features = [
             home_strength, away_strength, home_attack, home_defence, away_attack, away_defence,
             home_form, away_form, home_home_factor, away_away_factor,
@@ -275,25 +352,94 @@ class BettingEngine:
         total = sum(ensemble_probs.values())
         if total > 0:
             ensemble_probs = {k: v / total for k, v in ensemble_probs.items()}
-        bookmaker_odds = {
-            "home": float(fixture.get("odds_home", 2.0) or 2.0),
-            "draw": float(fixture.get("odds_draw", 3.2) or 3.2),
-            "away": float(fixture.get("odds_away", 3.0) or 3.0),
+        oh_raw, od_raw, oa_raw = fixture.get("odds_home"), fixture.get("odds_draw"), fixture.get("odds_away")
+        has_book = bool(
+            fixture.get("odds_available")
+            or (
+                oh_raw is not None and od_raw is not None and oa_raw is not None
+                and float(oh_raw) > 1.0 and float(od_raw) > 1.0 and float(oa_raw) > 1.0
+            )
+        )
+        if has_book:
+            try:
+                bookmaker_odds = {
+                    "home": float(oh_raw),
+                    "draw": float(od_raw),
+                    "away": float(oa_raw),
+                }
+            except (TypeError, ValueError):
+                bookmaker_odds = {}
+                has_book = False
+        else:
+            bookmaker_odds = {}
+        poisson_btts = self._poisson_btts_probability(xg_home, xg_away)
+        hb = float(fixture.get("home_btts_rate", 0.0) or 0.0)
+        ab = float(fixture.get("away_btts_rate", 0.0) or 0.0)
+        empirical_btts = (hb + ab) / 2.0 if (hb > 0 or ab > 0) else 0.0
+        n_home = int(fixture.get("home_recent_n", 0) or 0)
+        n_away = int(fixture.get("away_recent_n", 0) or 0)
+        if n_home >= 4 and n_away >= 4:
+            btts_prob = max(0.03, min(0.97, poisson_btts * 0.42 + empirical_btts * 0.58))
+        elif n_home >= 2 or n_away >= 2:
+            w = 0.65
+            btts_prob = max(0.03, min(0.97, poisson_btts * w + empirical_btts * (1.0 - w)))
+        else:
+            btts_prob = poisson_btts
+        over15_prob = self._poisson_over_goals_probability(xg_home, xg_away, 1.5)
+        over25_prob = self._poisson_over_goals_probability(xg_home, xg_away, 2.5)
+        over35_prob = self._poisson_over_goals_probability(xg_home, xg_away, 3.5)
+        j_home_btts = self._poisson_joint_home_win_and_btts(xg_home, xg_away)
+        j_draw_btts = self._poisson_joint_draw_and_btts(xg_home, xg_away)
+        j_away_btts = self._poisson_joint_away_win_and_btts(xg_home, xg_away)
+        merged_model = {
+            **ensemble_probs,
+            "btts_yes": btts_prob,
+            "btts_no": max(0.02, min(0.98, 1.0 - btts_prob)),
+            "over25": over25_prob,
+            "under25": max(0.02, min(0.98, 1.0 - over25_prob)),
+            "home_and_btts": j_home_btts,
+            "draw_and_btts": j_draw_btts,
+            "away_and_btts": j_away_btts,
         }
-        value_bets = OddsAnalyzer.identify_value_bets(ensemble_probs, bookmaker_odds, margin=0.04)
+        merged_book: Dict[str, float] = {}
+        if bookmaker_odds:
+            for k, v in bookmaker_odds.items():
+                if v is not None and float(v) > 1.0:
+                    merged_book[str(k)] = float(v)
+        mo = fixture.get("market_odds") or {}
+        bt = mo.get("btts") or {}
+        if bt.get("yes") and float(bt["yes"]) > 1.0:
+            merged_book["btts_yes"] = float(bt["yes"])
+        if bt.get("no") and float(bt["no"]) > 1.0:
+            merged_book["btts_no"] = float(bt["no"])
+        to = mo.get("totals_2_5") or {}
+        if to.get("over") and float(to["over"]) > 1.0:
+            merged_book["over25"] = float(to["over"])
+        if to.get("under") and float(to["under"]) > 1.0:
+            merged_book["under25"] = float(to["under"])
+        value_bets = OddsAnalyzer.identify_value_bets(merged_model, merged_book, margin=0.04) if merged_book else {}
         confidence = max(ensemble_probs.values())
         predicted_outcome = max(ensemble_probs, key=ensemble_probs.get)
-        btts_prob = min(0.92, max(0.08,
-            (1 - self._poisson_prob(xg_home, 0)) * (1 - self._poisson_prob(xg_away, 0))
-        ))
-        over25_prob = min(0.95, max(0.05,
-            1 - sum(
-                self._poisson_prob(xg_home, h) * self._poisson_prob(xg_away, a)
-                for h in range(3) for a in range(3) if h + a <= 2
-            )
-        ))
         best_bet = max(value_bets, key=lambda x: value_bets[x].get("roi_percent", 0)) if value_bets else None
         best_roi = value_bets[best_bet].get("roi_percent", 0.0) if best_bet else 0.0
+        market_labels = {
+            "home": "1X2 Home",
+            "draw": "1X2 Draw",
+            "away": "1X2 Away",
+            "btts_yes": "BTTS Yes",
+            "btts_no": "BTTS No",
+            "over25": "Over 2.5",
+            "under25": "Under 2.5",
+            "home_and_btts": "Home + BTTS",
+            "draw_and_btts": "Draw + BTTS",
+            "away_and_btts": "Away + BTTS",
+        }
+        for _k, row in value_bets.items():
+            row["market_label"] = market_labels.get(_k, _k.replace("_", " ").title())
+        value_highlights = sorted(
+            [{"key": k, "roi": v.get("roi_percent", 0.0), "label": v.get("market_label", k)} for k, v in value_bets.items()],
+            key=lambda z: -z["roi"],
+        )[:6]
         return {
             "fixture": f"{metadata['home']} vs {metadata['away']}",
             "home": metadata["home"], "away": metadata["away"],
@@ -302,14 +448,26 @@ class BettingEngine:
             "predicted_outcome": predicted_outcome,
             "confidence": round(confidence, 4),
             "confidence_pct": round(confidence * 100, 1),
-            "bookmaker_odds": bookmaker_odds,
+            "bookmaker_odds": bookmaker_odds if bookmaker_odds else {"home": None, "draw": None, "away": None},
+            "odds_source_bookmaker": has_book,
             "value_bets": value_bets,
+            "value_highlights": value_highlights,
+            "has_any_value": bool(value_bets),
             "best_bet": best_bet,
             "best_bet_roi": round(best_roi, 1),
+            "score_and_btts_pct": {
+                "home_win_and_btts": round(j_home_btts * 100, 1),
+                "draw_and_btts": round(j_draw_btts * 100, 1),
+                "away_win_and_btts": round(j_away_btts * 100, 1),
+            },
+            "odds_cross_max_implied_diff_pct": float(fixture.get("odds_cross_max_implied_diff_pct") or 0.0),
             "expected_goals_home": round(xg_home, 2),
             "expected_goals_away": round(xg_away, 2),
+            "btts_probability": round(btts_prob, 4),
             "btts_probability_pct": round(btts_prob * 100, 1),
+            "over15_probability_pct": round(over15_prob * 100, 1),
             "over25_probability_pct": round(over25_prob * 100, 1),
+            "over35_probability_pct": round(over35_prob * 100, 1),
             "team_strength_home": round(metadata["home_strength"] * 100, 1),
             "team_strength_away": round(metadata["away_strength"] * 100, 1),
             "form_home": round(metadata["home_form"] * 100, 1),
