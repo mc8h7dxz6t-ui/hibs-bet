@@ -107,6 +107,25 @@ def augment_health_for_ui(health: Dict[str, Any]) -> Dict[str, Any]:
             "Heavy scrapers are off (`HIBS_ENABLE_HEAVY_SCRAPERS=0`) — use only when HTML scraping is detrimental; predictions rely more on APIs only."
         )
 
+    cd = health.get("cache_disk") or {}
+    cd_ok = not bool(cd.get("error"))
+    cd_files = int(cd.get("files") or 0)
+    cd_ttl = int(cd.get("entries_with_ttl_metadata") or 0)
+    cd_dir = str(cd.get("cache_dir") or ".cache")
+    features = features + [
+        {
+            "id": "disk_cache",
+            "label": "Disk cache (TTL JSON)",
+            "ok": cd_ok,
+            "ms": None,
+            "prediction_effect": (
+                f"{cd_dir}: {cd_files} JSON file(s), {cd_ttl} with embedded ttl_hours. "
+                "On startup, DataAggregator runs Cache.prune_stale() when HIBS_CACHE_PRUNE is not disabled — stale blobs are deleted using cached_at + ttl_hours "
+                "(legacy files without ttl_hours use a 7-day fallback)."
+            ),
+        }
+    ]
+
     out["apis"] = apis
     out["scrapers"] = scrapers
     out["features"] = features

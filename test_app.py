@@ -133,6 +133,9 @@ def test_api_health_prediction_quality():
         assert "headline" in pq and "overall" in pq
         assert "scrapers_policy" in data
         assert "features" in data and isinstance(data["features"], list)
+        assert "cache_disk" in data and isinstance(data["cache_disk"], dict)
+        assert "files" in data["cache_disk"] and "cache_dir" in data["cache_disk"]
+        assert any((f.get("id") == "disk_cache") for f in (data.get("features") or []))
         for row in data.get("apis") or []:
             assert "prediction_effect" in row
         for row in data.get("scrapers") or []:
