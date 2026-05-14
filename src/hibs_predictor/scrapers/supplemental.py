@@ -10,6 +10,9 @@ Env:
   HIBS_SKIP_ODDS_API — skip The Odds API (default on); use API-Football odds only.
   HIBS_SKIP_RAPID_STATS_XG — skip RapidAPI stats xG (default on).
 
+Source roadmap (FBref, Transfermarkt, WhoScored, SofaScore, Understat, FootyStats,
+SoccerStats, DataMB): see ``hibs_predictor.scrapers.source_registry.SOURCE_CATALOG``.
+
 Rolling window (with APIs unchanged): ``HIBS_STATS_LOOKBACK_DAYS`` (default 183), ``HIBS_STATS_FUTURE_DAYS``,
 optional ``HIBS_DATA_POLICY_AS_OF`` — see ``data_source_policy``.
 """
