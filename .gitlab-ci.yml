@@ -1,0 +1,41 @@
+# hibs-bet — minimal GitLab CI (tests on every branch; deploy is manual / TBD).
+# https://docs.gitlab.com/ee/ci/yaml/
+
+image: python:3.12-bookworm
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PYTHONPATH: "src"
+
+stages:
+  - test
+  - deploy
+
+cache:
+  paths:
+    - .cache/pip
+
+before_script:
+  - python --version
+  - pip install --upgrade pip
+  - pip install -r requirements.txt
+
+test:
+  stage: test
+  script:
+    - python test_app.py
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+
+deploy_production:
+  stage: deploy
+  needs: ["test"]
+  script:
+    - echo "Deploy stub - replace with your real deploy (Render hook, SSH, etc.)."
+    - echo 'Example later - curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL"'
+  environment:
+    name: production
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: manual
