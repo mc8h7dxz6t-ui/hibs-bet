@@ -7,6 +7,20 @@ from hibs_predictor.cache import Cache
 from hibs_predictor.rate_limiter import RateLimiter
 
 
+_API_SPORTS_MISSING_KEY_WARNED = False
+
+
+def _api_sports_errors_indicate_missing_or_invalid_key(errors: Any) -> bool:
+    text = str(errors).lower()
+    if "application key" in text:
+        return True
+    if "missing" in text and "key" in text:
+        return True
+    if "invalid" in text and "key" in text:
+        return True
+    return False
+
+
 def _api_football_errors_truthy(errors: Any) -> bool:
     if errors is None:
         return False
@@ -198,9 +212,20 @@ class ApiSportsFootballClient(BaseApiClient):
             return {"response": [], "errors": {"shape": "non-object JSON"}}
 
         if _api_football_errors_truthy(data.get("errors")):
-            print(f"[API-Sports errors] {endpoint} params={params}: {data.get('errors')}")
+            global _API_SPORTS_MISSING_KEY_WARNED
+            errs = data.get("errors")
+            if _api_sports_errors_indicate_missing_or_invalid_key(errs):
+                if not _API_SPORTS_MISSING_KEY_WARNED:
+                    _API_SPORTS_MISSING_KEY_WARNED = True
+                    print(
+                        "[API-Sports] Missing or invalid API key (header x-apisports-key). "
+                        "Set API_SPORTS_FOOTBALL_KEY, API_SPORTS_KEY, or APISPORTS_KEY in .env. "
+                        f"First error: {errs!r}"
+                    )
+            else:
+                print(f"[API-Sports errors] {endpoint} params={params}: {errs}")
             self.rate_limiter.record_request(self.service_name)
-            return {"response": [], "errors": data.get("errors"), "results": data.get("results", 0)}
+            return {"response": [], "errors": errs, "results": data.get("results", 0)}
 
         self.rate_limiter.record_request(self.service_name)
         self.cache.set(cache_key, data, ttl_hours=4)

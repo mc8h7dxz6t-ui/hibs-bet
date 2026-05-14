@@ -153,6 +153,7 @@
         <div class="fix-list" id="fix-list">
         {% for fixture in fixtures %}
         {% set p = fixture.prediction %}
+        {% set show_pred = p and not (p.prediction_unavailable | default(false)) %}
         {% set vb = p.value_bets if p else {} %}
         {% set fid = fixture.id | string %}
         {% set region = 'scotland' if 'SCOTLAND' in fixture.league else 'england' if fixture.league in ['EPL','CHAMPIONSHIP','LEAGUE_ONE','LEAGUE_TWO','FA_CUP'] else 'european' if fixture.league in ['UCL','EUROPA_LEAGUE','UECL','LA_LIGA','SERIE_A','BUNDESLIGA','LIGUE_1','EREDIVISIE','PRIMEIRA','BELGIUM_FIRST','DENMARK_SL','GREECE_SL','AUSTRIA_BL'] else 'international' %}
@@ -172,7 +173,7 @@
                 <span class="afix-away">{{ fixture.away }}</span>
             </div>
 
-            {% if p %}
+            {% if show_pred %}
             {% if p.odds_source_bookmaker and p.bookmaker_odds.home is not none %}
             <div class="odds-row">
                 <button class="odd-btn {% if vb and 'home' in vb %}vbet{% endif %}"
@@ -210,6 +211,8 @@
                 <span class="mpill">Conf <strong>{{ p.confidence_pct }}%</strong></span>
                 {% if fixture.has_value_bet %}<span class="mpill vp">⚡ +{{ p.best_bet_roi }}% ROI</span>{% endif %}
             </div>
+            {% elif p and (p.prediction_unavailable | default(false)) %}
+            <div class="odds-row" style="font-size:0.72em;color:var(--muted);padding:6px 0;">{% if p.prediction_quality_hint is defined and p.prediction_quality_hint and p.prediction_quality_hint.summary %}{{ p.prediction_quality_hint.summary }}{% else %}Prediction unavailable for this fixture.{% endif %}</div>
             {% endif %}
         </div>
         {% endfor %}

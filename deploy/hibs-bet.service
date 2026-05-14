@@ -1,0 +1,30 @@
+# Example systemd unit for hibs-bet (gunicorn).
+# Copy to /etc/systemd/system/hibs-bet.service, then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now hibs-bet
+#
+# Edit WorkingDirectory, User/Group, and ExecStart venv path to match the server.
+# Create a venv once: cd /opt/hibs-bet && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+# Put secrets in /opt/hibs-bet/.env (never commit .env); the app loads it from repo root.
+
+[Unit]
+Description=hibs-bet Flask application (gunicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/hibs-bet
+Environment=PYTHONPATH=src
+# Optional: uncomment if you prefer systemd to load env instead of python-dotenv only
+# EnvironmentFile=-/opt/hibs-bet/.env
+ExecStart=/opt/hibs-bet/.venv/bin/gunicorn \
+  --workers 2 \
+  --bind 0.0.0.0:8000 \
+  hibs_predictor.web:app
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

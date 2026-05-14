@@ -1,11 +1,14 @@
     <div class="expand-panel">
+        {% set show_pred = p and not (p.prediction_unavailable | default(false)) %}
 
-        {% if p %}
+        {% if show_pred %}
         <!-- CONFIDENCE BAR -->
         <div class="conf-bar-wrap" style="margin-bottom:12px;">
             <div class="conf-label"><span>Model Confidence</span><span>{{ p.confidence_pct }}%</span></div>
             <div class="conf-bar"><div class="conf-fill" style="width:{{ p.confidence_pct }}%"></div></div>
         </div>
+        {% elif p and (p.prediction_unavailable | default(false)) %}
+        <p class="pred-unavailable-banner" style="margin:0 0 12px;padding:10px 12px;border-radius:10px;border:1px solid rgba(248,113,113,0.35);background:rgba(127,29,29,0.2);font-size:0.8em;color:#fecaca;" title="{% if p.prediction_unavailable_reason %}{{ p.prediction_unavailable_reason }}{% endif %}">{% if p.prediction_quality_hint is defined and p.prediction_quality_hint and p.prediction_quality_hint.summary %}{{ p.prediction_quality_hint.summary }}{% else %}Prediction unavailable{% if p.prediction_unavailable_reason %}: {{ p.prediction_unavailable_reason }}{% endif %}{% endif %}</p>
         {% endif %}
 
         {% if fixture.data_quality is defined and fixture.data_quality and fixture.data_quality.score_pct is defined %}
@@ -20,7 +23,7 @@
             {% else %}
             <p style="color:#fecaca;">Below 80% input coverage — probabilities still shown; treat value edges cautiously.</p>
             {% endif %}
-            {% if p and p.value_bets_gated_by_data %}
+            {% if show_pred and p.value_bets_gated_by_data %}
             <p style="color:var(--muted);margin-top:6px;">Value alerts were suppressed for this match (data below configured minimum).</p>
             {% endif %}
             <ul style="margin:8px 0 0 16px;color:var(--muted);font-size:0.72em;">
@@ -31,7 +34,7 @@
         </div>
         {% endif %}
 
-        {% if p and p.line_odds %}
+        {% if p.line_odds %}
         <div class="section-title" style="margin-top:4px;">📗 Book side markets</div>
         <div class="market-pills" style="margin-bottom:12px;">
             {% set lo2 = p.line_odds %}
@@ -240,7 +243,7 @@
         {% if hl10 or al10 %}
         <div class="section-title" style="margin-top:14px;">📊 Market Probabilities</div>
         <div class="market-pills" style="margin-bottom:12px;">
-            {% if p %}
+            {% if show_pred %}
             <span class="mpill">BTTS <strong>{{ p.btts_probability_pct }}%</strong></span>
             <span class="mpill">O1.5 <strong>{{ p.over15_probability_pct }}%</strong></span>
             <span class="mpill">O2.5 <strong>{{ p.over25_probability_pct }}%</strong></span>
@@ -267,7 +270,7 @@
         </table>
         {% endif %}
 
-        {% if p.value_highlights is defined and p.value_highlights %}
+        {% if show_pred and p.value_highlights is defined and p.value_highlights %}
         <div class="section-title" style="margin-top:10px;">✨ Value by market</div>
         <div class="value-highlight-strip">
             {% for h in p.value_highlights %}
@@ -277,7 +280,7 @@
         {% endif %}
 
         <!-- ALL VALUE BETS (display list keeps ROI sort when present) -->
-        {% if p.value_bets_display is defined and p.value_bets_display %}
+        {% if show_pred and p.value_bets_display is defined and p.value_bets_display %}
         <div class="section-title">⚡ All Value Bets</div>
         {% for bdata in p.value_bets_display %}
         <div style="background:rgba(255,215,0,0.04);border:1px solid rgba(255,215,0,0.14);border-radius:8px;padding:10px;margin-bottom:8px;">
@@ -314,7 +317,7 @@
         {% endif %}
 
         <!-- TEAM STRENGTH -->
-        {% if p %}
+        {% if show_pred %}
         <div class="section-title" style="margin-top:14px;">🧠 Model Analysis</div>
         <table class="data-table" style="margin-bottom:6px;">
             <tr><th></th><th>{{ fixture.home }}</th><th>{{ fixture.away }}</th></tr>

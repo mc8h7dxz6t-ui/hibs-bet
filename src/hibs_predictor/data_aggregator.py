@@ -58,6 +58,27 @@ def _env_first_usable(*names: str) -> str:
     return ""
 
 
+def _env_flag_truthy(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _effective_skip_odds_api(clients: Dict[str, Any]) -> bool:
+    """Use The Odds API when the client is configured unless HIBS_SKIP_ODDS_API opts out."""
+    if "odds_api" not in clients:
+        return True
+    return _env_flag_truthy("HIBS_SKIP_ODDS_API")
+
+
+def _effective_skip_rapid_stats_xg(clients: Dict[str, Any]) -> bool:
+    """Default skips RapidAPI stats xG; HIBS_MAX_DATA=1 + stats_api client enables it without editing HIBS_SKIP_RAPID_STATS_XG."""
+    raw = os.getenv("HIBS_SKIP_RAPID_STATS_XG", "1").strip().lower()
+    if raw not in ("1", "true", "yes"):
+        return False
+    if _env_flag_truthy("HIBS_MAX_DATA") and "stats_api" in clients:
+        return False
+    return True
+
+
 def _extract_goals_totals_from_api_stats(team_stats: Dict[str, Any]) -> Tuple[int, int]:
     """Normalize API-Football teams/statistics goals shape to (goals_for, goals_against)."""
     goals = team_stats.get("goals") or {}
@@ -150,6 +171,31 @@ def _implied_prob(odds: float) -> float:
     if odds is None or odds <= 1.0:
         return 0.0
     return 1.0 / float(odds)
+
+
+def _empty_rates() -> Dict[str, float]:
+    return {
+        "btts_rate": 0.0,
+        "over15_rate": 0.0,
+        "over25_rate": 0.0,
+        "avg_gf": 0.0,
+        "avg_ga": 0.0,
+        "n": 0.0,
+    }
+
+
+def _empty_odds_bundle() -> Dict[str, Any]:
+    return {
+        "odds_home": None,
+        "odds_draw": None,
+        "odds_away": None,
+        "odds_available": False,
+        "all_bookmaker_odds": [],
+        "odds_secondary": {"home": None, "draw": None, "away": None},
+        "odds_cross_max_implied_diff_pct": 0.0,
+        "odds_primary_source": "partial",
+        "market_odds": {},
+    }
 
 
 def _max_implied_delta_pct(
@@ -304,9 +350,9 @@ class DataAggregator:
         ak = (fixture.get("teams", {}) or {}).get("away", {}).get("name") or (fixture.get("away", {}) or {}).get("name", "?")
         dt = str(fixture.get("date", ""))
         if fixture_id_str:
-            cache_key = f"enriched_fixture_{fixture_id_str}_{league_code}_dq2"
+            cache_key = f"enriched_fixture_{fixture_id_str}_{league_code}_dq3"
         else:
-            cache_key = f"enriched_fixture_teams_{league_code}_{hk}|{ak}|{dt}_dq2"
+            cache_key = f"enriched_fixture_teams_{league_code}_{hk}|{ak}|{dt}_dq3"
 
         try:
             fixture_id_for_xg = int(raw_fid) if raw_fid not in (None, "", "0", 0) else None
@@ -318,11 +364,25 @@ class DataAggregator:
             return cached
 
         enriched = dict(fixture)
-        enriched["home_recent"] = self._fetch_team_recent_matches(home_id)
-        enriched["away_recent"] = self._fetch_team_recent_matches(away_id)
 
-        home_rates = _recent_match_rates(enriched["home_recent"], home_id or 0)
-        away_rates = _recent_match_rates(enriched["away_recent"], away_id or 0)
+        try:
+            enriched["home_recent"] = self._fetch_team_recent_matches(home_id)
+        except Exception as exc:
+            print(f"[enrich home_recent] {league_code} fid={fixture_id_str}: {exc!r}")
+            enriched["home_recent"] = []
+        try:
+            enriched["away_recent"] = self._fetch_team_recent_matches(away_id)
+        except Exception as exc:
+            print(f"[enrich away_recent] {league_code} fid={fixture_id_str}: {exc!r}")
+            enriched["away_recent"] = []
+
+        try:
+            home_rates = _recent_match_rates(enriched["home_recent"], home_id or 0)
+            away_rates = _recent_match_rates(enriched["away_recent"], away_id or 0)
+        except Exception as exc:
+            print(f"[enrich match_rates] {league_code} fid={fixture_id_str}: {exc!r}")
+            home_rates = _empty_rates()
+            away_rates = _empty_rates()
         enriched["home_btts_rate"] = home_rates["btts_rate"]
         enriched["away_btts_rate"] = away_rates["btts_rate"]
         enriched["home_recent_n"] = int(home_rates["n"])
@@ -332,51 +392,98 @@ class DataAggregator:
         enriched["home_over15_rate"] = home_rates["over15_rate"]
         enriched["away_over15_rate"] = away_rates["over15_rate"]
 
-        enriched["home_stats"] = self._fetch_team_stats(home_id, league_code, league_api_id, season, home_rates)
-        enriched["away_stats"] = self._fetch_team_stats(away_id, league_code, league_api_id, season, away_rates)
+        try:
+            enriched["home_stats"] = self._fetch_team_stats(home_id, league_code, league_api_id, season, home_rates)
+        except Exception as exc:
+            print(f"[enrich home_stats] {league_code} fid={fixture_id_str}: {exc!r}")
+            enriched["home_stats"] = {}
+        try:
+            enriched["away_stats"] = self._fetch_team_stats(away_id, league_code, league_api_id, season, away_rates)
+        except Exception as exc:
+            print(f"[enrich away_stats] {league_code} fid={fixture_id_str}: {exc!r}")
+            enriched["away_stats"] = {}
 
-        enriched["home_form"] = TeamStrengthCalculator.calculate_form_strength(enriched["home_recent"])
-        enriched["away_form"] = TeamStrengthCalculator.calculate_form_strength(enriched["away_recent"])
+        try:
+            enriched["home_form"] = TeamStrengthCalculator.calculate_form_strength(enriched["home_recent"])
+        except Exception as exc:
+            print(f"[enrich home_form] {league_code} fid={fixture_id_str}: {exc!r}")
+            enriched["home_form"] = 0.5
+        try:
+            enriched["away_form"] = TeamStrengthCalculator.calculate_form_strength(enriched["away_recent"])
+        except Exception as exc:
+            print(f"[enrich away_form] {league_code} fid={fixture_id_str}: {exc!r}")
+            enriched["away_form"] = 0.5
 
-        enriched["home_home_factor"] = TeamStrengthCalculator.calculate_home_away_factor(
-            home_id, enriched["home_recent"], is_home=True
-        )
-        enriched["away_away_factor"] = TeamStrengthCalculator.calculate_home_away_factor(
-            away_id, enriched["away_recent"], is_home=False
-        )
+        try:
+            enriched["home_home_factor"] = TeamStrengthCalculator.calculate_home_away_factor(
+                home_id, enriched["home_recent"], is_home=True
+            )
+        except Exception as exc:
+            print(f"[enrich home_home_factor] {league_code} fid={fixture_id_str}: {exc!r}")
+            enriched["home_home_factor"] = 1.0
+        try:
+            enriched["away_away_factor"] = TeamStrengthCalculator.calculate_home_away_factor(
+                away_id, enriched["away_recent"], is_home=False
+            )
+        except Exception as exc:
+            print(f"[enrich away_away_factor] {league_code} fid={fixture_id_str}: {exc!r}")
+            enriched["away_away_factor"] = 1.0
 
         home_nm = fixture.get("home", {}).get("name") or fixture.get("teams", {}).get("home", {}).get("name", "")
         away_nm = fixture.get("away", {}).get("name") or fixture.get("teams", {}).get("away", {}).get("name", "")
         prefer_wiki = os.getenv("HIBS_PREFER_SCRAPED_STANDINGS", "1").lower() in ("1", "true", "yes")
         wiki_rows: List[Dict[str, Any]] = []
         if prefer_wiki and league_code in wiki_standings.WP_SUFFIX:
-            wiki_rows = self._cached_wikipedia_league_table(league_code)
+            try:
+                wiki_rows = self._cached_wikipedia_league_table(league_code)
+            except Exception as exc:
+                print(f"[enrich wiki_standings] {league_code}: {exc!r}")
+                wiki_rows = []
 
         hp: Dict[str, Any] = {}
         ap: Dict[str, Any] = {}
         if wiki_rows:
-            wr = wiki_standings.find_team_row(wiki_rows, home_nm)
-            arw = wiki_standings.find_team_row(wiki_rows, away_nm)
-            if wr:
-                hp = wiki_standings.row_to_position_shape(wr)
-            if arw:
-                ap = wiki_standings.row_to_position_shape(arw)
+            try:
+                wr = wiki_standings.find_team_row(wiki_rows, home_nm)
+                arw = wiki_standings.find_team_row(wiki_rows, away_nm)
+                if wr:
+                    hp = wiki_standings.row_to_position_shape(wr)
+                if arw:
+                    ap = wiki_standings.row_to_position_shape(arw)
+            except Exception as exc:
+                print(f"[enrich wiki_positions] {league_code} fid={fixture_id_str}: {exc!r}")
 
         if league_api_id and "api_sports" in self.clients:
             skip_api_tbl = os.getenv("HIBS_SKIP_API_STANDINGS", "0").lower() in ("1", "true", "yes")
             if not skip_api_tbl:
-                if not hp.get("position"):
-                    hp = self._fetch_team_position(home_id, league_api_id, season) or hp
-                if not ap.get("position"):
-                    ap = self._fetch_team_position(away_id, league_api_id, season) or ap
+                try:
+                    if not hp.get("position"):
+                        hp = self._fetch_team_position(home_id, league_api_id, season) or hp
+                except Exception as exc:
+                    print(f"[enrich home_position] {league_code} fid={fixture_id_str}: {exc!r}")
+                try:
+                    if not ap.get("position"):
+                        ap = self._fetch_team_position(away_id, league_api_id, season) or ap
+                except Exception as exc:
+                    print(f"[enrich away_position] {league_code} fid={fixture_id_str}: {exc!r}")
 
         enriched["home_position"] = hp
         enriched["away_position"] = ap
 
-        enriched["xg_home"], enriched["xg_away"], enriched["xg_source"] = self._fetch_expected_goals(
-            fixture_id_for_xg, home_rates, away_rates, league.get("strength_factor", 1.0)
-        )
-        bundle = self._fetch_odds_bundle(fixture, league_code)
+        try:
+            enriched["xg_home"], enriched["xg_away"], enriched["xg_source"] = self._fetch_expected_goals(
+                fixture_id_for_xg, home_rates, away_rates, league.get("strength_factor", 1.0)
+            )
+        except Exception as exc:
+            print(f"[enrich xg] {league_code} fid={fixture_id_str}: {exc!r}")
+            lam_h, lam_a = self._lambda_from_rates(home_rates, away_rates, league.get("strength_factor", 1.0))
+            enriched["xg_home"], enriched["xg_away"], enriched["xg_source"] = float(lam_h), float(lam_a), "goals_proxy"
+
+        try:
+            bundle = self._fetch_odds_bundle(fixture, league_code)
+        except Exception as exc:
+            print(f"[enrich odds_bundle] {league_code} fid={fixture_id_str}: {exc!r}")
+            bundle = _empty_odds_bundle()
         enriched["odds_home"] = bundle["odds_home"]
         enriched["odds_draw"] = bundle["odds_draw"]
         enriched["odds_away"] = bundle["odds_away"]
@@ -402,8 +509,16 @@ class DataAggregator:
                 enriched["fixture_injuries"] = []
         else:
             enriched["fixture_injuries"] = []
-        enriched["supplemental"] = collect_supplemental(fixture, league_code, enriched)
-        enriched["data_quality"] = compute_fixture_data_quality(enriched)
+        try:
+            enriched["supplemental"] = collect_supplemental(fixture, league_code, enriched)
+        except Exception as exc:
+            print(f"[enrich supplemental] {league_code} fid={fixture_id_str}: {exc!r}")
+            enriched["supplemental"] = {}
+        try:
+            enriched["data_quality"] = compute_fixture_data_quality(enriched)
+        except Exception as exc:
+            print(f"[enrich data_quality] {league_code} fid={fixture_id_str}: {exc!r}")
+            enriched["data_quality"] = {"score_pct": 0.0, "blocks": [], "full_scope": False, "strong_scope": False}
 
         self.cache.set(cache_key, enriched, ttl_hours=2)
         return enriched
@@ -555,11 +670,7 @@ class DataAggregator:
         from_stats_api = False
         filled_via_api_fixture = False
 
-        if "stats_api" in self.clients and os.getenv("HIBS_SKIP_RAPID_STATS_XG", "1").lower() not in (
-            "1",
-            "true",
-            "yes",
-        ):
+        if "stats_api" in self.clients and not _effective_skip_rapid_stats_xg(self.clients):
             try:
                 xg_data = self.clients["stats_api"].fetch_xg_data(fixture_id)
                 resp = xg_data.get("response") if isinstance(xg_data, dict) else None
@@ -657,10 +768,7 @@ class DataAggregator:
         all_bookmakers: List = []
         api_odds_raw: List[Dict[str, Any]] = []
 
-        if (
-            "odds_api" in self.clients
-            and os.getenv("HIBS_SKIP_ODDS_API", "1").lower() not in ("1", "true", "yes")
-        ):
+        if "odds_api" in self.clients and not _effective_skip_odds_api(self.clients):
             try:
                 events = self.clients["odds_api"].fetch_odds_for_league(league_code)
                 for event in events or []:

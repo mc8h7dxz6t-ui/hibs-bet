@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 import requests
 from dotenv import load_dotenv
 
+from hibs_predictor.data_aggregator import _env_first_usable
 from hibs_predictor.scrapers.statsbomb_open import OPEN_BASE
 
 
@@ -59,8 +60,8 @@ def gather_health() -> Dict[str, Any]:
     apis: List[Dict[str, Any]] = []
     scrapers: List[Dict[str, Any]] = []
 
-    # --- API-Football (timezone is small + requires key) ---
-    key = os.getenv("API_SPORTS_FOOTBALL_KEY", "")
+    # --- API-Football (timezone is small + requires key; same env resolution as DataAggregator) ---
+    key = _env_first_usable("API_SPORTS_FOOTBALL_KEY", "API_SPORTS_KEY", "APISPORTS_KEY")
     t0 = time.perf_counter()
     if key:
         try:
@@ -97,12 +98,12 @@ def gather_health() -> Dict[str, Any]:
                 "label": "API-Football",
                 "ms": None,
                 "ok": False,
-                "error": "API_SPORTS_FOOTBALL_KEY not set",
+                "error": "API_SPORTS_FOOTBALL_KEY / API_SPORTS_KEY / APISPORTS_KEY not set",
             }
         )
 
-    # --- Football-Data.org ---
-    fdo = os.getenv("FOOTBALL_DATA_ORG_KEY", "")
+    # --- Football-Data.org (same aliases as DataAggregator) ---
+    fdo = _env_first_usable("FOOTBALL_DATA_ORG_KEY", "FOOTBALL_DATA_KEY")
     t0 = time.perf_counter()
     if fdo:
         try:

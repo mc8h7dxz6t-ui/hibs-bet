@@ -1,4 +1,22 @@
-# hibs-bet — minimal GitLab CI (tests on every branch; deploy is manual / TBD).
+# hibs-bet — GitLab CI: tests on every branch; production deploy is manual on default branch.
+#
+# --- GitLab CI/CD variables (Settings → CI/CD → Variables) ---
+#   SSH_PRIVATE_KEY   File or variable: private key for DEPLOY_USER (PEM, include BEGIN/END lines).
+#   DEPLOY_HOST       VPS hostname or IP (e.g. 203.0.113.10 or vps.example.com).
+#   DEPLOY_USER       SSH user (must have pull rights to this repo and passwordless sudo for systemctl).
+#   DEPLOY_PATH       Absolute path to the git clone on the server (repo root; contains src/, requirements.txt).
+#
+# Optional:
+#   SSH_KNOWN_HOSTS   If set, written to ~/.ssh/known_hosts (recommended). Generate: ssh-keyscan -H your.host
+#
+# Server setup (once):
+#   - Clone this repo to DEPLOY_PATH; ensure branch tracks origin default branch.
+#   - python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+#   - Copy deploy/hibs-bet.service → /etc/systemd/system/hibs-bet.service (edit paths/user), daemon-reload, enable.
+#   - Create DEPLOY_PATH/.env with API keys etc. Never commit .env (already in .gitignore).
+#   - DEPLOY_USER must be able to `git pull` in DEPLOY_PATH (deploy key or HTTPS credential on server).
+#   - Passwordless sudo for: systemctl restart hibs-bet.service (or run the pip/git parts as a user without systemd and adjust).
+#
 # https://docs.gitlab.com/ee/ci/yaml/
 
 image: python:3.12-bookworm
@@ -31,9 +49,21 @@ test:
 deploy_production:
   stage: deploy
   needs: ["test"]
+  image: python:3.12-bookworm
+  before_script:
+    - apt-get update -qq && apt-get install -qqy openssh-client
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - |
+      if [ -n "${SSH_KNOWN_HOSTS:-}" ]; then
+        echo "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      else
+        ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+      fi
+    - chmod 644 ~/.ssh/known_hosts
+    - eval "$(ssh-agent -s)"
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
   script:
-    - echo "Deploy stub - replace with your real deploy (Render hook, SSH, etc.)."
-    - echo 'Example later - curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL"'
+    - ssh -o StrictHostKeyChecking=yes -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" "export DEPLOY_PATH=\"${DEPLOY_PATH}\"; bash -s" < scripts/deploy_remote.sh
   environment:
     name: production
   rules:

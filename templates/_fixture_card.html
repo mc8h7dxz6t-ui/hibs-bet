@@ -1,4 +1,5 @@
 {% set p = fixture.prediction %}
+{% set show_pred = p and not (p.prediction_unavailable | default(false)) %}
 {% set vb = p.value_bets if p else {} %}
 {% set best = p.best_bet if p else none %}
 {% set hp = fixture.home_position %}
@@ -10,7 +11,7 @@
      data-league="{{ fixture.league }}"
      data-has-value="{% if fixture.has_value_bet %}1{% else %}0{% endif %}">
 <summary class="fixture-summary">
-    {% if fixture.has_value_bet %}<div class="value-badge">⚡ VALUE{% if p and p.value_highlights|length > 1 %} · {{ p.value_highlights|length }} mkts{% endif %}</div>{% endif %}
+    {% if fixture.has_value_bet %}<div class="value-badge">⚡ VALUE{% if show_pred and p.value_highlights|length > 1 %} · {{ p.value_highlights|length }} mkts{% endif %}</div>{% endif %}
 
     <!-- TOP ROW -->
     <div class="card-top">
@@ -29,7 +30,7 @@
         </div>
 
         <div class="score-col">
-            {% if p %}
+            {% if show_pred %}
             <div class="odds-trio">
                 <div class="odd-box {% if p.predicted_outcome=='home' %}best{% endif %}">
                     <div class="odd-lbl">1</div>
@@ -47,6 +48,10 @@
                     <div class="odd-pct">{{ p.probabilities_pct.away }}%</div>
                 </div>
             </div>
+            {% elif p and (p.prediction_unavailable | default(false)) %}
+            {% set lo = p.line_odds if p and p.line_odds is defined else {} %}
+            {% set bo = p.bookmaker_odds %}
+            <div style="font-size:0.72em;color:var(--muted);text-align:center;">{% if bo is defined and bo.home is not none and bo.draw is not none and bo.away is not none %}No model · 1X2 from books{% elif lo and (lo.btts_yes or lo.over25) %}No model · side odds{% elif p.prediction_quality_hint is defined and p.prediction_quality_hint and p.prediction_quality_hint.summary %}{{ p.prediction_quality_hint.summary }}{% else %}Prediction unavailable{% endif %}</div>
             {% endif %}
         </div>
 
@@ -59,7 +64,7 @@
         </div>
     </div>
 
-    {% if p %}
+    {% if show_pred %}
     <!-- MARKET PILLS -->
     <div class="market-pills">
         <span class="mpill">BTTS <strong>{{ p.btts_probability_pct }}%</strong></span>

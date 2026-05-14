@@ -1,4 +1,5 @@
 {% set p = fixture.prediction %}
+{% set show_pred = p and not (p.prediction_unavailable | default(false)) %}
 {% set vb = p.value_bets if p else {} %}
 {% set best = p.best_bet if p else none %}
 {% set hp = fixture.home_position %}
@@ -15,7 +16,7 @@
     <span class="fr-ko">{% if fixture.date and 'T' in fixture.date %}{{ fixture.date[11:16] }}{% else %}—{% endif %}</span>
     <div class="fr-match">
         <div class="fr-teams">{{ fixture.home }} <span class="fr-vs">v</span> {{ fixture.away }}</div>
-        {% if p %}
+        {% if show_pred %}
         {% if p.predicted_outcome == 'home' %}
         <div class="fr-pred fr-pred-home">Home Win {{ p.probabilities_pct.home }}%</div>
         {% elif p.predicted_outcome == 'draw' %}
@@ -23,6 +24,9 @@
         {% else %}
         <div class="fr-pred fr-pred-away">Away Win {{ p.probabilities_pct.away }}%</div>
         {% endif %}
+        {% elif p and (p.prediction_unavailable | default(false)) %}
+        {% set bo = p.bookmaker_odds %}
+        <div class="fr-pred" style="color:var(--muted);font-size:0.72em;">{% if bo is defined and bo.home is not none and bo.draw is not none and bo.away is not none %}No model · 1X2 from books{% elif lo and (lo.btts_yes or lo.over25 or lo.over15) %}No model · side odds{% elif p.prediction_quality_hint is defined and p.prediction_quality_hint and p.prediction_quality_hint.summary %}{{ p.prediction_quality_hint.summary }}{% else %}Prediction unavailable{% endif %}</div>
         {% endif %}
         {% if fixture.data_quality is defined and fixture.data_quality and fixture.data_quality.score_pct is defined %}
         {% set dq = fixture.data_quality.score_pct %}

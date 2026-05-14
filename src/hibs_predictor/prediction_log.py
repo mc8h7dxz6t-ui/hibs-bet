@@ -132,6 +132,8 @@ def maybe_log_prediction_snapshot(fixture: Dict[str, Any], prediction: Dict[str,
     """Append a snapshot row if logging is enabled and interval / dedupe rules pass."""
     if not _enabled():
         return
+    if prediction.get("prediction_unavailable"):
+        return
     fid = _fixture_id(fixture)
     if not fid:
         return

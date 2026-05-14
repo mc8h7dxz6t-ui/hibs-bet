@@ -12,6 +12,137 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
 
 
+def _allow_dummy_numeric() -> bool:
+    return (os.getenv("HIBS_ALLOW_DUMMY") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _fixture_team_display_name(fixture: Dict[str, Any], side: str) -> str:
+    blk = fixture.get(side)
+    if isinstance(blk, dict):
+        return str(blk.get("name") or "?")
+    return str(blk or "?")
+
+
+def _line_odds_from_fixture_markets(fixture: Dict[str, Any]) -> Dict[str, Any]:
+    """Same keys as full predictions; only include sides present on the fixture (book prices, no model)."""
+    mo = fixture.get("market_odds") or {}
+    line_odds: Dict[str, Any] = {}
+
+    def _take(key: str, raw: Any) -> None:
+        if raw is None:
+            return
+        try:
+            fv = float(raw)
+        except (TypeError, ValueError):
+            return
+        if fv > 1.0:
+            line_odds[key] = round(fv, 2)
+
+    bt = mo.get("btts") or {}
+    _take("btts_yes", bt.get("yes"))
+    _take("btts_no", bt.get("no"))
+    t15 = mo.get("totals_1_5") or {}
+    _take("over15", t15.get("over"))
+    _take("under15", t15.get("under"))
+    t25 = mo.get("totals_2_5") or {}
+    _take("over25", t25.get("over"))
+    _take("under25", t25.get("under"))
+    t35 = mo.get("totals_3_5") or {}
+    _take("over35", t35.get("over"))
+    _take("under35", t35.get("under"))
+    return line_odds
+
+
+def _prediction_unavailable_pq_summary(reason: str, has_book_triplet: bool, has_side_lines: bool) -> str:
+    if reason == "model_error":
+        return "Model step failed; prices shown (if any) are from book feeds only, not the model."
+    if reason == "fixture_enrichment_failed":
+        if has_book_triplet and has_side_lines:
+            return "Enrichment incomplete; 1X2 and side prices from book feeds only."
+        if has_book_triplet:
+            return "Enrichment incomplete; 1X2 prices from book feeds only."
+        if has_side_lines:
+            return "Enrichment incomplete; side-market prices from book feeds only."
+        return "Enrichment failed; prices shown (if any) are from book feeds only, not the model."
+    return "Prediction unavailable; prices shown (if any) are from book feeds only, not the model."
+
+
+def prediction_unavailable_payload(fixture: Dict[str, Any], reason: str) -> Dict[str, Any]:
+    """Explicit no-prediction shape for the dashboard (no fabricated probabilities or xG)."""
+    home = _fixture_team_display_name(fixture, "home")
+    away = _fixture_team_display_name(fixture, "away")
+    dq_bundle = fixture.get("data_quality") or {}
+    oh_raw, od_raw, oa_raw = fixture.get("odds_home"), fixture.get("odds_draw"), fixture.get("odds_away")
+    try:
+        book_h = float(oh_raw) if oh_raw is not None and float(oh_raw) > 1.0 else None
+        book_d = float(od_raw) if od_raw is not None and float(od_raw) > 1.0 else None
+        book_a = float(oa_raw) if oa_raw is not None and float(oa_raw) > 1.0 else None
+    except (TypeError, ValueError):
+        book_h = book_d = book_a = None
+    bookmaker_odds = {"home": book_h, "draw": book_d, "away": book_a}
+    has_book_triplet = book_h is not None and book_d is not None and book_a is not None
+    line_odds = _line_odds_from_fixture_markets(fixture)
+    has_side_lines = bool(line_odds)
+    pq_summary = _prediction_unavailable_pq_summary(reason, has_book_triplet, has_side_lines)
+    try:
+        cross_implied = float(fixture.get("odds_cross_max_implied_diff_pct") or 0.0)
+    except (TypeError, ValueError):
+        cross_implied = 0.0
+    return {
+        "prediction_unavailable": True,
+        "prediction_unavailable_reason": reason,
+        "fixture": f"{home} vs {away}",
+        "home": home,
+        "away": away,
+        "probabilities": None,
+        "probabilities_pct": None,
+        "predicted_outcome": None,
+        "confidence": None,
+        "confidence_pct": None,
+        "bookmaker_odds": bookmaker_odds,
+        "odds_source_bookmaker": has_book_triplet,
+        "value_bets": {},
+        "value_bets_display": [],
+        "value_highlights": [],
+        "line_odds": line_odds,
+        "has_any_value": False,
+        "best_bet": None,
+        "best_bet_roi": None,
+        "data_quality": dq_bundle if dq_bundle else None,
+        "xg_source": fixture.get("xg_source"),
+        "value_bets_gated_by_data": False,
+        "value_edge_margin_used": None,
+        "score_and_btts_pct": None,
+        "odds_cross_max_implied_diff_pct": cross_implied,
+        "expected_goals_home": None,
+        "expected_goals_away": None,
+        "btts_probability": None,
+        "btts_probability_pct": None,
+        "over15_probability_pct": None,
+        "over25_probability_pct": None,
+        "over35_probability_pct": None,
+        "team_strength_home": None,
+        "team_strength_away": None,
+        "form_home": None,
+        "form_away": None,
+        "poisson_probs": None,
+        "one_x2_mode": "unavailable",
+        "supplemental_xg_prior": None,
+        "prediction_quality_hint": {
+            "data_score_pct": (dq_bundle or {}).get("score_pct"),
+            "full_scope": (dq_bundle or {}).get("full_scope"),
+            "supplemental_errors": [],
+            "heavy_scrape": "not_run",
+            "summary": pq_summary,
+        },
+        "lambda_side_home": None,
+        "lambda_side_away": None,
+        "lambda_calibration": {},
+        "blend_weights_1x2": None,
+        "poisson_probs_calibrated_pct": None,
+    }
+
+
 class TeamStrengthCalculator:
 
     @staticmethod
@@ -235,6 +366,8 @@ class BettingEngine:
         """Pull 1X2 model mass slightly toward de-vig implied odds (fewer spurious value flags)."""
         if strength <= 0 or not book:
             return probs
+        if not all(k in probs for k in ("home", "draw", "away")):
+            return probs
         impl: Dict[str, float] = {}
         for k in ("home", "draw", "away"):
             o = book.get(k)
@@ -247,7 +380,7 @@ class BettingEngine:
         impl = {k: impl[k] / s for k in impl}
         out: Dict[str, float] = {}
         for k in ("home", "draw", "away"):
-            e = float(probs.get(k, 1.0 / 3.0))
+            e = float(probs[k])
             out[k] = e * (1.0 - strength) + impl[k] * strength
         t = sum(out.values())
         if t <= 0:
@@ -282,7 +415,7 @@ class BettingEngine:
         total = home_win + draw + away_win
         if total > 0:
             return {"home": home_win / total, "draw": draw / total, "away": away_win / total}
-        return {"home": 0.33, "draw": 0.34, "away": 0.33}
+        return {"home": 1.0 / 3.0, "draw": 1.0 / 3.0, "away": 1.0 / 3.0}
 
     @staticmethod
     def _fair_decimal_from_prob(p: float) -> float:
@@ -322,7 +455,7 @@ class BettingEngine:
         w_ml: float,
         w_raw: float,
         w_cal: float,
-    ) -> Dict[str, float]:
+    ) -> Optional[Dict[str, float]]:
         out: Dict[str, float] = {}
         for k in ("home", "draw", "away"):
             out[k] = (
@@ -331,9 +464,15 @@ class BettingEngine:
                 + float(p_cal.get(k, 0.0)) * w_cal
             )
         t = sum(out.values())
-        if t <= 0:
+        if t > 0:
+            return {k: max(1e-9, v / t) for k, v in out.items()}
+        if _allow_dummy_numeric():
             return {"home": 1.0 / 3.0, "draw": 1.0 / 3.0, "away": 1.0 / 3.0}
-        return {k: max(1e-9, v / t) for k, v in out.items()}
+        for src in (p_raw, p_cal, p_ml):
+            s = sum(float(src.get(k, 0.0)) for k in ("home", "draw", "away"))
+            if s > 0:
+                return {k: max(1e-9, float(src.get(k, 0.0)) / s) for k in ("home", "draw", "away")}
+        return None
 
     def _poisson_btts_probability(self, lam_h: float, lam_a: float) -> float:
         """Independent Poisson: both teams score at least once."""
@@ -446,18 +585,12 @@ class BettingEngine:
         return features, metadata
 
     def predict_with_confidence(self, fixture: Dict[str, Any]) -> Dict[str, Any]:
+        if fixture.get("_hibs_prediction_blocked"):
+            return prediction_unavailable_payload(
+                fixture,
+                str(fixture.get("_hibs_prediction_block_reason") or "fixture_enrichment_failed"),
+            )
         features, metadata = self.build_advanced_features(fixture)
-        X = np.array([features])
-        try:
-            rf_probs = self.rf_model.predict_proba(X)[0]
-            gb_probs = self.gb_model.predict_proba(X)[0]
-            ml_probs = {
-                "home": float(rf_probs[0] * 0.6 + gb_probs[0] * 0.4),
-                "draw": float(rf_probs[1] * 0.6 + gb_probs[1] * 0.4),
-                "away": float(rf_probs[2] * 0.6 + gb_probs[2] * 0.4),
-            }
-        except Exception:
-            ml_probs = {"home": 0.33, "draw": 0.34, "away": 0.33}
         xg_home = float(metadata["xg_home"])
         xg_away = float(metadata["xg_away"])
         sup_xg_dbg: Optional[Dict[str, Any]] = None
@@ -481,6 +614,20 @@ class BettingEngine:
                     metadata["xg_away"] = xg_away
                     sup_xg_dbg = {"blend_weight": w, "understat_xg_home": uh, "understat_xg_away": ua}
         poisson_probs_raw = self._poisson_match_probs(xg_home, xg_away)
+        X = np.array([features])
+        try:
+            rf_probs = self.rf_model.predict_proba(X)[0]
+            gb_probs = self.gb_model.predict_proba(X)[0]
+            ml_probs = {
+                "home": float(rf_probs[0] * 0.6 + gb_probs[0] * 0.4),
+                "draw": float(rf_probs[1] * 0.6 + gb_probs[1] * 0.4),
+                "away": float(rf_probs[2] * 0.6 + gb_probs[2] * 0.4),
+            }
+        except Exception:
+            if _allow_dummy_numeric():
+                ml_probs = {"home": 0.33, "draw": 0.34, "away": 0.33}
+            else:
+                ml_probs = dict(poisson_probs_raw)
         mode = self._read_1x2_mode()
         league_code = str(fixture.get("league") or "")
 
@@ -504,7 +651,8 @@ class BettingEngine:
         elif mode == "blend_all" and poisson_probs_cal is not None:
             w_ml, w_raw, w_cal = self._read_blend_weights()
             blend_w = {"ml": round(w_ml, 3), "poisson_raw": round(w_raw, 3), "poisson_calibrated": round(w_cal, 3)}
-            ensemble_probs = self._merge_three_1x2(ml_probs, poisson_probs_raw, poisson_probs_cal, w_ml, w_raw, w_cal)
+            merged = self._merge_three_1x2(ml_probs, poisson_probs_raw, poisson_probs_cal, w_ml, w_raw, w_cal)
+            ensemble_probs = dict(merged) if merged is not None else dict(poisson_probs_raw)
         else:
             poisson_w = 0.78 if not self.is_trained else 0.6
             ml_w = 1.0 - poisson_w

@@ -175,13 +175,20 @@ def fetch_remote_fixtures() -> List[Dict[str, Any]]:
 def run_train(use_sample: bool = False) -> None:
     _load_env_from_project()
     if use_sample:
+        allow = (os.getenv("HIBS_ALLOW_DUMMY") or "").strip().lower() in ("1", "true", "yes", "on")
+        if not allow:
+            print(
+                "Refusing --use-sample without HIBS_ALLOW_DUMMY=1 (sample rows are synthetic training data). "
+                "Use real data: python3 -m hibs_predictor.main train"
+            )
+            sys.exit(1)
         fixtures = sample_fixtures()
     else:
         fixtures = fetch_remote_fixtures()
         if not fixtures:
             print(
                 "No training data: need API_SPORTS_FOOTBALL_KEY with quota for fixtures + odds, "
-                "or run: python3 -m hibs_predictor.main train --use-sample"
+                "or for local-only synthetic rows: HIBS_ALLOW_DUMMY=1 python3 -m hibs_predictor.main train --use-sample"
             )
             sys.exit(1)
 
@@ -334,7 +341,11 @@ def create_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     train_parser = subparsers.add_parser("train", help="Train the bet predictor")
-    train_parser.add_argument("--use-sample", action="store_true", help="Force sample data for training")
+    train_parser.add_argument(
+        "--use-sample",
+        action="store_true",
+        help="Train on built-in synthetic rows (requires HIBS_ALLOW_DUMMY=1)",
+    )
 
     predict_parser = subparsers.add_parser("predict", help="Predict a fixture result")
     predict_parser.add_argument("--home", required=True)

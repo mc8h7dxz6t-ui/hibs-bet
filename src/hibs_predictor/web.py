@@ -17,7 +17,12 @@ from flask import Flask, render_template, jsonify, request, abort
 from hibs_predictor.config import LEAGUES, ALL_LEAGUE_CODES, LEAGUE_REGIONS, DASHBOARD_LEAGUE_ORDER
 from hibs_predictor.cache import Cache
 from hibs_predictor.data_aggregator import DataAggregator
-from hibs_predictor.betting_engine import BettingEngine, OddsAnalyzer, TeamStrengthCalculator
+from hibs_predictor.betting_engine import (
+    BettingEngine,
+    OddsAnalyzer,
+    TeamStrengthCalculator,
+    prediction_unavailable_payload,
+)
 from hibs_predictor.health_probe import gather_health
 
 TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
@@ -36,6 +41,41 @@ _HEALTH_TTL_SEC = 90.0
 def _api_football_season_year(now: datetime) -> int:
     """API-Football season id is the year the competition season starts (e.g. 2025 for 2025–26)."""
     return now.year if now.month >= 7 else now.year - 1
+
+
+_FDO_CALENDAR_COMPS = frozenset({"WC", "EC", "UNL"})
+
+
+def _years_touched_by_date_range(date_from_s: str, date_to_s: str) -> List[int]:
+    d0 = date.fromisoformat(date_from_s[:10])
+    d1 = date.fromisoformat(date_to_s[:10])
+    if d1 < d0:
+        d0, d1 = d1, d0
+    return list(range(d0.year, d1.year + 1))
+
+
+def _fixture_fetch_season_candidates(
+    football_data_comp_id: Optional[str], date_from_s: str, date_to_s: str, now: datetime
+) -> List[int]:
+    """Season years to try for fixtures. Domestic leagues use Jul-based season id; WC/EC/UNL also use calendar years in the fetch window."""
+    primary = _api_football_season_year(now)
+    if not football_data_comp_id or football_data_comp_id not in _FDO_CALENDAR_COMPS:
+        return [primary, primary - 1]
+    window_years = _years_touched_by_date_range(date_from_s, date_to_s)
+    merged = set(window_years) | {primary, primary - 1}
+    out: List[int] = []
+    seen: set[int] = set()
+    for y in sorted(window_years, reverse=True):
+        if y in merged and y not in seen:
+            out.append(y)
+            seen.add(y)
+    for y in (primary, primary - 1):
+        if y in merged and y not in seen:
+            out.append(y)
+            seen.add(y)
+    for y in sorted(merged - seen, reverse=True):
+        out.append(y)
+    return out
 
 
 def _env_truthy(name: str) -> bool:
@@ -73,29 +113,50 @@ def _ui_data_quality_min_pct() -> int:
 
 
 def _all_fixtures_cache_key() -> str:
-    return f"all_fixtures_{_fetch_window_days()}d_v10"
+    return f"all_fixtures_{_fetch_window_days()}d_v11"
 
 
 def _safe_enrich(fixture: Dict[str, Any], league_code: str) -> Dict[str, Any]:
-    """Prefer full enrichment; on failure return a minimal shape so the fixture still lists."""
+    """Prefer full enrichment; on failure list the fixture without inventing xG/form/odds (unless HIBS_ALLOW_DUMMY=1)."""
     try:
         return aggregator.enrich_fixture(fixture, league_code)
     except Exception as exc:
         print(f"[Enrich fallback] {league_code} {_fixture_key(fixture)}: {exc}")
-        league = LEAGUES.get(league_code, {})
+        if _env_truthy("HIBS_ALLOW_DUMMY"):
+            league = LEAGUES.get(league_code, {})
+            out = dict(fixture)
+            out.setdefault("home_recent", [])
+            out.setdefault("away_recent", [])
+            out.setdefault("home_stats", {})
+            out.setdefault("away_stats", {})
+            out.setdefault("home_form", 0.5)
+            out.setdefault("away_form", 0.5)
+            out.setdefault("home_home_factor", 1.0)
+            out.setdefault("away_away_factor", 1.0)
+            out.setdefault("home_position", {})
+            out.setdefault("away_position", {})
+            out.setdefault("xg_home", 1.25)
+            out.setdefault("xg_away", 1.15)
+            out.setdefault("odds_home", None)
+            out.setdefault("odds_draw", None)
+            out.setdefault("odds_away", None)
+            out.setdefault("odds_available", False)
+            out.setdefault("all_bookmaker_odds", [])
+            out.setdefault("fixture_injuries", [])
+            out.setdefault("market_odds", {})
+            out.setdefault("odds_secondary", None)
+            out.setdefault("odds_cross_max_implied_diff_pct", 0.0)
+            out.setdefault("league_factor", league.get("strength_factor", 1.0))
+            out.setdefault("xg_source", "goals_proxy")
+            out.setdefault("data_quality", {"score_pct": 0.0, "blocks": [], "full_scope": False, "strong_scope": False})
+            return out
         out = dict(fixture)
         out.setdefault("home_recent", [])
         out.setdefault("away_recent", [])
         out.setdefault("home_stats", {})
         out.setdefault("away_stats", {})
-        out.setdefault("home_form", 0.5)
-        out.setdefault("away_form", 0.5)
-        out.setdefault("home_home_factor", 1.0)
-        out.setdefault("away_away_factor", 1.0)
         out.setdefault("home_position", {})
         out.setdefault("away_position", {})
-        out.setdefault("xg_home", 1.25)
-        out.setdefault("xg_away", 1.15)
         out.setdefault("odds_home", None)
         out.setdefault("odds_draw", None)
         out.setdefault("odds_away", None)
@@ -105,9 +166,24 @@ def _safe_enrich(fixture: Dict[str, Any], league_code: str) -> Dict[str, Any]:
         out.setdefault("market_odds", {})
         out.setdefault("odds_secondary", None)
         out.setdefault("odds_cross_max_implied_diff_pct", 0.0)
-        out.setdefault("league_factor", league.get("strength_factor", 1.0))
-        out.setdefault("xg_source", "goals_proxy")
         out.setdefault("data_quality", {"score_pct": 0.0, "blocks": [], "full_scope": False, "strong_scope": False})
+        out["_hibs_prediction_blocked"] = True
+        out["_hibs_prediction_block_reason"] = "fixture_enrichment_failed"
+        # Enrichment can fail after form/stats work but before odds; odds bundle only needs fixture id + team names.
+        try:
+            bundle = aggregator._fetch_odds_bundle(out, league_code)
+            if isinstance(bundle, dict):
+                out["odds_home"] = bundle.get("odds_home")
+                out["odds_draw"] = bundle.get("odds_draw")
+                out["odds_away"] = bundle.get("odds_away")
+                out["odds_available"] = bool(bundle.get("odds_available"))
+                out["all_bookmaker_odds"] = bundle.get("all_bookmaker_odds") or []
+                out["market_odds"] = bundle.get("market_odds") or {}
+                out["odds_secondary"] = bundle.get("odds_secondary")
+                out["odds_cross_max_implied_diff_pct"] = bundle.get("odds_cross_max_implied_diff_pct") or 0.0
+                out["odds_primary_source"] = bundle.get("odds_primary_source")
+        except Exception:
+            pass
         return out
 
 
@@ -158,7 +234,7 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     cache = Cache()
     prefer_fdo = _env_truthy("HIBS_PREFER_FOOTBALL_DATA_FIXTURES")
     skip_as_fx = _env_truthy("HIBS_SKIP_API_SPORTS_FIXTURES")
-    cache_key = f"fixtures_{days}d_{league_code}_v10_{int(prefer_fdo)}{int(skip_as_fx)}"
+    cache_key = f"fixtures_{days}d_{league_code}_v11_{int(prefer_fdo)}{int(skip_as_fx)}"
     cached = cache.get(cache_key, ttl_hours=1)
     if cached:
         return cached
@@ -169,7 +245,8 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     fetched: Dict[str, Dict] = {}
     date_from = now.strftime("%Y-%m-%d")
     date_to = cutoff.strftime("%Y-%m-%d")
-    season_primary = _api_football_season_year(now)
+    fdo_comp = league.get("football_data_org_id")
+    season_candidates = _fixture_fetch_season_candidates(fdo_comp, date_from, date_to, now)
 
     def add(candidate: Dict) -> None:
         key = _fixture_key(candidate)
@@ -182,7 +259,7 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
         if skip_as_fx or "api_sports" not in aggregator.clients or not league_api_id:
             return
         try:
-            for season in [season_primary, season_primary - 1]:
+            for season in season_candidates:
                 raw = aggregator.clients["api_sports"].fetch_fixtures_by_league(
                     int(league_api_id),
                     int(season),
@@ -213,7 +290,7 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
         comp = league.get("football_data_org_id")
         if not comp:
             return
-        for season in [season_primary, season_primary - 1]:
+        for season in season_candidates:
             try:
                 import time as _time
 
@@ -242,8 +319,8 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
                 if fetched:
                     break
             except Exception as ex:
-                print(f"[Football-Data.org] {league_code} {comp}: {ex!r}")
-                break
+                print(f"[Football-Data.org] {league_code} {comp} season={season}: {ex!r}")
+                continue
 
     if prefer_fdo:
         try_football_data()
@@ -256,38 +333,45 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
 
     fixtures = []
     for fixture in fetched.values():
+        enriched = _safe_enrich(fixture, league_code)
         try:
-            enriched = _safe_enrich(fixture, league_code)
             prediction = betting_engine.predict_with_confidence(enriched)
-            home_id = fixture.get("teams", {}).get("home", {}).get("id")
-            away_id = fixture.get("teams", {}).get("away", {}).get("id")
+        except Exception as e:
+            print(f"[Prediction] {league_code} {_fixture_key(fixture)}: {e!r}")
+            prediction = prediction_unavailable_payload(enriched, "model_error")
+
+        home_id = fixture.get("teams", {}).get("home", {}).get("id")
+        away_id = fixture.get("teams", {}).get("away", {}).get("id")
+        try:
             home_last10 = TeamStrengthCalculator.parse_last_10_results(enriched.get("home_recent", []), home_id)
             away_last10 = TeamStrengthCalculator.parse_last_10_results(enriched.get("away_recent", []), away_id)
-            fixtures.append(
-                {
-                    "id": fixture.get("fixture", {}).get("id"),
-                    "home": fixture.get("home", {}).get("name", "?"),
-                    "away": fixture.get("away", {}).get("name", "?"),
-                    "home_id": home_id,
-                    "away_id": away_id,
-                    "date": fixture.get("date"),
-                    "league": league_code,
-                    "league_name": LEAGUES.get(league_code, {}).get("name", ""),
-                    "league_flag": LEAGUES.get(league_code, {}).get("flag", ""),
-                    "prediction": prediction,
-                    "home_last10": home_last10,
-                    "away_last10": away_last10,
-                    "home_position": enriched.get("home_position", {}),
-                    "away_position": enriched.get("away_position", {}),
-                    "all_bookmaker_odds": enriched.get("all_bookmaker_odds", []),
-                    "fixture_injuries": enriched.get("fixture_injuries", []),
-                    "data_quality": enriched.get("data_quality", {}),
-                    "xg_source": enriched.get("xg_source", "unknown"),
-                    "has_value_bet": bool(prediction.get("has_any_value", prediction.get("value_bets"))),
-                }
-            )
         except Exception as e:
-            print(f"[Fixture build] {league_code}: {e}")
+            print(f"[Fixture last10] {league_code} {_fixture_key(fixture)}: {e!r}")
+            home_last10, away_last10 = [], []
+
+        fixtures.append(
+            {
+                "id": fixture.get("fixture", {}).get("id"),
+                "home": fixture.get("home", {}).get("name", "?"),
+                "away": fixture.get("away", {}).get("name", "?"),
+                "home_id": home_id,
+                "away_id": away_id,
+                "date": fixture.get("date"),
+                "league": league_code,
+                "league_name": LEAGUES.get(league_code, {}).get("name", ""),
+                "league_flag": LEAGUES.get(league_code, {}).get("flag", ""),
+                "prediction": prediction,
+                "home_last10": home_last10,
+                "away_last10": away_last10,
+                "home_position": enriched.get("home_position", {}),
+                "away_position": enriched.get("away_position", {}),
+                "all_bookmaker_odds": enriched.get("all_bookmaker_odds", []),
+                "fixture_injuries": enriched.get("fixture_injuries", []),
+                "data_quality": enriched.get("data_quality", {}),
+                "xg_source": enriched.get("xg_source", "unknown"),
+                "has_value_bet": bool(prediction.get("has_any_value", prediction.get("value_bets"))),
+            }
+        )
 
     fixtures.sort(key=lambda x: x.get("date") or "")
     cache.set(cache_key, fixtures, ttl_hours=1)
@@ -336,7 +420,8 @@ def fetch_all_fixtures() -> Dict:
         "total": len(all_fixtures),
         "value_bet_count": len(value_bets_only),
         "fetch_days": _fetch_window_days(),
-        "has_api_clients": bool(aggregator.clients),
+        # Fixture lists come only from API-Sports or Football-Data.org, not Odds API / Rapid / SportMonks.
+        "has_api_clients": ("api_sports" in aggregator.clients or "football_data_org" in aggregator.clients),
     }
     cache.set(ck, result, ttl_hours=1)
     return result
@@ -418,7 +503,10 @@ def index():
         min_league_chip_fixtures=_min_league_chip_fixtures(),
         dashboard_league_order=DASHBOARD_LEAGUE_ORDER,
         fetch_days=data.get("fetch_days", _fetch_window_days()),
-        has_api_clients=data.get("has_api_clients", bool(aggregator.clients)),
+        has_api_clients=data.get(
+            "has_api_clients",
+            ("api_sports" in aggregator.clients or "football_data_org" in aggregator.clients),
+        ),
         leagues=LEAGUES,
         data_quality_ui_min=_ui_data_quality_min_pct(),
     )
@@ -480,4 +568,6 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
     print("\n\U0001f7e2\U0001f49a hibs-bet \u2014 Starting...")
     print(f"   Open http://127.0.0.1:{port}\n")
-    app.run(debug=False, port=port, host="127.0.0.1")
+    # threaded=True: first dashboard load can take a long time (fixtures + enrichment);
+    # without threads the dev server would ignore other tabs/requests until that finishes.
+    app.run(debug=False, port=port, host="127.0.0.1", threaded=True, use_reloader=False)

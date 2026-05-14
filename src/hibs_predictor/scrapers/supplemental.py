@@ -7,8 +7,9 @@ Env:
   HIBS_ENABLE_UNDERSTAT_LIGHT — Understat xG row for fixtures in ``data_source_policy`` window (off default).
   HIBS_ENABLE_STATSBOMB_OPEN_MATCHES — StatsBomb open-data goals proxy for teams in policy window (off default).
   HIBS_PREFER_SCRAPED_STANDINGS — Wikipedia league table first (default on in aggregator).
-  HIBS_SKIP_ODDS_API — skip The Odds API (default on); use API-Football odds only.
-  HIBS_SKIP_RAPID_STATS_XG — skip RapidAPI stats xG (default on).
+  HIBS_SKIP_ODDS_API — skip The Odds API (explicit opt-out only when ODDS_API_KEY is usable).
+  HIBS_SKIP_RAPID_STATS_XG — skip RapidAPI stats xG (default on; HIBS_MAX_DATA=1 + STATS_API_KEY enables).
+  HIBS_MAX_DATA — when 1, prefer maximum safe inputs: do not skip heavy scrapers for "API strong" alone; enable Rapid stats xG when stats client is configured.
 
 Source roadmap (FBref, Transfermarkt, WhoScored, SofaScore, Understat, FootyStats,
 SoccerStats, DataMB): see ``hibs_predictor.scrapers.source_registry.SOURCE_CATALOG``.
@@ -27,6 +28,8 @@ from hibs_predictor.data_quality import _has_stats, _position_ok
 
 def _skip_heavy_when_api_strong(enriched: Dict[str, Any]) -> tuple:
     """If True, skip FBref / full Understat: APIs already cover the same inputs heavy would reinforce."""
+    if os.getenv("HIBS_MAX_DATA", "").strip().lower() in ("1", "true", "yes", "on"):
+        return False, ""
     if os.getenv("HIBS_SKIP_HEAVY_WHEN_API_STRONG", "1").lower() in ("0", "false", "no"):
         return False, ""
     if not enriched.get("odds_available"):
