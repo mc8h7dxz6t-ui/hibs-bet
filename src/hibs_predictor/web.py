@@ -38,6 +38,10 @@ def _api_football_season_year(now: datetime) -> int:
     return now.year if now.month >= 7 else now.year - 1
 
 
+def _env_truthy(name: str) -> bool:
+    return (os.getenv(name) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _fixture_key(fixture: Dict[str, Any]) -> str:
     home = fixture.get("home", {}).get("name") or fixture.get("teams", {}).get("home", {}).get("name", "")
     away = fixture.get("away", {}).get("name") or fixture.get("teams", {}).get("away", {}).get("name", "")
@@ -152,7 +156,9 @@ def _normalize_fdo(match: Dict, league_code: str) -> Optional[Dict]:
 def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     days = _fetch_window_days()
     cache = Cache()
-    cache_key = f"fixtures_{days}d_{league_code}"
+    prefer_fdo = _env_truthy("HIBS_PREFER_FOOTBALL_DATA_FIXTURES")
+    skip_as_fx = _env_truthy("HIBS_SKIP_API_SPORTS_FIXTURES")
+    cache_key = f"fixtures_{days}d_{league_code}_v10_{int(prefer_fdo)}{int(skip_as_fx)}"
     cached = cache.get(cache_key, ttl_hours=1)
     if cached:
         return cached
@@ -171,7 +177,10 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
             fetched[key] = candidate
 
     league_api_id = league.get("api_sports_id")
-    if "api_sports" in aggregator.clients and league_api_id:
+
+    def try_api_sports() -> None:
+        if skip_as_fx or "api_sports" not in aggregator.clients or not league_api_id:
+            return
         try:
             for season in [season_primary, season_primary - 1]:
                 raw = aggregator.clients["api_sports"].fetch_fixtures_by_league(
@@ -198,40 +207,52 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
         except Exception as e:
             print(f"[API-Sports] {league_code}: {e!r}")
 
-    if not fetched and "football_data_org" in aggregator.clients:
+    def try_football_data() -> None:
+        if "football_data_org" not in aggregator.clients:
+            return
         comp = league.get("football_data_org_id")
-        if comp:
-            for season in [season_primary, season_primary - 1]:
-                try:
-                    import time as _time
+        if not comp:
+            return
+        for season in [season_primary, season_primary - 1]:
+            try:
+                import time as _time
 
-                    _time.sleep(0.5)
-                    raw = aggregator.clients["football_data_org"].fetch_fixtures(
-                        comp,
-                        season,
-                        status=None,
-                        date_from=date_from,
-                        date_to=date_to,
-                    )
-                    for m in raw or []:
-                        st = str(m.get("status") or "").upper()
-                        if st in ("FINISHED", "AWARDED", "CANCELLED", "POSTPONED", "ABANDONED", "SUSPENDED"):
-                            continue
-                        norm = _normalize_fdo(m, league_code)
-                        if not norm:
-                            continue
-                        try:
-                            fd = datetime.fromisoformat(norm["date"].replace("Z", "+00:00"))
-                            if now <= fd <= cutoff:
-                                norm["date"] = fd.isoformat()
-                                add(norm)
-                        except Exception:
-                            continue
-                    if fetched:
-                        break
-                except Exception as ex:
-                    print(f"[Football-Data.org] {league_code} {comp}: {ex!r}")
+                _time.sleep(0.5)
+                raw = aggregator.clients["football_data_org"].fetch_fixtures(
+                    comp,
+                    season,
+                    status=None,
+                    date_from=date_from,
+                    date_to=date_to,
+                )
+                for m in raw or []:
+                    st = str(m.get("status") or "").upper()
+                    if st in ("FINISHED", "AWARDED", "CANCELLED", "POSTPONED", "ABANDONED", "SUSPENDED"):
+                        continue
+                    norm = _normalize_fdo(m, league_code)
+                    if not norm:
+                        continue
+                    try:
+                        fd = datetime.fromisoformat(norm["date"].replace("Z", "+00:00"))
+                        if now <= fd <= cutoff:
+                            norm["date"] = fd.isoformat()
+                            add(norm)
+                    except Exception:
+                        continue
+                if fetched:
                     break
+            except Exception as ex:
+                print(f"[Football-Data.org] {league_code} {comp}: {ex!r}")
+                break
+
+    if prefer_fdo:
+        try_football_data()
+        if not fetched:
+            try_api_sports()
+    else:
+        try_api_sports()
+        if not fetched:
+            try_football_data()
 
     fixtures = []
     for fixture in fetched.values():

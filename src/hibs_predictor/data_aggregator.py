@@ -261,7 +261,10 @@ class DataAggregator:
             "API_SPORTS_KEY",
             "APISPORTS_KEY",
         )
-        if api_sports_key:
+        if (
+            api_sports_key
+            and os.getenv("HIBS_DISABLE_API_SPORTS", "").strip().lower() not in ("1", "true", "yes", "on")
+        ):
             clients["api_sports"] = ApiSportsFootballClient(api_sports_key)
 
         fdo_key = _env_first_usable("FOOTBALL_DATA_ORG_KEY", "FOOTBALL_DATA_KEY")
