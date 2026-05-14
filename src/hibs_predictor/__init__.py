@@ -1,1 +1,1 @@
-"""HibsBetting package for UK and European football prediction."""
+"""hibs-bet package for UK and European football prediction."""

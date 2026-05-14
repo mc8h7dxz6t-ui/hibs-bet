@@ -14,7 +14,7 @@ import requests
 from bs4 import BeautifulSoup
 
 _HEADERS = {
-    "User-Agent": "hibs.bet/1.0 (standings preview; contact via site owner)",
+    "User-Agent": "hibs-bet/1.0 (standings preview; contact via site owner)",
     "Accept-Language": "en",
 }
 

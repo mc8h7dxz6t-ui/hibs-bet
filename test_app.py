@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Quick test runner to verify HibsBetting app components.
+Quick test runner to verify hibs-bet app components.
 """
 import sys
 import os
@@ -210,7 +210,7 @@ def test_templates():
 def main():
     """Run all tests."""
     print("=" * 60)
-    print("HibsBetting Application Test Suite")
+    print("hibs-bet application test suite")
     print("=" * 60)
     
     tests = [
@@ -234,7 +234,7 @@ def main():
     
     if all(results):
         print("✓ All tests passed! Application ready to run.")
-        print("\nStart the dashboard: launch/RunHibsBetting.command or: PYTHONPATH=src python3 src/hibs_predictor/web.py")
+        print("\nStart the dashboard: launch/Run-hibs-bet.command or: PYTHONPATH=src python3 src/hibs_predictor/web.py")
         return 0
     else:
         print("✗ Some tests failed. Check output above.")

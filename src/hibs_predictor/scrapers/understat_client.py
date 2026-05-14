@@ -22,7 +22,7 @@ LEAGUE_SLUG = {
     "AUSTRIA_BL": "Austrian_Bundesliga",
 }
 
-_HEADERS = {"User-Agent": "hibs.bet/1.0 (stats enrichment; contact: local)"}
+_HEADERS = {"User-Agent": "hibs-bet/1.0 (stats enrichment; contact: local)"}
 
 
 def _extract_json_array(html: str) -> Optional[List[Dict[str, Any]]]:

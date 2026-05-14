@@ -1,6 +1,6 @@
 ╔════════════════════════════════════════════════════════════════════════════╗
 ║                                                                            ║
-║                       ✅ HIBSBETTING PROJECT COMPLETE                      ║
+║                       ✅ HIBS-BET PROJECT COMPLETE                         ║
 ║                                                                            ║
 ║                    Advanced Betting Intelligence Platform                  ║
 ║                         🟤💛 For Edinburgh & Hibs                         ║

@@ -1,4 +1,4 @@
-"""Flask web dashboard for hibs.bet."""
+"""Flask web dashboard for hibs-bet."""
 
 import os
 import sys
@@ -452,6 +452,6 @@ def api_status_page():
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
-    print("\n\U0001f7e2\U0001f49a hibs.bet \u2014 Starting...")
+    print("\n\U0001f7e2\U0001f49a hibs-bet \u2014 Starting...")
     print(f"   Open http://127.0.0.1:{port}\n")
     app.run(debug=False, port=port, host="127.0.0.1")

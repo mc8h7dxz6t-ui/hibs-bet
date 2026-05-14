@@ -2,7 +2,7 @@
 
 ## Overview
 
-Your HibsBetting predictor now includes a **professional-grade betting engine** that integrates data from **5 premium APIs** to provide sophisticated match predictions with value betting analysis.
+Your hibs-bet predictor now includes a **professional-grade betting engine** that integrates data from **5 premium APIs** to provide sophisticated match predictions with value betting analysis.
 
 ## APIs Integrated
 
@@ -293,4 +293,4 @@ Remember: This is an analytical tool for learning. Betting always carries risk.
 
 ---
 
-**🟤💛 HibsBetting — Edinburgh-Inspired Advanced Betting Intelligence**
+**🟤💛 hibs-bet — Edinburgh-Inspired Advanced Betting Intelligence**

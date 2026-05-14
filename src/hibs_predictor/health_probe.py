@@ -195,7 +195,7 @@ def gather_health() -> Dict[str, Any]:
     try:
         from hibs_predictor.scrapers.understat_client import _extract_json_array
 
-        headers = {"User-Agent": "hibs.bet/1.0 (health probe)"}
+        headers = {"User-Agent": "hibs-bet/1.0 (health probe)"}
         r = requests.get("https://understat.com/league/EPL/2025", headers=headers, timeout=18)
         ms = _ms_since(t0)
         if r.status_code != 200:

@@ -1,4 +1,4 @@
-# HibsBetting
+# hibs-bet
 
 An advanced bet predictor for UK and European football leagues with Edinburgh/Hibernian theme. Features sophisticated ensemble ML models, multi-API data integration, and professional-grade value betting detection.
 
@@ -35,7 +35,7 @@ An advanced bet predictor for UK and European football leagues with Edinburgh/Hi
 ### 1. Install & Setup
 
 ```bash
-cd HibsBetting
+cd hibs-bet
 python3 -m pip install -r requirements.txt
 python3 src/hibs_predictor/main.py setup
 ```
@@ -137,7 +137,7 @@ Bet Size = (Win Prob × Odds - 1) / (Odds - 1) × 25%
 ## Architecture
 
 ```
-HibsBetting/
+hibs-bet/
 ├── src/hibs_predictor/
 │   ├── betting_engine.py       # ML models + value detection
 │   ├── data_aggregator.py      # Multi-API data enrichment
@@ -203,7 +203,7 @@ The interactive setup will guide you through adding API keys and launch the dash
 
 ---
 
-**🟤💛 HibsBetting — Advanced Football Betting Intelligence for Edinburgh**
+**🟤💛 hibs-bet — Advanced Football Betting Intelligence for Edinburgh**
 
 *Built with ❤️ for Hibernian FC supporters and analytical bettors*
 

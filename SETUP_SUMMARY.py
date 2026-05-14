@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HibsBetting Professional Betting Platform
+hibs-bet Professional Betting Platform
 Complete Application Summary & Quick Start
 
 Generated: January 2025
@@ -9,7 +9,7 @@ Status: ✅ Production Ready (All 6/6 Tests Passing)
 
 print("""
 ╔════════════════════════════════════════════════════════════════╗
-║                    HIBSBETTING v1.0                            ║
+║                    HIBS-BET v1.0                               ║
 ║           Advanced Betting Intelligence Platform               ║
 ║                    🟤💛 For Hibs Fans                          ║
 ╚════════════════════════════════════════════════════════════════╝
@@ -56,7 +56,7 @@ print("""
    • Persistent state tracking
 
 ✅ Professional UI
-   • Hibs-themed design (red/yellow gradients)
+   • Edinburgh / Hibs-inspired design (red/yellow gradients)
    • Edinburgh skyline background
    • Responsive layout (desktop + mobile)
    • Two-page interface: Dashboard + Acca Builder
@@ -129,7 +129,7 @@ APIs: 5 Sports data integrations
 📁 PROJECT STRUCTURE
 ═══════════════════════════════════════════════════════════════
 
-HibsBetting/
+hibs-bet/
 ├── src/hibs_predictor/
 │   ├── api_clients.py        (5 API clients)
 │   ├── betting_engine.py      (ML + value analysis)
@@ -426,7 +426,7 @@ Why Caching Matters:
 
      Your professional betting platform awaits!
 
-                      🟤💛 HibsBetting
+                      🟤💛 hibs-bet
                    Edinburgh Football Intelligence
 
 ═══════════════════════════════════════════════════════════════

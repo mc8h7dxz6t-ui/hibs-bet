@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}hibs.bet — Live Dashboard{% endblock %}
+{% block title %}hibs-bet — Live Dashboard{% endblock %}
 {% block container_class %} dash-outer{% endblock %}
 {% block content %}
 <div class="ref-page">
     <header class="site-top">
         <div class="site-top-left">
             <img src="{{ url_for('static', filename='badge_harp_shield.png') }}" alt="Hibernian FC" class="site-crest" width="38" height="38">
-            <span class="site-wordmark">hibs.bet</span>
+            <span class="site-wordmark">hibs-bet</span>
             <nav class="site-links" aria-label="Primary">
                 <span class="site-link site-link-active">Dashboard</span>
                 <a href="/acca" class="site-link">Acca Builder</a>
@@ -31,7 +31,7 @@
     <div class="ref-cols">
         <div class="ref-primary">
             <div class="hero-strip">
-                <h1 class="hero-title"><span class="hero-brand">hibs.bet</span> {{ fetch_days }}-Day Fixtures</h1>
+                <h1 class="hero-title"><span class="hero-brand">hibs-bet</span> {{ fetch_days }}-Day Fixtures</h1>
                 <p class="hero-meta"><strong>{{ total }}</strong> fixtures <span class="live-pill"><span class="live-dot"></span> LIVE DATA</span></p>
             </div>
 

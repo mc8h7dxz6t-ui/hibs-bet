@@ -1,5 +1,5 @@
 """
-Rolling window for which external stats/scrapes may be used alongside APIs (hibs.bet).
+Rolling window for which external stats/scrapes may be used alongside APIs (hibs-bet).
 
 Default: last ``HIBS_STATS_LOOKBACK_DAYS`` (183 ≈ 6 months) through ``now + HIBS_STATS_FUTURE_DAYS``
 (14) for upcoming kickoffs. Optional ``HIBS_DATA_POLICY_AS_OF`` (ISO date/datetime) freezes the clock

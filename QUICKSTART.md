@@ -1,4 +1,4 @@
-# 🟤💛 HibsBetting Quick Start
+# 🟤💛 hibs-bet Quick Start
 
 ## One-Command Launch
 
@@ -78,7 +78,7 @@ Get yours from:
 ## Architecture
 
 ```
-HibsBetting/
+hibs-bet/
 ├── src/hibs_predictor/
 │   ├── __init__.py
 │   ├── api_clients.py       # API integrations with caching

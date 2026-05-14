@@ -1,12 +1,12 @@
 #!/bin/bash
-# Double-click this file in Finder to launch HibsBetting via Streamlit.
+# Double-click this file in Finder to launch hibs-bet via Streamlit.
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
 
 if [ ! -f ".env" ]; then
-  osascript -e 'display dialog "HibsBetting cannot start without a .env file in the project root. Copy .env.example and fill in your API keys." buttons {"OK"} default button "OK"'
+  osascript -e 'display dialog "hibs-bet cannot start without a .env file in the project root. Copy .env.example and fill in your API keys." buttons {"OK"} default button "OK"'
   exit 1
 fi
 

@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 import requests
 from bs4 import BeautifulSoup
 
-_HEADERS = {"User-Agent": "hibs.bet/1.0 (research enrichment)"}
+_HEADERS = {"User-Agent": "hibs-bet/1.0 (research enrichment)"}
 
 # fbref /en/comps/{id}/{season}/ — season like 2024-2025
 FBREF_LEAGUE = {

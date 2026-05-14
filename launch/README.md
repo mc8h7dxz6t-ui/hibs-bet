@@ -1,10 +1,10 @@
-# HibsBetting Quick Start
+# hibs-bet quick start
 
 ## 🚀 One-Click Launch (Recommended)
 
-**Double-click `RunHibsStreamlit.command`** in this folder to start the app instantly.
+**Double-click `Run-hibs-streamlit.command`** in this folder to start the app instantly.
 
-That's it! The launcher will:
+For the Flask web dashboard instead, double-click **`Run-hibs-bet.command`** in this folder.
 - Check for your `.env` file
 - Activate the virtual environment
 - Install Streamlit if needed

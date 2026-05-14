@@ -198,7 +198,7 @@ def run_predict(args: argparse.Namespace) -> None:
 def run_setup() -> None:
     """Interactive setup for API keys."""
     import sys
-    print("\n🟤💛 HibsBetting — First-Time Setup\n")
+    print("\n🟤💛 hibs-bet — First-Time Setup\n")
     print("Get free API keys from:")
     print("  • API-Sports: https://www.api-football.com")
     print("  • Football-Data.org: https://www.football-data.org")
@@ -232,7 +232,7 @@ def run_web() -> None:
     """Launch the Flask web dashboard."""
     try:
         from hibs_predictor.web import app
-        print("\n🟤💛 HibsBetting Web Dashboard")
+        print("\n🟤💛 hibs-bet Web Dashboard")
         print("Opening http://127.0.0.1:5000\n")
         app.run(debug=False, port=5000, host="127.0.0.1")
     except ImportError:
@@ -301,7 +301,7 @@ def run_data_sources_probe() -> None:
 
 
 def create_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Hibs-themed bet predictor for UK and European football")
+    parser = argparse.ArgumentParser(description="hibs-bet — UK and European football predictor")
     subparsers = parser.add_subparsers(dest="command")
 
     train_parser = subparsers.add_parser("train", help="Train the bet predictor")

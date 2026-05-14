@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}hibs.bet — Acca Builder{% endblock %}
+{% block title %}hibs-bet — Acca Builder{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -90,7 +90,7 @@
 {% block content %}
 <header>
     <div class="brand">
-        <span class="brand-logo">hibs.bet</span>
+        <span class="brand-logo">hibs-bet</span>
         <div>
             <div class="brand-sub">Acca Builder</div>
             <div class="brand-sub" style="font-size:0.65em;color:var(--green);margin-top:2px;">Click any odds to add to your slip</div>
@@ -330,7 +330,7 @@ function buildSummaryText() {
     const betType = keys.length > 1 ? keys.length + '-fold acca' : 'Single';
     const profit = (parseFloat(ret) - stake).toFixed(2);
     return [
-        'hibs.bet — slip summary (analysis only)',
+        'hibs-bet — slip summary (analysis only)',
         betType,
         '',
         ...lines,

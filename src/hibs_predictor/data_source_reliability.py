@@ -1,5 +1,5 @@
 """
-Best-effort probes for hibs.bet external sources (APIs + scrapers + open data).
+Best-effort probes for hibs-bet external sources (APIs + scrapers + open data).
 
 Run: ``python3 -m hibs_predictor.main data-sources-probe``
 
@@ -67,7 +67,7 @@ def run_all_probes() -> Dict[str, Any]:
     try:
         from hibs_predictor.scrapers.understat_client import _extract_json_array
 
-        headers = {"User-Agent": "hibs.bet/1.0 (reliability probe)"}
+        headers = {"User-Agent": "hibs-bet/1.0 (reliability probe)"}
         ok_any = False
         best_url = ""
         best_n = 0

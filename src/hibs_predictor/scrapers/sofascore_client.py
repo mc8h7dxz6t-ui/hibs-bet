@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 _HEADERS = {
-    "User-Agent": "hibs.bet/1.0",
+    "User-Agent": "hibs-bet/1.0",
     "Accept": "application/json",
 }
 
