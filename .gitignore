@@ -10,5 +10,7 @@ __pycache__/
 .env
 .env.save
 .env.*.local
+.rate_limit_state.json
+.cache/
 .ipynb_checkpoints/
 model.joblib
