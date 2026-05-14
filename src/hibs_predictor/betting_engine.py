@@ -15,6 +15,35 @@ from sklearn.preprocessing import StandardScaler
 class TeamStrengthCalculator:
 
     @staticmethod
+    def _team_xg_from_fixture_statistics(match: Dict[str, Any], team_id: int) -> Optional[float]:
+        """Per-team xG from API-Football finished fixture when statistics[] is present."""
+        if not team_id:
+            return None
+        stats_list = match.get("statistics")
+        if not isinstance(stats_list, list):
+            return None
+        for block in stats_list:
+            team = block.get("team") or {}
+            if team.get("id") != team_id:
+                continue
+            xg_block = block.get("expected_goals")
+            if isinstance(xg_block, dict):
+                for key in ("total", "value", "on"):
+                    raw = xg_block.get(key)
+                    if raw is None or raw == "":
+                        continue
+                    try:
+                        return float(raw)
+                    except (TypeError, ValueError):
+                        continue
+            if isinstance(xg_block, (int, float)):
+                try:
+                    return float(xg_block)
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    @staticmethod
     def calculate_attack_strength(stats: Dict[str, Any]) -> float:
         try:
             goals_for = float(stats.get("goals_for", 0) or 0)
@@ -102,12 +131,20 @@ class TeamStrengthCalculator:
             opponent = away_name if is_home else home_name
             result = "W" if gf > ga else ("L" if gf < ga else "D")
             fixture_date = match.get("fixture", {}).get("date", "") or ""
+            tot = int(gf + ga)
+            xgf = TeamStrengthCalculator._team_xg_from_fixture_statistics(match, team_id)
             results.append({
                 "result": result,
                 "score": f"{int(gf)}-{int(ga)}",
                 "opponent": opponent,
                 "home_away": "H" if is_home else "A",
                 "date": fixture_date[:10],
+                "gf": int(gf),
+                "ga": int(ga),
+                "btts": bool(gf > 0 and ga > 0),
+                "over15": tot > 1,
+                "over25": tot > 2,
+                "xg_for": round(xgf, 2) if xgf is not None else None,
             })
         return results
 
@@ -558,6 +595,13 @@ class BettingEngine:
         to15 = mo.get("totals_1_5") or {}
         if to15.get("over") and float(to15["over"]) > 1.0:
             merged_book["over15"] = float(to15["over"])
+        if to15.get("under") and float(to15["under"]) > 1.0:
+            merged_book["under15"] = float(to15["under"])
+        to35 = mo.get("totals_3_5") or {}
+        if to35.get("over") and float(to35["over"]) > 1.0:
+            merged_book["over35"] = float(to35["over"])
+        if to35.get("under") and float(to35["under"]) > 1.0:
+            merged_book["under35"] = float(to35["under"])
         dq_bundle = fixture.get("data_quality") or {}
         dq_pct = float(dq_bundle.get("score_pct") or 0)
         try:
@@ -621,7 +665,7 @@ class BettingEngine:
             row["outcome"] = k
             value_bets_display.append(row)
         line_odds: Dict[str, Any] = {}
-        for _lk in ("btts_yes", "btts_no", "over25", "under25", "over15"):
+        for _lk in ("btts_yes", "btts_no", "over15", "under15", "over25", "under25", "over35", "under35"):
             _lv = merged_book.get(_lk)
             try:
                 _fv = float(_lv)

@@ -11,7 +11,7 @@
         :root {
             --hibs-neon:#7CFC00;
             --neon-value:#39ff14;
-            --green:#94a3b8;
+            --green:#86efac;
             --green-dim:#475569;
             --dark:#020617;
             --slate-900:#0f172a;
@@ -121,10 +121,21 @@
         .api-missing-banner code{font-size:0.88em;color:#fde68a;}
 
         /* —— Reference dashboard (hibs-bet) —— */
-        .ref-page{max-width:1720px;margin:0 auto;}
+        .ref-page{max-width:1720px;margin:0 auto;position:relative;}
+        .ref-page::after{
+            content:'';position:absolute;left:0;right:0;bottom:0;height:min(42vh,520px);
+            pointer-events:none;opacity:0.1;z-index:0;
+            background:url('/static/stadium_easter_road.png') center bottom / min(1200px, 100%) no-repeat;
+            mask-image:linear-gradient(to top, #000 0%, transparent 92%);
+            -webkit-mask-image:linear-gradient(to top, #000 0%, transparent 92%);
+        }
+        .ref-page > *{position:relative;z-index:1;}
         .site-top{
             display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;
             padding:10px 4px 14px;border-bottom:1px solid var(--border);margin-bottom:12px;
+            background:
+                linear-gradient(180deg, rgba(15,23,42,0.55) 0%, transparent 100%),
+                url('/static/badges_heritage_montage.png') right 8px center / 180px no-repeat;
         }
         .site-top-left{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
         .site-crest{flex-shrink:0;width:38px;height:38px;object-fit:contain;border-radius:10px;box-shadow:0 0 0 2px rgba(255,215,0,0.22);}
@@ -134,7 +145,9 @@
         .site-link:hover{color:var(--text);}
         .site-link-active{background:rgba(57,255,20,0.12);color:var(--neon-value);border:1px solid rgba(57,255,20,0.35);}
         .site-link-muted{opacity:0.45;cursor:default;}
-        .site-top-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+        @media(max-width:900px){
+            .site-top{background:linear-gradient(180deg, rgba(15,23,42,0.55) 0%, transparent 100%);}
+        }
         .pill-soft{font-size:0.7em;color:var(--muted);display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;border:1px solid var(--border);}
         .odds-toggle{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;}
         .ot{background:rgba(2,6,23,0.6);border:none;color:var(--muted);padding:5px 12px;font-size:0.7em;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;}
@@ -147,6 +160,7 @@
         .hero-title{font-family:'Orbitron',monospace;font-size:clamp(1.1rem,2.4vw,1.45rem);font-weight:900;color:var(--text);letter-spacing:0.04em;}
         .hero-brand{color:var(--hibs-neon);}
         .hero-meta{font-size:0.8em;color:var(--muted);margin-top:6px;}
+        .hero-sub{font-size:0.72em;color:var(--muted);margin-top:8px;max-width:52rem;line-height:1.45;opacity:0.92;}
         .live-pill{margin-left:8px;color:var(--neon-value);font-weight:700;font-size:0.85em;}
         .live-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--neon-value);margin-right:5px;animation:pulseDot 1.4s ease-out infinite;}
         .search-chips{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:12px;}
@@ -177,20 +191,28 @@
         .vsc-kelly{font-size:0.68em;color:var(--muted);margin-top:2px;}
         .day-heading{font-size:0.95em;font-weight:800;margin:16px 0 8px;color:var(--text);letter-spacing:0.04em;}
         .lg-heading{font-size:0.68em;font-weight:800;color:var(--muted);letter-spacing:0.14em;margin:10px 0 6px;}
+        .ft-scroll-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -2px;padding:0 2px 4px;}
+        .ft-head,.fr-sum{
+            display:grid;
+            grid-template-columns:52px minmax(120px,1.35fr) repeat(9, minmax(32px, 0.48fr)) 28px;
+            gap:4px;align-items:center;
+            min-width:min(1080px, 100%);
+        }
         .ft-head{
-            display:grid;grid-template-columns:52px minmax(120px,1.4fr) repeat(7, minmax(36px,0.55fr)) 28px;
-            gap:4px;align-items:center;font-size:0.58em;font-weight:700;color:var(--muted);text-transform:uppercase;padding:4px 8px;border-bottom:1px solid rgba(255,255,255,0.06);
+            font-size:0.58em;font-weight:700;color:var(--muted);text-transform:uppercase;padding:4px 8px;border-bottom:1px solid rgba(255,255,255,0.06);
         }
         .ft-h-match{text-align:left;}
         .fr-compact{border-radius:8px;padding:0;margin-bottom:4px;border:1px solid rgba(255,255,255,0.06);background:rgba(15,23,42,0.55);}
         .fr-compact.value-card{border-color:rgba(57,255,20,0.35);}
         .fr-sum{
-            display:grid;grid-template-columns:52px minmax(120px,1.4fr) repeat(7, minmax(36px,0.55fr)) 28px;
-            gap:4px;align-items:center;padding:8px 8px;list-style:none;cursor:pointer;font-size:0.78em;position:relative;
+            padding:8px 8px;list-style:none;cursor:pointer;font-size:0.78em;position:relative;
         }
         .fr-sum::-webkit-details-marker{display:none;}
         .fr-ko{color:var(--muted);font-variant-numeric:tabular-nums;font-weight:600;}
         .fr-match{min-width:0;}
+        .fr-l10-preview{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-top:5px;}
+        .fr-l10-lbl{font-size:0.55em;font-weight:800;color:var(--muted);letter-spacing:0.06em;}
+        .fr-l10-sep{opacity:0.45;font-size:0.65em;}
         .fr-teams{font-weight:700;color:var(--text);line-height:1.25;}
         .fr-vs{font-weight:500;color:var(--muted);margin:0 4px;}
         .fr-pred{font-size:0.72em;font-weight:700;margin-top:2px;}

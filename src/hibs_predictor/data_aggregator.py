@@ -169,11 +169,15 @@ def _max_implied_delta_pct(
 
 
 def _parse_api_sports_side_markets(odds_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """BTTS and Over/Under 2.5 from API-Football odds (best decimal per selection)."""
+    """BTTS and Over/Under lines from API-Football odds (best decimal per selection)."""
     btts_yes: List[float] = []
     btts_no: List[float] = []
+    over15: List[float] = []
+    under15: List[float] = []
     over25: List[float] = []
     under25: List[float] = []
+    over35: List[float] = []
+    under35: List[float] = []
     for entry in odds_data or []:
         for bm in entry.get("bookmakers", []) or []:
             for bet in bm.get("bets", []) or []:
@@ -201,19 +205,35 @@ def _parse_api_sports_side_markets(odds_data: List[Dict[str, Any]]) -> Dict[str,
                             continue
                         if p <= 1.0:
                             continue
+                        if "over 1.5" in val or val in ("o1.5", "over 1.5"):
+                            over15.append(p)
+                        elif "under 1.5" in val or val in ("u1.5", "under 1.5"):
+                            under15.append(p)
                         if "over 2.5" in val or val in ("o2.5", "over 2.5"):
                             over25.append(p)
                         elif "under 2.5" in val or val in ("u2.5", "under 2.5"):
                             under25.append(p)
+                        if "over 3.5" in val or val in ("o3.5", "over 3.5"):
+                            over35.append(p)
+                        elif "under 3.5" in val or val in ("u3.5", "under 3.5"):
+                            under35.append(p)
     out: Dict[str, Any] = {}
     if btts_yes:
         out["btts_yes"] = max(btts_yes)
     if btts_no:
         out["btts_no"] = max(btts_no)
+    if over15:
+        out["over_1_5"] = max(over15)
+    if under15:
+        out["under_1_5"] = max(under15)
     if over25:
         out["over_2_5"] = max(over25)
     if under25:
         out["under_2_5"] = max(under25)
+    if over35:
+        out["over_3_5"] = max(over35)
+    if under35:
+        out["under_3_5"] = max(under35)
     return out
 
 
@@ -727,6 +747,14 @@ class DataAggregator:
         if side.get("over_2_5") or side.get("under_2_5"):
             market_odds["totals_2_5"] = {
                 k: v for k, v in (("over", side.get("over_2_5")), ("under", side.get("under_2_5"))) if v
+            }
+        if side.get("over_1_5") or side.get("under_1_5"):
+            market_odds["totals_1_5"] = {
+                k: v for k, v in (("over", side.get("over_1_5")), ("under", side.get("under_1_5"))) if v
+            }
+        if side.get("over_3_5") or side.get("under_3_5"):
+            market_odds["totals_3_5"] = {
+                k: v for k, v in (("over", side.get("over_3_5")), ("under", side.get("under_3_5"))) if v
             }
 
         as_ok = bool(as_home and as_draw and as_away and as_home > 1 and as_draw > 1 and as_away > 1)

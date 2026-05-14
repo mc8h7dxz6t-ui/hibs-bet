@@ -33,6 +33,7 @@
             <div class="hero-strip">
                 <h1 class="hero-title"><span class="hero-brand">hibs-bet</span> {{ fetch_days }}-Day Fixtures</h1>
                 <p class="hero-meta"><strong>{{ total }}</strong> fixtures <span class="live-pill"><span class="live-dot"></span> LIVE DATA</span></p>
+                <p class="hero-sub">Edinburgh betting intelligence · same crest &amp; pitch mood as classic view · tap any row for last 10 (scores, BTTS, xG when API ships it) plus full markets</p>
             </div>
 
             {% if not has_api_clients %}
@@ -98,12 +99,14 @@
                     {% for lg in day.leagues %}
                     <div class="lg-block" data-league-section="{{ lg.code }}">
                         <h3 class="lg-heading">{{ lg.name|upper }}</h3>
+                        <div class="ft-scroll-wrap">
                         <div class="ft-head" aria-hidden="true">
-                            <span>KO</span><span class="ft-h-match">MATCH</span><span>1</span><span>X</span><span>2</span><span>BTTS</span><span>O2.5</span><span>U2.5</span><span>O1.5</span><span class="ft-h-chev"></span>
+                            <span>KO</span><span class="ft-h-match">MATCH</span><span>1</span><span>X</span><span>2</span><span>BTTS</span><span>O1.5</span><span>O2.5</span><span>U2.5</span><span>O3.5</span><span>U3.5</span><span class="ft-h-chev"></span>
                         </div>
                         {% for fixture in lg.fixtures %}
                         {% include '_fixture_row_compact.html' %}
                         {% endfor %}
+                        </div>
                     </div>
                     {% endfor %}
                 </section>
