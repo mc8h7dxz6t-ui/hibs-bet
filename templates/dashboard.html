@@ -2,156 +2,235 @@
 {% block title %}hibs.bet — Live Dashboard{% endblock %}
 {% block container_class %} dash-outer{% endblock %}
 {% block content %}
-<div class="dash-layout">
-    <aside class="dash-sidebar" aria-label="Navigation and data health">
-        <div class="dash-side-brand">
-            <span class="brand-logo">hibs.bet</span>
-            <div class="dash-side-sub">Edinburgh Betting Intelligence</div>
+<div class="ref-page">
+    <header class="site-top">
+        <div class="site-top-left">
+            <img src="{{ url_for('static', filename='badge_harp_shield.png') }}" alt="Hibernian FC" class="site-crest" width="38" height="38">
+            <span class="site-wordmark">hibs.bet</span>
+            <nav class="site-links" aria-label="Primary">
+                <span class="site-link site-link-active">Dashboard</span>
+                <a href="/acca" class="site-link">Acca Builder</a>
+                <a href="/status" class="site-link">API status</a>
+                <span class="site-link site-link-muted" title="Coming soon">Saved Accas</span>
+                <span class="site-link site-link-muted" title="Coming soon">Insights</span>
+                <span class="site-link site-link-muted" title="Coming soon">Tables</span>
+                <span class="site-link site-link-muted" title="Coming soon">Guide</span>
+                <span class="site-link site-link-muted" title="Coming soon">Settings</span>
+            </nav>
         </div>
-        <nav class="dash-nav">
-            <a href="/acca" class="nav-btn">💰 Acca Builder</a>
-        </nav>
-        <div class="health-panel-title">API &amp; scraper health</div>
-        <div id="health-grid" class="health-grid">
-            <div class="health-row"><span class="health-name">Checking services…</span></div>
+        <div class="site-top-right">
+            <span class="pill-soft"><span class="dot dot-pulse" style="width:8px;height:8px;"></span> Balanced</span>
+            <div class="odds-toggle" role="group" aria-label="Odds format">
+                <button type="button" class="ot ot-active" data-odds="dec">Dec</button>
+                <button type="button" class="ot" data-odds="frac">Frac</button>
+            </div>
+            <button type="button" class="btn-refresh" id="btn-refresh">Refresh</button>
         </div>
-    </aside>
+    </header>
 
-    <main class="dash-main">
-        <div class="sticky-stack">
-            <header>
-                <div class="brand">
-                    <span class="brand-logo" style="font-size:1.5em;">hibs.bet</span>
-                    <div>
-                        <div class="brand-sub">Live fixtures</div>
-                        <div class="brand-sub" style="margin-top:2px;font-size:0.65em;color:var(--muted);">Tap any card to expand</div>
-                    </div>
-                </div>
-                <div class="header-right">
-                    <span class="stat-pill">⚽ {{ total }} fixtures</span>
-                    <span class="stat-pill gold">⚡ {{ value_bet_count }} value bets</span>
-                    <a href="/acca" class="nav-btn">💰 Acca</a>
-                </div>
-            </header>
-
-            <div class="filter-toolbar" role="region" aria-label="Fixture filters">
-                <label for="flt-league">League</label>
-                <select id="flt-league" aria-label="Filter by league">
-                    <option value="">All leagues</option>
-                    {% for code, name in leagues_for_filter %}
-                    <option value="{{ code }}">{{ name }}</option>
-                    {% endfor %}
-                </select>
-                <label><input type="checkbox" id="flt-value" aria-label="Show only fixtures with value bets"> Verified value bets only</label>
+    <div class="ref-cols">
+        <div class="ref-primary">
+            <div class="hero-strip">
+                <h1 class="hero-title"><span class="hero-brand">hibs.bet</span> {{ fetch_days }}-Day Fixtures</h1>
+                <p class="hero-meta"><strong>{{ total }}</strong> fixtures <span class="live-pill"><span class="live-dot"></span> LIVE DATA</span></p>
             </div>
 
-            <div class="tab-bar">
-                <button class="tab-btn gold-tab active" data-tab-group="main" onclick="switchTab(event,'tab-value','main')">⚡ Value ({{ value_bet_count }})</button>
-                <button class="tab-btn" data-tab-group="main" onclick="switchTab(event,'tab-all','main')">⚽ All ({{ total }})</button>
-                {% for region in league_regions %}
-                <button class="tab-btn" data-tab-group="main" onclick="switchTab(event,'tab-r{{ loop.index }}','main')">{{ region }}</button>
+            {% if not has_api_clients %}
+            <div class="api-missing-banner" role="alert">
+                <strong>No fixture API keys loaded.</strong> Add <code>API_SPORTS_FOOTBALL_KEY</code> and/or <code>FOOTBALL_DATA_ORG_KEY</code> to your <code>.env</code>, then restart.
+            </div>
+            {% endif %}
+
+            <div class="search-chips">
+                <input type="search" id="dash-search" class="dash-search" placeholder="Search teams…" autocomplete="off" aria-label="Search fixtures">
+                <label class="chk-inline"><input type="checkbox" id="flt-value"> Value bets only</label>
+                <label class="chk-inline" title="Only matches meeting data coverage threshold (see expand panel)."><input type="checkbox" id="flt-data-full"> Full data (≥{{ data_quality_ui_min }}%)</label>
+                <p class="chip-hint">League shortcuts only show competitions with at least <strong>{{ min_league_chip_fixtures }}</strong> upcoming fixtures in this window (better form/xG coverage). Use <strong>All</strong> to browse every game.</p>
+                <div class="chip-row" id="chip-row">
+                    <button type="button" class="chip chip-lg active" data-league="">All</button>
+                    {% for code, name in leagues_for_filter %}
+                    <button type="button" class="chip chip-lg" data-league="{{ code }}">{{ name }}</button>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <details class="acca-week-card">
+                <summary class="acca-week-sum">
+                    <span class="acca-week-ico">🏆</span>
+                    <span class="acca-week-txt">Best Acca of the Week</span>
+                    <span class="ai-pill">AI PICKS</span>
+                    <span class="acca-week-sub">Up to 5 legs · ranked by edge &amp; Kelly · <a href="/acca">Acca Builder</a></span>
+                </summary>
+                <p class="muted small" style="padding:0 14px 12px;">Open Acca Builder to combine value lines. Legs are sorted by model ROI where book odds exist.</p>
+            </details>
+
+            {% if value_bets and value_bets|length > 0 %}
+            <div class="value-strip-title">⚡ TOP VALUE BETS TODAY</div>
+            <div class="value-strip">
+                {% for vf in value_bets[:3] %}
+                {% set pr = vf.prediction %}
+                {% set top = pr.value_bets_display[0] if pr.value_bets_display is defined and pr.value_bets_display else none %}
+                <div class="value-strip-card">
+                    <div class="vsc-meta">{{ vf.home }} <span class="vsc-vs">v</span> {{ vf.away }}</div>
+                    {% if top %}
+                    <div class="vsc-pick">{{ top.market_label }}</div>
+                    <div class="vsc-odds">{{ "%.2f"|format(top.odds) }}</div>
+                    <div class="vsc-edge">+{{ "%.1f"|format(top.edge_pct) }}% edge</div>
+                    <div class="vsc-kelly">{{ top.kelly.suggested_percent }}% Kelly</div>
+                    {% else %}
+                    <div class="vsc-pick">Value</div>
+                    <div class="vsc-odds">—</div>
+                    {% endif %}
+                </div>
                 {% endfor %}
             </div>
+            {% endif %}
+
+            <div id="dash-fixture-root" data-dq-min="{{ data_quality_ui_min }}">
+                {% if total == 0 %}
+                <div class="empty-state"><div class="icon">📡</div>
+                    <p>No fixtures in the next {{ fetch_days }} days.</p>
+                </div>
+                {% else %}
+                {% for day in dashboard_days %}
+                <section class="day-block" data-date="{{ day.date_iso }}">
+                    <h2 class="day-heading">{{ day.heading }}</h2>
+                    {% for lg in day.leagues %}
+                    <div class="lg-block" data-league-section="{{ lg.code }}">
+                        <h3 class="lg-heading">{{ lg.name|upper }}</h3>
+                        <div class="ft-head" aria-hidden="true">
+                            <span>KO</span><span class="ft-h-match">MATCH</span><span>1</span><span>X</span><span>2</span><span>BTTS</span><span>O2.5</span><span>U2.5</span><span>O1.5</span><span class="ft-h-chev"></span>
+                        </div>
+                        {% for fixture in lg.fixtures %}
+                        {% include '_fixture_row_compact.html' %}
+                        {% endfor %}
+                    </div>
+                    {% endfor %}
+                </section>
+                {% endfor %}
+                {% endif %}
+            </div>
         </div>
 
-        <div id="tab-value" class="tab-panel active" data-group="main">
-            {% if value_bets %}
-            <div class="fixtures-grid">{% for fixture in value_bets %}{% include '_fixture_card.html' %}{% endfor %}</div>
-            {% else %}
-            <div class="empty-state"><div class="icon">🔍</div><p>No value bets right now. Open All fixtures or adjust filters.</p></div>
-            {% endif %}
-        </div>
-
-        <div id="tab-all" class="tab-panel" data-group="main">
-            {% if all_fixtures %}
-            <div class="fixtures-grid">{% for fixture in all_fixtures %}{% include '_fixture_card.html' %}{% endfor %}</div>
-            {% else %}
-            <div class="empty-state"><div class="icon">📅</div><p>No fixtures in the next few days.</p></div>
-            {% endif %}
-        </div>
-
-        {% for region, codes in league_regions.items() %}
-        <div id="tab-r{{ loop.index }}" class="tab-panel" data-group="main">
-            {% set rf = by_region[region] %}
-            {% if rf %}
-            <div class="fixtures-grid">{% for fixture in rf %}{% include '_fixture_card.html' %}{% endfor %}</div>
-            {% else %}
-            <div class="empty-state"><div class="icon">📅</div><p>No {{ region }} fixtures in the window.</p></div>
-            {% endif %}
-        </div>
-        {% endfor %}
-    </main>
+        <aside class="acca-rail" aria-label="Acca slip">
+            <div class="acca-rail-card">
+                <div class="acca-rail-hd">Your Acca</div>
+                <div class="acca-rail-st">Selections: <strong>0</strong></div>
+                <div class="acca-rail-st">Total Odds: <strong>1.00</strong></div>
+                <div class="acca-rail-empty">🏆<br>Add selections from fixtures below</div>
+                <label class="acca-rail-lbl" for="stake-ph">Stake (£)</label>
+                <input id="stake-ph" class="acca-rail-input" type="text" placeholder="0.00" disabled>
+                <a href="/acca" class="acca-rail-btn">Save Acca</a>
+                <button type="button" class="acca-rail-sec" disabled>⚡ Bankroll Simulator</button>
+                <div class="acca-rail-books">
+                    <span class="book-pill">William Hill</span>
+                    <span class="book-pill">Ladbrokes</span>
+                </div>
+            </div>
+            <div class="rail-status-link">
+                <a href="/status" class="nav-btn" style="display:block;text-align:center;width:100%;box-sizing:border-box;">API &amp; scraper status →</a>
+                <p class="chip-hint" style="margin-top:8px;margin-bottom:0;">Full latency checks, errors, and scraper drift on the status page.</p>
+            </div>
+        </aside>
+    </div>
 </div>
 {% endblock %}
 {% block extra_js %}
 <script>
 (function () {
+    var activeLeague = '';
+    var searchQ = '';
+    var fullDataOnly = false;
+
     function applyDashFilters() {
-        var leagueSel = document.getElementById('flt-league');
         var valCb = document.getElementById('flt-value');
-        if (!leagueSel || !valCb) return;
-        var lg = leagueSel.value || '';
-        var valOnly = valCb.checked;
-        document.querySelectorAll('.tab-panel .fixture-card').forEach(function (card) {
+        var valOnly = valCb ? valCb.checked : false;
+        var root = document.getElementById('dash-fixture-root');
+        var dqMin = root ? parseFloat(root.getAttribute('data-dq-min') || '85') : 85;
+        if (isNaN(dqMin)) dqMin = 85;
+        document.querySelectorAll('#dash-fixture-root .fixture-card').forEach(function (card) {
+            var lg = activeLeague;
             var okL = !lg || card.getAttribute('data-league') === lg;
             var okV = !valOnly || card.getAttribute('data-has-value') === '1';
-            card.style.display = (okL && okV) ? '' : 'none';
+            var hay = (card.getAttribute('data-search') || '');
+            var okS = !searchQ || hay.indexOf(searchQ) !== -1;
+            var dq = parseFloat(card.getAttribute('data-data-q') || '0');
+            if (isNaN(dq)) dq = 0;
+            var okD = !fullDataOnly || dq >= dqMin;
+            var show = okL && okV && okS && okD;
+            card.style.display = show ? '' : 'none';
+        });
+        document.querySelectorAll('.lg-block').forEach(function (block) {
+            var vis = false;
+            block.querySelectorAll('.fixture-card').forEach(function (c) {
+                if (c.style.display !== 'none') vis = true;
+            });
+            block.style.display = vis ? '' : 'none';
+        });
+        document.querySelectorAll('.day-block').forEach(function (day) {
+            var v = false;
+            day.querySelectorAll('.lg-block').forEach(function (b) {
+                if (b.style.display !== 'none') v = true;
+            });
+            day.style.display = v ? '' : 'none';
         });
     }
 
-    function wireFilters() {
-        var leagueSel = document.getElementById('flt-league');
-        var valCb = document.getElementById('flt-value');
-        if (leagueSel) leagueSel.addEventListener('change', applyDashFilters);
-        if (valCb) valCb.addEventListener('change', applyDashFilters);
-        document.addEventListener('hibs-tab-change', applyDashFilters);
+    function wireChips() {
+        var row = document.getElementById('chip-row');
+        if (!row) return;
+        row.querySelectorAll('.chip').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                row.querySelectorAll('.chip').forEach(function (b) { b.classList.remove('active'); });
+                btn.classList.add('active');
+                activeLeague = btn.getAttribute('data-league') || '';
+                applyDashFilters();
+            });
+        });
     }
 
-    async function loadHealth() {
-        var root = document.getElementById('health-grid');
-        if (!root) return;
-        var okMs = 200;
-        try {
-            var res = await fetch('/api/health');
-            var d = await res.json();
-            okMs = d.latency_ok_ms || 200;
-            var html = '';
-            (d.apis || []).forEach(function (a) {
-                var dotClass = 'dot ';
-                if (a.ok && a.ms != null && a.ms < okMs) dotClass += 'dot-pulse';
-                else if (a.ok) dotClass += 'dot-warn';
-                else dotClass += 'dot-bad';
-                var ms = a.ms != null ? '<span class="health-ms">' + a.ms + 'ms</span>' : '<span class="health-ms">—</span>';
-                var err = a.error ? '<span class="health-ms" title="' + String(a.error).replace(/"/g, '&quot;') + '">!</span>' : '';
-                html += '<div class="health-row"><span class="health-name">' + (a.label || a.id) + '</span><div class="health-meta"><span class="' + dotClass + '"></span>' + ms + err + '</div></div>';
+    function wireSearch() {
+        var inp = document.getElementById('dash-search');
+        if (!inp) return;
+        inp.addEventListener('input', function () {
+            searchQ = (inp.value || '').trim().toLowerCase();
+            applyDashFilters();
+        });
+    }
+
+    function wireRefresh() {
+        var b = document.getElementById('btn-refresh');
+        if (b) b.addEventListener('click', function () { window.location.reload(); });
+    }
+
+    function wireOddsToggle() {
+        var g = document.querySelector('.odds-toggle');
+        if (!g) return;
+        g.querySelectorAll('.ot').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                g.querySelectorAll('.ot').forEach(function (x) { x.classList.remove('ot-active'); });
+                btn.classList.add('ot-active');
             });
-            (d.scrapers || []).forEach(function (s) {
-                var dotClass = 'dot ';
-                if (s.ok && s.ms != null && s.ms < okMs) dotClass += 'dot-pulse';
-                else if (s.ok) dotClass += 'dot-warn';
-                else dotClass += 'dot-bad';
-                var ms = s.ms != null ? '<span class="health-ms">' + s.ms + 'ms</span>' : '<span class="health-ms">—</span>';
-                var badge = (s.error_code === 'LAYOUT_BROKEN') ? '<span class="badge-layout">LAYOUT_BROKEN</span>' : '';
-                html += '<div class="health-row"><span class="health-name">' + (s.label || s.id) + '</span><div class="health-meta">' + badge + '<span class="' + dotClass + '"></span>' + ms + '</div></div>';
-            });
-            root.innerHTML = html || '<div class="health-row"><span class="health-name">No health rows</span></div>';
-        } catch (e) {
-            root.innerHTML = '<div class="health-row"><span class="health-name">Health check unavailable</span><span class="dot dot-bad"></span></div>';
-        }
+        });
+    }
+
+    function wireVal() {
+        var v = document.getElementById('flt-value');
+        if (v) v.addEventListener('change', applyDashFilters);
+        var fd = document.getElementById('flt-data-full');
+        if (fd) fd.addEventListener('change', function () {
+            fullDataOnly = fd.checked;
+            applyDashFilters();
+        });
     }
 
     document.addEventListener('DOMContentLoaded', function () {
-        if ({{ value_bet_count }} === 0) {
-            document.querySelectorAll('[data-group="main"]').forEach(function (p) { p.classList.remove('active'); });
-            document.querySelectorAll('[data-tab-group="main"]').forEach(function (b) { b.classList.remove('active'); });
-            var allPanel = document.getElementById('tab-all');
-            if (allPanel) allPanel.classList.add('active');
-            var btns = document.querySelectorAll('.tab-bar .tab-btn');
-            if (btns[1]) btns[1].classList.add('active');
-        }
-        wireFilters();
+        wireChips();
+        wireSearch();
+        wireVal();
+        wireRefresh();
+        wireOddsToggle();
         applyDashFilters();
-        loadHealth();
     });
 })();
 </script>

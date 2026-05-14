@@ -166,6 +166,8 @@ def run_train(use_sample: bool = False) -> None:
 
 
 def run_predict(args: argparse.Namespace) -> None:
+    import numpy as np
+
     pipeline = load_model()
     fixture = [
         [
@@ -180,10 +182,17 @@ def run_predict(args: argparse.Namespace) -> None:
         ]
     ]
     probs = predict_probabilities(pipeline, fixture)[0]
+    arr = np.asarray(probs, dtype=float).ravel()
+    if arr.size != 3:
+        print(f"Prediction for {args.home} vs {args.away} in {args.league}:")
+        print(f"  Model output has {arr.size} class(es): {arr}. Expected 3 (home/draw/away).")
+        print("  Train with: python3 -m hibs_predictor.main train (API fixtures + odds) for full 1X2.")
+        return
+    ph, pd, pa = float(arr[0]), float(arr[1]), float(arr[2])
     print(f"Prediction for {args.home} vs {args.away} in {args.league}:")
-    print(f"  Home win chance: {probs[0]:.2f}")
-    print(f"  Draw chance: {probs[1]:.2f}")
-    print(f"  Away win chance: {probs[2]:.2f}")
+    print(f"  Home win chance: {ph:.2f}")
+    print(f"  Draw chance: {pd:.2f}")
+    print(f"  Away win chance: {pa:.2f}")
 
 
 def run_setup() -> None:
@@ -230,6 +239,67 @@ def run_web() -> None:
         print("Flask not installed. Run: pip install -r requirements.txt")
 
 
+def run_pred_log_sync(args: argparse.Namespace) -> None:
+    """Backfill finished scores into rows logged by prediction_log (API-Football)."""
+    load_dotenv()
+    from hibs_predictor.prediction_log import _db_path, _enabled, sync_finished_results
+
+    if not _enabled() and not os.path.isfile(_db_path()):
+        print(
+            "No prediction audit database found. Enable HIBS_PREDICTION_LOG_ENABLED=1, "
+            "then use the web dashboard or predictions so snapshots are created."
+        )
+        sys.exit(1)
+    from hibs_predictor.data_aggregator import DataAggregator
+
+    agg = DataAggregator()
+    if "api_sports" not in agg.clients:
+        print("API_SPORTS_FOOTBALL_KEY is required to sync finished results.")
+        sys.exit(1)
+    n = sync_finished_results(
+        agg.clients["api_sports"].fetch_fixture,
+        max_fixtures=int(args.max_fixtures),
+        min_after_kickoff_hours=float(args.min_after_kickoff_hours),
+    )
+    print(f"Updated snapshot row(s): {n}")
+
+
+def run_pred_log_report(args: argparse.Namespace) -> None:
+    """Print JSON summary of scored prediction snapshots (Brier, log loss, buckets)."""
+    import json
+
+    load_dotenv()
+    from hibs_predictor.prediction_log import export_scored_csv, report_summary_dict
+
+    rep = report_summary_dict()
+    if getattr(args, "csv", None):
+        rep["csv_rows_written"] = export_scored_csv(args.csv)
+        rep["csv_path"] = args.csv
+    print(json.dumps(rep, indent=2))
+
+
+def run_pred_log_prune(args: argparse.Namespace) -> None:
+    """Delete old prediction_snapshots rows by captured_at (retention)."""
+    load_dotenv()
+    from hibs_predictor.prediction_log import _db_path, _enabled, prune_old_rows
+
+    if not _enabled() and not os.path.isfile(_db_path()):
+        print("No prediction audit database to prune.")
+        sys.exit(1)
+    n = prune_old_rows(args.days)
+    print(f"Deleted {n} snapshot row(s).")
+
+
+def run_data_sources_probe() -> None:
+    """Print JSON reliability probe for APIs + scrapers + StatsBomb open data (needs network)."""
+    import json
+
+    from hibs_predictor.data_source_reliability import run_all_probes
+
+    payload = run_all_probes()
+    print(json.dumps(payload, indent=2))
+
+
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Hibs-themed bet predictor for UK and European football")
     subparsers = parser.add_subparsers(dest="command")
@@ -250,6 +320,38 @@ def create_parser() -> argparse.ArgumentParser:
     setup_parser = subparsers.add_parser("setup", help="Interactive API key setup")
     web_parser = subparsers.add_parser("web", help="Launch Flask web dashboard")
 
+    pred_sync = subparsers.add_parser(
+        "pred-log-sync",
+        help="Backfill FT results into prediction audit DB (needs API_SPORTS_FOOTBALL_KEY)",
+    )
+    pred_sync.add_argument("--max", dest="max_fixtures", type=int, default=400, help="Max distinct fixtures to poll")
+    pred_sync.add_argument(
+        "--min-after-kickoff-hours",
+        type=float,
+        default=2.5,
+        help="Skip API calls for fixtures whose kickoff is sooner than this many hours ago",
+    )
+
+    pred_report = subparsers.add_parser("pred-log-report", help="Print JSON metrics for scored prediction snapshots")
+    pred_report.add_argument(
+        "--csv",
+        metavar="PATH",
+        help="Also write scored rows to CSV at this path",
+    )
+
+    pred_prune = subparsers.add_parser("pred-log-prune", help="Delete old rows from prediction audit DB")
+    pred_prune.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        help="Delete snapshots older than this many days (default: HIBS_PREDICTION_LOG_RETAIN_DAYS)",
+    )
+
+    subparsers.add_parser(
+        "data-sources-probe",
+        help="JSON probe: policy window + reliability of StatsBomb/Understat/FBref/Sofascore/API-Football",
+    )
+
     return parser
 
 
@@ -265,6 +367,14 @@ def main() -> None:
         run_setup()
     elif args.command == "web":
         run_web()
+    elif args.command == "pred-log-sync":
+        run_pred_log_sync(args)
+    elif args.command == "pred-log-report":
+        run_pred_log_report(args)
+    elif args.command == "pred-log-prune":
+        run_pred_log_prune(args)
+    elif args.command == "data-sources-probe":
+        run_data_sources_probe()
     else:
         parser.print_help()
 

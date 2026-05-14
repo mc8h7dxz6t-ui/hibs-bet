@@ -16,7 +16,9 @@ from hibs_predictor.api_clients import (
 from hibs_predictor.betting_engine import TeamStrengthCalculator
 from hibs_predictor.config import LEAGUES
 from hibs_predictor.cache import Cache
+from hibs_predictor.data_quality import compute_fixture_data_quality
 from hibs_predictor.scrapers.supplemental import collect_supplemental
+from hibs_predictor.scrapers import wikipedia_standings as wiki_standings
 
 
 def _extract_goals_totals_from_api_stats(team_stats: Dict[str, Any]) -> Tuple[int, int]:
@@ -215,13 +217,6 @@ class DataAggregator:
 
     def enrich_fixture(self, fixture: Dict[str, Any], league_code: str = "EPL") -> Dict[str, Any]:
         """Enrich a fixture with comprehensive data from multiple sources."""
-        fixture_id = fixture.get("fixture", {}).get("id") or fixture.get("id", "")
-        cache_key = f"enriched_fixture_{fixture_id}_{league_code}"
-        cached = self.cache.get(cache_key, ttl_hours=2)
-        if cached:
-            return cached
-
-        enriched = dict(fixture)
         league = LEAGUES.get(league_code, {})
         league_api_id = league.get("api_sports_id")
         now = datetime.now()
@@ -230,6 +225,29 @@ class DataAggregator:
         home_id = fixture.get("teams", {}).get("home", {}).get("id")
         away_id = fixture.get("teams", {}).get("away", {}).get("id")
 
+        fx = fixture.get("fixture")
+        raw_fid = fx.get("id") if isinstance(fx, dict) else None
+        if raw_fid is None:
+            raw_fid = fixture.get("id")
+        fixture_id_str = str(raw_fid).strip() if raw_fid not in (None, "", 0, "0") else ""
+        hk = (fixture.get("teams", {}) or {}).get("home", {}).get("name") or (fixture.get("home", {}) or {}).get("name", "?")
+        ak = (fixture.get("teams", {}) or {}).get("away", {}).get("name") or (fixture.get("away", {}) or {}).get("name", "?")
+        dt = str(fixture.get("date", ""))
+        if fixture_id_str:
+            cache_key = f"enriched_fixture_{fixture_id_str}_{league_code}_dq2"
+        else:
+            cache_key = f"enriched_fixture_teams_{league_code}_{hk}|{ak}|{dt}_dq2"
+
+        try:
+            fixture_id_for_xg = int(raw_fid) if raw_fid not in (None, "", "0", 0) else None
+        except (TypeError, ValueError):
+            fixture_id_for_xg = None
+
+        cached = self.cache.get(cache_key, ttl_hours=2)
+        if cached:
+            return cached
+
+        enriched = dict(fixture)
         enriched["home_recent"] = self._fetch_team_recent_matches(home_id)
         enriched["away_recent"] = self._fetch_team_recent_matches(away_id)
 
@@ -257,15 +275,36 @@ class DataAggregator:
             away_id, enriched["away_recent"], is_home=False
         )
 
-        if league_api_id:
-            enriched["home_position"] = self._fetch_team_position(home_id, league_api_id, season)
-            enriched["away_position"] = self._fetch_team_position(away_id, league_api_id, season)
-        else:
-            enriched["home_position"] = {}
-            enriched["away_position"] = {}
+        home_nm = fixture.get("home", {}).get("name") or fixture.get("teams", {}).get("home", {}).get("name", "")
+        away_nm = fixture.get("away", {}).get("name") or fixture.get("teams", {}).get("away", {}).get("name", "")
+        prefer_wiki = os.getenv("HIBS_PREFER_SCRAPED_STANDINGS", "1").lower() in ("1", "true", "yes")
+        wiki_rows: List[Dict[str, Any]] = []
+        if prefer_wiki and league_code in wiki_standings.WP_SUFFIX:
+            wiki_rows = self._cached_wikipedia_league_table(league_code)
 
-        enriched["xg_home"], enriched["xg_away"] = self._fetch_expected_goals(
-            fixture_id, home_rates, away_rates, league.get("strength_factor", 1.0)
+        hp: Dict[str, Any] = {}
+        ap: Dict[str, Any] = {}
+        if wiki_rows:
+            wr = wiki_standings.find_team_row(wiki_rows, home_nm)
+            arw = wiki_standings.find_team_row(wiki_rows, away_nm)
+            if wr:
+                hp = wiki_standings.row_to_position_shape(wr)
+            if arw:
+                ap = wiki_standings.row_to_position_shape(arw)
+
+        if league_api_id and "api_sports" in self.clients:
+            skip_api_tbl = os.getenv("HIBS_SKIP_API_STANDINGS", "0").lower() in ("1", "true", "yes")
+            if not skip_api_tbl:
+                if not hp.get("position"):
+                    hp = self._fetch_team_position(home_id, league_api_id, season) or hp
+                if not ap.get("position"):
+                    ap = self._fetch_team_position(away_id, league_api_id, season) or ap
+
+        enriched["home_position"] = hp
+        enriched["away_position"] = ap
+
+        enriched["xg_home"], enriched["xg_away"], enriched["xg_source"] = self._fetch_expected_goals(
+            fixture_id_for_xg, home_rates, away_rates, league.get("strength_factor", 1.0)
         )
         bundle = self._fetch_odds_bundle(fixture, league_code)
         enriched["odds_home"] = bundle["odds_home"]
@@ -279,10 +318,14 @@ class DataAggregator:
         enriched["market_odds"] = bundle["market_odds"]
         enriched["league_factor"] = league.get("strength_factor", 1.0)
         try:
-            fid_int = int(fixture_id) if fixture_id else 0
+            fid_int = int(raw_fid) if raw_fid not in (None, "", "0", 0) else 0
         except (TypeError, ValueError):
             fid_int = 0
-        if fid_int and "api_sports" in self.clients:
+        if fid_int and "api_sports" in self.clients and os.getenv("HIBS_SKIP_API_INJURIES", "0").lower() not in (
+            "1",
+            "true",
+            "yes",
+        ):
             try:
                 enriched["fixture_injuries"] = self.clients["api_sports"].fetch_injuries(fid_int)
             except Exception:
@@ -290,6 +333,7 @@ class DataAggregator:
         else:
             enriched["fixture_injuries"] = []
         enriched["supplemental"] = collect_supplemental(fixture, league_code, enriched)
+        enriched["data_quality"] = compute_fixture_data_quality(enriched)
 
         self.cache.set(cache_key, enriched, ttl_hours=2)
         return enriched
@@ -384,6 +428,17 @@ class DataAggregator:
             pass
         return {}
 
+    def _cached_wikipedia_league_table(self, league_code: str) -> List[Dict[str, Any]]:
+        """One Wikipedia standings parse per league per ~12h (disk cache)."""
+        sk = wiki_standings._season_wiki_title_part()
+        cache_key = f"wiki_stand_{league_code}_{sk}"
+        cached = self.cache.get(cache_key, ttl_hours=12)
+        if cached is not None:
+            return cached if isinstance(cached, list) else []
+        rows = wiki_standings.fetch_league_table(league_code)
+        self.cache.set(cache_key, rows, ttl_hours=12)
+        return rows
+
     def _fetch_team_recent_matches(self, team_id: Optional[int], limit: int = 10) -> List[Dict[str, Any]]:
         """Fetch team's last matches from API-Sports."""
         if not team_id:
@@ -410,20 +465,31 @@ class DataAggregator:
         home_rates: Dict[str, float],
         away_rates: Dict[str, float],
         league_strength: float,
-    ) -> Tuple[float, float]:
-        """Expected goals from APIs; fall back to attack vs defence estimates from recent real results."""
-        if not fixture_id:
-            return self._lambda_from_rates(home_rates, away_rates, league_strength)
+    ) -> Tuple[float, float, str]:
+        """Expected goals from APIs; fall back to attack vs defence estimates from recent real results.
 
-        cache_key = f"xg_data_{fixture_id}"
+        Returns (xg_home, xg_away, source_tag) where source_tag is one of:
+        api_fixture_xg, stats_api_xg, mixed_api_goals_proxy, goals_proxy.
+        """
+        if not fixture_id:
+            h, a = self._lambda_from_rates(home_rates, away_rates, league_strength)
+            return (h, a, "goals_proxy")
+
+        cache_key = f"xg_data_v2_{fixture_id}"
         cached = self.cache.get(cache_key, ttl_hours=6)
-        if cached:
-            return cached
+        if isinstance(cached, (list, tuple)) and len(cached) >= 3:
+            return float(cached[0]), float(cached[1]), str(cached[2])
 
         xg_home: Optional[float] = None
         xg_away: Optional[float] = None
+        from_stats_api = False
+        filled_via_api_fixture = False
 
-        if "stats_api" in self.clients:
+        if "stats_api" in self.clients and os.getenv("HIBS_SKIP_RAPID_STATS_XG", "1").lower() not in (
+            "1",
+            "true",
+            "yes",
+        ):
             try:
                 xg_data = self.clients["stats_api"].fetch_xg_data(fixture_id)
                 resp = xg_data.get("response") if isinstance(xg_data, dict) else None
@@ -440,6 +506,8 @@ class DataAggregator:
                             xg_home = val
                         else:
                             xg_away = val
+                    if xg_home and xg_away:
+                        from_stats_api = True
             except Exception:
                 pass
 
@@ -462,20 +530,30 @@ class DataAggregator:
                         hid = fixture_data.get("teams", {}).get("home", {}).get("id")
                         if tid == hid:
                             xg_home = val
+                            filled_via_api_fixture = True
                         else:
                             xg_away = val
+                            filled_via_api_fixture = True
             except Exception:
                 pass
 
         if xg_home is not None and xg_away is not None and xg_home > 0 and xg_away > 0:
-            result = (xg_home, xg_away)
+            if filled_via_api_fixture:
+                tag = "api_fixture_xg"
+            elif from_stats_api:
+                tag = "stats_api_xg"
+            else:
+                tag = "mixed_api_goals_proxy"
+            result = (float(xg_home), float(xg_away), tag)
             self.cache.set(cache_key, result, ttl_hours=6)
             return result
 
         est_h, est_a = self._lambda_from_rates(home_rates, away_rates, league_strength)
         use_h = xg_home if xg_home and xg_home > 0 else est_h
         use_a = xg_away if xg_away and xg_away > 0 else est_a
-        out = (use_h, use_a)
+        had_any = (xg_home is not None and xg_home > 0) or (xg_away is not None and xg_away > 0)
+        tag = "mixed_api_goals_proxy" if had_any else "goals_proxy"
+        out = (float(use_h), float(use_a), tag)
         self.cache.set(cache_key, out, ttl_hours=6)
         return out
 
@@ -509,7 +587,10 @@ class DataAggregator:
         all_bookmakers: List = []
         api_odds_raw: List[Dict[str, Any]] = []
 
-        if "odds_api" in self.clients:
+        if (
+            "odds_api" in self.clients
+            and os.getenv("HIBS_SKIP_ODDS_API", "1").lower() not in ("1", "true", "yes")
+        ):
             try:
                 events = self.clients["odds_api"].fetch_odds_for_league(league_code)
                 for event in events or []:

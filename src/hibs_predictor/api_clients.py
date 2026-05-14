@@ -58,9 +58,22 @@ class FootballDataOrgClient(BaseApiClient):
     def __init__(self, api_key: str) -> None:
         super().__init__(api_key, "https://api.football-data.org/v4", "X-Auth-Token", "football_data_org")
 
-    def fetch_fixtures(self, competition_code: str, season: int, status: str = "SCHEDULED") -> List[Dict[str, Any]]:
+    def fetch_fixtures(
+        self,
+        competition_code: str,
+        season: int,
+        status: Optional[str] = "SCHEDULED",
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         endpoint = f"competitions/{competition_code}/matches"
-        params = {"season": season, "status": status}
+        params: Dict[str, Any] = {"season": season}
+        if status:
+            params["status"] = status
+        if date_from:
+            params["dateFrom"] = date_from
+        if date_to:
+            params["dateTo"] = date_to
         data = self._get_json(endpoint, params=params)
         if not isinstance(data, dict):
             return []

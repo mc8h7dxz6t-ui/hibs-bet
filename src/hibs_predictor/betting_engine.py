@@ -1,10 +1,13 @@
 """Refined betting engine with Poisson model, fixed Kelly Criterion, and clear value bet output."""
 
 import math
+import os
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 
 import numpy as np
+
+from hibs_predictor.calibrated_lambdas import calibrated_match_lambdas
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
 
@@ -186,6 +189,34 @@ class OddsAnalyzer:
 
 class BettingEngine:
 
+    @staticmethod
+    def _blend_1x2_toward_implied(
+        probs: Dict[str, float],
+        book: Dict[str, float],
+        strength: float,
+    ) -> Dict[str, float]:
+        """Pull 1X2 model mass slightly toward de-vig implied odds (fewer spurious value flags)."""
+        if strength <= 0 or not book:
+            return probs
+        impl: Dict[str, float] = {}
+        for k in ("home", "draw", "away"):
+            o = book.get(k)
+            if o is None or float(o) <= 1.0:
+                return probs
+            impl[k] = OddsAnalyzer.decimal_to_probability(float(o))
+        s = sum(impl.values())
+        if s <= 0:
+            return probs
+        impl = {k: impl[k] / s for k in impl}
+        out: Dict[str, float] = {}
+        for k in ("home", "draw", "away"):
+            e = float(probs.get(k, 1.0 / 3.0))
+            out[k] = e * (1.0 - strength) + impl[k] * strength
+        t = sum(out.values())
+        if t <= 0:
+            return probs
+        return {k: max(1e-6, v / t) for k, v in out.items()}
+
     def __init__(self, clients: Dict[str, Any]) -> None:
         self.clients = clients
         self.scaler = StandardScaler()
@@ -221,6 +252,51 @@ class BettingEngine:
         """Decimal odds with no vig from a win probability (for feature fill-in only)."""
         p = max(0.03, min(0.97, float(p)))
         return max(1.02, min(80.0, 1.0 / p))
+
+    @staticmethod
+    def _read_1x2_mode() -> str:
+        """ensemble: ML+Poisson(raw). calibrated_poisson: HA+Elo-proxy Poisson only. blend_all: weighted mix of three 1X2 heads."""
+        m = (os.getenv("HIBS_1X2_MODE") or "ensemble").strip().lower()
+        if m in ("calibrated_poisson", "blend_all", "ensemble"):
+            return m
+        return "ensemble"
+
+    @staticmethod
+    def _read_blend_weights() -> Tuple[float, float, float]:
+        def _f(name: str, default: float) -> float:
+            try:
+                return float(os.getenv(name, str(default)))
+            except ValueError:
+                return default
+
+        w_ml = _f("HIBS_BLEND_W_ML", 1.0 / 3.0)
+        w_raw = _f("HIBS_BLEND_W_POISSON_RAW", 1.0 / 3.0)
+        w_cal = _f("HIBS_BLEND_W_POISSON_CAL", 1.0 / 3.0)
+        s = w_ml + w_raw + w_cal
+        if s <= 0:
+            return (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0)
+        return (w_ml / s, w_raw / s, w_cal / s)
+
+    @staticmethod
+    def _merge_three_1x2(
+        p_ml: Dict[str, float],
+        p_raw: Dict[str, float],
+        p_cal: Dict[str, float],
+        w_ml: float,
+        w_raw: float,
+        w_cal: float,
+    ) -> Dict[str, float]:
+        out: Dict[str, float] = {}
+        for k in ("home", "draw", "away"):
+            out[k] = (
+                float(p_ml.get(k, 0.0)) * w_ml
+                + float(p_raw.get(k, 0.0)) * w_raw
+                + float(p_cal.get(k, 0.0)) * w_cal
+            )
+        t = sum(out.values())
+        if t <= 0:
+            return {"home": 1.0 / 3.0, "draw": 1.0 / 3.0, "away": 1.0 / 3.0}
+        return {k: max(1e-9, v / t) for k, v in out.items()}
 
     def _poisson_btts_probability(self, lam_h: float, lam_a: float) -> float:
         """Independent Poisson: both teams score at least once."""
@@ -345,13 +421,62 @@ class BettingEngine:
             }
         except Exception:
             ml_probs = {"home": 0.33, "draw": 0.34, "away": 0.33}
-        xg_home = metadata["xg_home"]
-        xg_away = metadata["xg_away"]
-        poisson_probs = self._poisson_match_probs(xg_home, xg_away)
-        ensemble_probs = {k: ml_probs[k] * 0.4 + poisson_probs[k] * 0.6 for k in ["home", "draw", "away"]}
-        total = sum(ensemble_probs.values())
-        if total > 0:
-            ensemble_probs = {k: v / total for k, v in ensemble_probs.items()}
+        xg_home = float(metadata["xg_home"])
+        xg_away = float(metadata["xg_away"])
+        sup_xg_dbg: Optional[Dict[str, Any]] = None
+        if os.getenv("HIBS_USE_SUPPLEMENTAL_XG_PRIOR", "0").lower() in ("1", "true", "yes"):
+            us = (fixture.get("supplemental") or {}).get("understat_light") or {}
+            u_h, u_a = us.get("xg_home"), us.get("xg_away")
+            if u_h is not None and u_a is not None:
+                try:
+                    uh, ua = float(u_h), float(u_a)
+                except (TypeError, ValueError):
+                    uh = ua = 0.0
+                if uh > 0.04 and ua > 0.04 and (uh + ua) < 6.0:
+                    try:
+                        w = float(os.getenv("HIBS_SUPPLEMENTAL_XG_BLEND", "0.1"))
+                    except ValueError:
+                        w = 0.1
+                    w = max(0.0, min(0.3, w))
+                    xg_home = xg_home * (1.0 - w) + uh * w
+                    xg_away = xg_away * (1.0 - w) + ua * w
+                    metadata["xg_home"] = xg_home
+                    metadata["xg_away"] = xg_away
+                    sup_xg_dbg = {"blend_weight": w, "understat_xg_home": uh, "understat_xg_away": ua}
+        poisson_probs_raw = self._poisson_match_probs(xg_home, xg_away)
+        mode = self._read_1x2_mode()
+        league_code = str(fixture.get("league") or "")
+
+        lam_cal_h: Optional[float] = None
+        lam_cal_a: Optional[float] = None
+        cal_dbg: Dict[str, Any] = {}
+        poisson_probs_cal: Optional[Dict[str, float]] = None
+        blend_w: Optional[Dict[str, float]] = None
+        if mode in ("calibrated_poisson", "blend_all"):
+            lam_cal_h, lam_cal_a, cal_dbg = calibrated_match_lambdas(
+                xg_home,
+                xg_away,
+                league_code,
+                fixture.get("home_position"),
+                fixture.get("away_position"),
+            )
+            poisson_probs_cal = self._poisson_match_probs(lam_cal_h, lam_cal_a)
+
+        if mode == "calibrated_poisson" and poisson_probs_cal is not None:
+            ensemble_probs = dict(poisson_probs_cal)
+        elif mode == "blend_all" and poisson_probs_cal is not None:
+            w_ml, w_raw, w_cal = self._read_blend_weights()
+            blend_w = {"ml": round(w_ml, 3), "poisson_raw": round(w_raw, 3), "poisson_calibrated": round(w_cal, 3)}
+            ensemble_probs = self._merge_three_1x2(ml_probs, poisson_probs_raw, poisson_probs_cal, w_ml, w_raw, w_cal)
+        else:
+            poisson_w = 0.78 if not self.is_trained else 0.6
+            ml_w = 1.0 - poisson_w
+            ensemble_probs = {
+                k: ml_probs[k] * ml_w + poisson_probs_raw[k] * poisson_w for k in ["home", "draw", "away"]
+            }
+            total = sum(ensemble_probs.values())
+            if total > 0:
+                ensemble_probs = {k: v / total for k, v in ensemble_probs.items()}
         oh_raw, od_raw, oa_raw = fixture.get("odds_home"), fixture.get("odds_draw"), fixture.get("odds_away")
         has_book = bool(
             fixture.get("odds_available")
@@ -360,6 +485,7 @@ class BettingEngine:
                 and float(oh_raw) > 1.0 and float(od_raw) > 1.0 and float(oa_raw) > 1.0
             )
         )
+        bookmaker_odds: Dict[str, float] = {}
         if has_book:
             try:
                 bookmaker_odds = {
@@ -370,9 +496,21 @@ class BettingEngine:
             except (TypeError, ValueError):
                 bookmaker_odds = {}
                 has_book = False
-        else:
-            bookmaker_odds = {}
-        poisson_btts = self._poisson_btts_probability(xg_home, xg_away)
+        if has_book and bookmaker_odds:
+            try:
+                blend = float(os.getenv("HIBS_CALIB_MARKET_BLEND", "0.08"))
+            except ValueError:
+                blend = 0.08
+            ensemble_probs = self._blend_1x2_toward_implied(ensemble_probs, bookmaker_odds, blend)
+
+        use_cal_side = mode == "calibrated_poisson" or (
+            mode == "blend_all"
+            and (os.getenv("HIBS_SIDE_MARKETS_USE_CALIBRATED", "1").lower() in ("1", "true", "yes"))
+        )
+        lam_h_side = float(lam_cal_h) if (use_cal_side and lam_cal_h is not None) else float(xg_home)
+        lam_a_side = float(lam_cal_a) if (use_cal_side and lam_cal_a is not None) else float(xg_away)
+
+        poisson_btts = self._poisson_btts_probability(lam_h_side, lam_a_side)
         hb = float(fixture.get("home_btts_rate", 0.0) or 0.0)
         ab = float(fixture.get("away_btts_rate", 0.0) or 0.0)
         empirical_btts = (hb + ab) / 2.0 if (hb > 0 or ab > 0) else 0.0
@@ -385,12 +523,12 @@ class BettingEngine:
             btts_prob = max(0.03, min(0.97, poisson_btts * w + empirical_btts * (1.0 - w)))
         else:
             btts_prob = poisson_btts
-        over15_prob = self._poisson_over_goals_probability(xg_home, xg_away, 1.5)
-        over25_prob = self._poisson_over_goals_probability(xg_home, xg_away, 2.5)
-        over35_prob = self._poisson_over_goals_probability(xg_home, xg_away, 3.5)
-        j_home_btts = self._poisson_joint_home_win_and_btts(xg_home, xg_away)
-        j_draw_btts = self._poisson_joint_draw_and_btts(xg_home, xg_away)
-        j_away_btts = self._poisson_joint_away_win_and_btts(xg_home, xg_away)
+        over15_prob = self._poisson_over_goals_probability(lam_h_side, lam_a_side, 1.5)
+        over25_prob = self._poisson_over_goals_probability(lam_h_side, lam_a_side, 2.5)
+        over35_prob = self._poisson_over_goals_probability(lam_h_side, lam_a_side, 3.5)
+        j_home_btts = self._poisson_joint_home_win_and_btts(lam_h_side, lam_a_side)
+        j_draw_btts = self._poisson_joint_draw_and_btts(lam_h_side, lam_a_side)
+        j_away_btts = self._poisson_joint_away_win_and_btts(lam_h_side, lam_a_side)
         merged_model = {
             **ensemble_probs,
             "btts_yes": btts_prob,
@@ -417,7 +555,34 @@ class BettingEngine:
             merged_book["over25"] = float(to["over"])
         if to.get("under") and float(to["under"]) > 1.0:
             merged_book["under25"] = float(to["under"])
-        value_bets = OddsAnalyzer.identify_value_bets(merged_model, merged_book, margin=0.04) if merged_book else {}
+        to15 = mo.get("totals_1_5") or {}
+        if to15.get("over") and float(to15["over"]) > 1.0:
+            merged_book["over15"] = float(to15["over"])
+        dq_bundle = fixture.get("data_quality") or {}
+        dq_pct = float(dq_bundle.get("score_pct") or 0)
+        try:
+            dq_min_boost = float(os.getenv("HIBS_MIN_DATA_QUALITY_PCT", "0"))
+        except ValueError:
+            dq_min_boost = 0.0
+        try:
+            dq_val_req = float(os.getenv("HIBS_VALUE_REQUIRE_DATA_PCT", "0"))
+        except ValueError:
+            dq_val_req = 0.0
+        try:
+            base_margin = float(os.getenv("HIBS_VALUE_EDGE_MARGIN", "0.04"))
+        except ValueError:
+            base_margin = 0.04
+        avg_n = (n_home + n_away) / 2.0
+        conf_scale = min(1.0, max(0.4, avg_n / 8.0))
+        margin = base_margin + (1.0 - conf_scale) * 0.02
+        margin = max(0.03, min(0.09, margin))
+        if dq_min_boost > 0 and dq_pct < dq_min_boost:
+            margin *= 1.0 + min(0.35, (dq_min_boost - dq_pct) / 100.0)
+        margin = min(0.14, margin)
+        value_bets = OddsAnalyzer.identify_value_bets(merged_model, merged_book, margin=margin) if merged_book else {}
+        gated_values = dq_val_req > 0 and dq_pct < dq_val_req
+        if gated_values:
+            value_bets = {}
         confidence = max(ensemble_probs.values())
         predicted_outcome = max(ensemble_probs, key=ensemble_probs.get)
         best_bet = max(value_bets, key=lambda x: value_bets[x].get("roi_percent", 0)) if value_bets else None
@@ -436,11 +601,48 @@ class BettingEngine:
         }
         for _k, row in value_bets.items():
             row["market_label"] = market_labels.get(_k, _k.replace("_", " ").title())
+        for _ti, (_k, _row) in enumerate(sorted(value_bets.items(), key=lambda kv: -kv[1].get("roi_percent", 0.0))):
+            _row["value_tier"] = 1 if _ti == 0 else (2 if _ti == 1 else 3)
         value_highlights = sorted(
-            [{"key": k, "roi": v.get("roi_percent", 0.0), "label": v.get("market_label", k)} for k, v in value_bets.items()],
+            [
+                {
+                    "key": k,
+                    "roi": v.get("roi_percent", 0.0),
+                    "label": v.get("market_label", k),
+                    "tier": int(v.get("value_tier", 3)),
+                }
+                for k, v in value_bets.items()
+            ],
             key=lambda z: -z["roi"],
         )[:6]
-        return {
+        value_bets_display = []
+        for k, v in sorted(value_bets.items(), key=lambda kv: -kv[1].get("roi_percent", 0.0)):
+            row = dict(v)
+            row["outcome"] = k
+            value_bets_display.append(row)
+        line_odds: Dict[str, Any] = {}
+        for _lk in ("btts_yes", "btts_no", "over25", "under25", "over15"):
+            _lv = merged_book.get(_lk)
+            try:
+                _fv = float(_lv)
+                line_odds[_lk] = round(_fv, 2) if _fv > 1.0 else None
+            except (TypeError, ValueError):
+                line_odds[_lk] = None
+        sup = fixture.get("supplemental") or {}
+        hsk = sup.get("heavy_skipped") or {}
+        dq = fixture.get("data_quality") or {}
+        sup_errs = [k for k in sup if str(k).endswith("_error")]
+        score_pct = float(dq.get("score_pct") or 0)
+        if hsk.get("reason") == "api_strong_skip_heavy":
+            pq_summary = "API coverage is strong for this fixture; heavy HTML scrapers were skipped — 1X2 unchanged by FBref/Understat."
+        elif score_pct < 70:
+            pq_summary = "Lower data coverage; treat multi-market and value hints cautiously."
+        elif sup_errs:
+            pq_summary = "Some supplemental sources failed; core prediction still uses APIs + Poisson/ML blend."
+        else:
+            pq_summary = "Typical input mix for this fixture."
+
+        out: Dict[str, Any] = {
             "fixture": f"{metadata['home']} vs {metadata['away']}",
             "home": metadata["home"], "away": metadata["away"],
             "probabilities": {k: round(v, 4) for k, v in ensemble_probs.items()},
@@ -451,10 +653,16 @@ class BettingEngine:
             "bookmaker_odds": bookmaker_odds if bookmaker_odds else {"home": None, "draw": None, "away": None},
             "odds_source_bookmaker": has_book,
             "value_bets": value_bets,
+            "value_bets_display": value_bets_display,
             "value_highlights": value_highlights,
+            "line_odds": line_odds,
             "has_any_value": bool(value_bets),
             "best_bet": best_bet,
             "best_bet_roi": round(best_roi, 1),
+            "data_quality": dq_bundle if dq_bundle else None,
+            "xg_source": fixture.get("xg_source"),
+            "value_bets_gated_by_data": gated_values,
+            "value_edge_margin_used": round(margin, 4),
             "score_and_btts_pct": {
                 "home_win_and_btts": round(j_home_btts * 100, 1),
                 "draw_and_btts": round(j_draw_btts * 100, 1),
@@ -472,8 +680,39 @@ class BettingEngine:
             "team_strength_away": round(metadata["away_strength"] * 100, 1),
             "form_home": round(metadata["home_form"] * 100, 1),
             "form_away": round(metadata["away_form"] * 100, 1),
-            "poisson_probs": {k: round(v * 100, 1) for k, v in poisson_probs.items()},
+            "poisson_probs": {k: round(v * 100, 1) for k, v in poisson_probs_raw.items()},
+            "one_x2_mode": mode,
+            "supplemental_xg_prior": sup_xg_dbg,
+            "prediction_quality_hint": {
+                "data_score_pct": dq.get("score_pct"),
+                "full_scope": dq.get("full_scope"),
+                "supplemental_errors": sup_errs[:10],
+                "heavy_scrape": (
+                    "skipped:" + str(hsk.get("reason"))
+                    if hsk.get("reason")
+                    else (
+                        "used"
+                        if sup.get("understat") or sup.get("fbref_home_squad")
+                        else "not_run"
+                    )
+                ),
+                "summary": pq_summary,
+            },
+            "lambda_side_home": round(lam_h_side, 3),
+            "lambda_side_away": round(lam_a_side, 3),
+            "lambda_calibration": cal_dbg,
+            "blend_weights_1x2": blend_w,
+            "poisson_probs_calibrated_pct": (
+                {k: round(v * 100, 1) for k, v in poisson_probs_cal.items()} if poisson_probs_cal else None
+            ),
         }
+        try:
+            from hibs_predictor.prediction_log import maybe_log_prediction_snapshot
+
+            maybe_log_prediction_snapshot(fixture, out)
+        except Exception:
+            pass
+        return out
 
     def train(self, X_train: List[List[float]], y_train: List[int]) -> Tuple[float, float]:
         X_scaled = self.scaler.fit_transform(X_train)

@@ -8,5 +8,7 @@ __pycache__/
 *.log
 .DS_Store
 .env
+.env.save
+.env.*.local
 .ipynb_checkpoints/
 model.joblib

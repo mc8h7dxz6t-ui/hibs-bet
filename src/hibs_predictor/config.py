@@ -276,6 +276,36 @@ ALL_LEAGUE_CODES = [
     "WORLD_CUP", "EUROS", "NATIONS_LEAGUE",
 ]
 
+# Dashboard: EPL first, Scottish Premiership second, then rest of UK, Europe, international.
+DASHBOARD_LEAGUE_ORDER = [
+    "EPL",
+    "SCOTLAND",
+    "CHAMPIONSHIP",
+    "LEAGUE_ONE",
+    "LEAGUE_TWO",
+    "FA_CUP",
+    "SCOTLAND_CHAMP",
+    "SCOTLAND_L1",
+    "SCOTLAND_L2",
+    "SCOTTISH_CUP",
+    "UCL",
+    "EUROPA_LEAGUE",
+    "UECL",
+    "LA_LIGA",
+    "SERIE_A",
+    "BUNDESLIGA",
+    "LIGUE_1",
+    "EREDIVISIE",
+    "PRIMEIRA",
+    "BELGIUM_FIRST",
+    "DENMARK_SL",
+    "GREECE_SL",
+    "AUSTRIA_BL",
+    "WORLD_CUP",
+    "EUROS",
+    "NATIONS_LEAGUE",
+]
+
 LEAGUE_REGIONS = {
     "🏴󠁧󠁢󠁳󠁣󠁴󠁿 Scotland": ["SCOTLAND", "SCOTLAND_CHAMP", "SCOTLAND_L1", "SCOTLAND_L2", "SCOTTISH_CUP"],
     "🏴󠁧󠁢󠁥󠁮󠁧󠁿 England": ["EPL", "CHAMPIONSHIP", "LEAGUE_ONE", "LEAGUE_TWO", "FA_CUP"],

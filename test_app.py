@@ -23,7 +23,10 @@ def test_imports():
         from hibs_predictor.rate_limiter import RateLimiter
         from hibs_predictor.data_aggregator import DataAggregator
         from hibs_predictor.betting_engine import BettingEngine, TeamStrengthCalculator, OddsAnalyzer
-        from hibs_predictor.web import app, fetch_next_48h_fixtures
+        from hibs_predictor.web import app
+        from hibs_predictor.prediction_log import init_db, report_summary_dict
+        from hibs_predictor.data_source_policy import policy_summary_dict
+        from hibs_predictor.data_source_reliability import run_all_probes
         print("  ✓ All imports successful")
         return True
     except Exception as e:
@@ -91,17 +94,102 @@ def test_flask_routes():
     print("\nTesting Flask routes...")
     try:
         from hibs_predictor.web import app
-        routes = [rule.rule for rule in app.url_map.iter_rules()]
-        expected_routes = ["/", "/api/fixtures", "/api/prediction/<int:fixture_id>", "/acca", "/api/place-bet"]
-        for route in expected_routes:
-            if route not in routes:
-                print(f"  ⚠ Missing route: {route}")
+
+        routes = {rule.rule for rule in app.url_map.iter_rules()}
+        required = {
+            "/",
+            "/api/fixtures",
+            "/api/health",
+            "/api/value-bets",
+            "/api/audit/summary",
+            "/acca",
+            "/status",
+        }
+        missing = sorted(required - routes)
+        if missing:
+            print(f"  ✗ Missing routes: {missing}")
+            return False
         print(f"  ✓ Flask app loaded with {len(routes)} routes")
         print(f"    Routes: {', '.join(sorted(routes))}")
         return True
     except Exception as e:
         print(f"  ✗ Flask test failed: {e}")
         return False
+
+
+def test_api_health_prediction_quality():
+    """Augmented /api/health includes narrative for UI and betting transparency."""
+    print("\nTesting /api/health payload...")
+    try:
+        from hibs_predictor.web import app
+
+        client = app.test_client()
+        res = client.get("/api/health")
+        assert res.status_code == 200, res.status_code
+        data = res.get_json()
+        assert data is not None
+        assert "prediction_quality" in data
+        pq = data["prediction_quality"]
+        assert "headline" in pq and "overall" in pq
+        assert "scrapers_policy" in data
+        assert "features" in data and isinstance(data["features"], list)
+        for row in data.get("apis") or []:
+            assert "prediction_effect" in row
+        for row in data.get("scrapers") or []:
+            assert "prediction_effect" in row
+        print("  ✓ /api/health has prediction_quality, scrapers_policy, prediction_effect rows")
+        return True
+    except Exception as e:
+        print(f"  ✗ Health payload test failed: {e}")
+        return False
+
+
+def test_data_policy():
+    """Rolling data window metadata."""
+    print("\nTesting data_source_policy...")
+    try:
+        from hibs_predictor.data_source_policy import policy_summary_dict
+
+        d = policy_summary_dict()
+        assert "window_start_utc" in d and "window_end_utc" in d
+        print(f"  ✓ Policy window keys present (lookback_days={d.get('lookback_days')})")
+        return True
+    except Exception as e:
+        print(f"  ✗ Policy test failed: {e}")
+        return False
+
+
+def test_main_cli_help():
+    """CLI module exposes expected subcommands."""
+    print("\nTesting main CLI --help...")
+    try:
+        import subprocess
+
+        root = os.path.dirname(os.path.abspath(__file__))
+        env = {**os.environ, "PYTHONPATH": os.path.join(root, "src")}
+        r = subprocess.run(
+            [sys.executable, "-m", "hibs_predictor.main", "--help"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+        )
+        assert r.returncode == 0, r.stderr
+        out = (r.stdout or "") + (r.stderr or "")
+        for needle in (
+            "pred-log-sync",
+            "pred-log-report",
+            "pred-log-prune",
+            "data-sources-probe",
+        ):
+            assert needle in out, f"missing {needle} in help"
+        print("  ✓ main --help lists extended subcommands")
+        return True
+    except Exception as e:
+        print(f"  ✗ CLI help test failed: {e}")
+        return False
+
 
 def test_templates():
     """Test template loading."""
@@ -110,7 +198,7 @@ def test_templates():
         from jinja2 import Environment, FileSystemLoader
         template_dir = os.path.join(os.path.dirname(__file__), 'templates')
         env = Environment(loader=FileSystemLoader(template_dir))
-        templates = ["base.html", "dashboard.html", "acca_builder.html"]
+        templates = ["base.html", "dashboard.html", "acca_builder.html", "api_status.html"]
         for template in templates:
             env.get_template(template)
             print(f"  ✓ Template loaded: {template}")
@@ -130,7 +218,10 @@ def main():
         test_config,
         test_cache,
         test_rate_limiter,
+        test_data_policy,
+        test_main_cli_help,
         test_flask_routes,
+        test_api_health_prediction_quality,
         test_templates,
     ]
     
@@ -143,7 +234,7 @@ def main():
     
     if all(results):
         print("✓ All tests passed! Application ready to run.")
-        print("\nStart the app with: python3 launcher.py")
+        print("\nStart the dashboard: launch/RunHibsBetting.command or: PYTHONPATH=src python3 src/hibs_predictor/web.py")
         return 0
     else:
         print("✗ Some tests failed. Check output above.")

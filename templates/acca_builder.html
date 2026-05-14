@@ -9,6 +9,8 @@
 /* SLIP */
 .slip{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;position:sticky;top:10px;}
 .slip-title{font-family:'Orbitron',monospace;font-size:0.95em;color:var(--green);font-weight:700;letter-spacing:0.08em;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;}
+.slip-brand{display:inline-flex;align-items:center;gap:8px;}
+.slip-brand img{width:26px;height:26px;border-radius:8px;object-fit:contain;box-shadow:0 0 0 1px rgba(124,252,0,0.2);}
 .slip-count{background:var(--green);color:#000;font-size:0.68em;font-weight:800;padding:2px 8px;border-radius:999px;min-width:22px;text-align:center;}
 .slip-empty{text-align:center;padding:20px 10px;color:var(--muted);font-size:0.78em;border:1px dashed rgba(124,252,0,0.12);border-radius:8px;margin-bottom:10px;}
 .slip-sel{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:9px 10px;margin-bottom:7px;position:relative;}
@@ -96,6 +98,7 @@
     </div>
     <div class="header-right">
         <a href="/" class="nav-btn">← Dashboard</a>
+        <a href="/status" class="nav-btn">API status</a>
     </div>
 </header>
 
@@ -104,7 +107,7 @@
     <!-- BET SLIP -->
     <div class="slip">
         <div class="slip-title">
-            📝 Bet Slip
+            <span class="slip-brand"><img src="{{ url_for('static', filename='badge_harp_shield.png') }}" alt="">Bet Slip</span>
             <span class="slip-count" id="sc">0</span>
         </div>
 

@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}hibs.bet — API &amp; data status{% endblock %}
+{% block content %}
+<div class="ref-page">
+    <header class="site-top">
+        <div class="site-top-left">
+            <img src="{{ url_for('static', filename='badge_harp_shield.png') }}" alt="" class="site-crest" width="38" height="38">
+            <span class="site-wordmark">hibs.bet</span>
+            <nav class="site-links" aria-label="Primary">
+                <a href="/" class="site-link">Dashboard</a>
+                <a href="/acca" class="site-link">Acca Builder</a>
+                <span class="site-link site-link-active">API status</span>
+            </nav>
+        </div>
+        <div class="site-top-right">
+            <button type="button" class="btn-refresh" id="btn-status-refresh">Refresh checks</button>
+        </div>
+    </header>
+
+    <div class="status-page">
+        <div class="status-hero">
+            <h1>Feeds &amp; scrapers</h1>
+            <p>Live probes against the same endpoints the dashboard uses. Green: OK and responsive; amber: reachable but slow; red: down, misconfigured, or layout drift.</p>
+            <div class="status-actions">
+                <button type="button" class="status-btn" id="btn-status-refresh-2">Run checks again</button>
+                <a href="/" class="nav-btn" style="text-decoration:none;display:inline-flex;align-items:center;">← Back to dashboard</a>
+            </div>
+        </div>
+
+        <div class="status-section">
+            <h2>How feeds affect predictions</h2>
+            <p id="status-quality-headline" class="status-impact-headline">—</p>
+            <ul id="status-quality-bullets" class="status-impact-list"></ul>
+            <p id="status-scrapers-policy" class="status-note" style="margin-top:10px;"></p>
+        </div>
+        <div class="status-section">
+            <h2>Feature flags (live)</h2>
+            <div id="status-features" class="health-grid"></div>
+        </div>
+        <div class="status-section">
+            <h2>HTTP APIs</h2>
+            <div id="status-apis" class="health-grid"></div>
+        </div>
+        <div class="status-section">
+            <h2>Scrapers &amp; open data</h2>
+            <div id="status-scrapers" class="health-grid"></div>
+        </div>
+        <p class="status-note">Results are cached for about 90 seconds server-side. Set keys in <code>.env</code> (<code>API_SPORTS_FOOTBALL_KEY</code>, <code>FOOTBALL_DATA_ORG_KEY</code>, <code>ODDS_API_KEY</code>) to enable paid APIs. Threshold for “fast” response: <span id="latency-threshold">—</span> ms.</p>
+    </div>
+</div>
+{% endblock %}
+{% block extra_css %}
+<style>
+.status-impact-headline{font-size:1.05em;font-weight:700;color:var(--text);margin:0 0 10px;line-height:1.35;}
+.status-impact-list{margin:0;padding-left:1.2em;color:var(--muted);font-size:0.88em;line-height:1.5;}
+.status-impact-list li{margin-bottom:6px;}
+.status-effect{font-size:0.78em;color:var(--muted);margin-top:4px;line-height:1.45;}
+</style>
+{% endblock %}
+{% block extra_js %}
+<script>
+(function () {
+    function esc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function rowHtml(item, okMs, showEffect) {
+        var dotClass = 'dot ';
+        if (item.ok && item.ms != null && item.ms < okMs) dotClass += 'dot-pulse';
+        else if (item.ok) dotClass += 'dot-warn';
+        else dotClass += 'dot-bad';
+        var ms = item.ms != null ? '<span class="health-ms">' + item.ms + 'ms</span>' : '<span class="health-ms">—</span>';
+        var err = item.error || item.error_code || '';
+        var errHtml = err ? '<div class="status-err">' + esc(err) + '</div>' : '';
+        var eff = (showEffect && item.prediction_effect) ? '<div class="status-effect">' + esc(item.prediction_effect) + '</div>' : '';
+        var lab = esc(item.label || item.id);
+        return '<div class="health-row" style="flex-wrap:wrap;"><div style="flex:1;min-width:0;"><span class="health-name">' + lab + '</span>' + errHtml + eff + '</div><div class="health-meta"><span class="' + dotClass + '"></span>' + ms + '</div></div>';
+    }
+
+    function featureRowHtml(item) {
+        var dotClass = 'dot ' + (item.ok ? 'dot-pulse' : 'dot-warn');
+        var lab = esc(item.label || item.id);
+        var eff = item.prediction_effect ? '<div class="status-effect">' + esc(item.prediction_effect) + '</div>' : '';
+        return '<div class="health-row" style="flex-wrap:wrap;"><div style="flex:1;min-width:0;"><span class="health-name">' + lab + '</span>' + eff + '</div><div class="health-meta"><span class="' + dotClass + '"></span></div></div>';
+    }
+
+    async function load() {
+        var aRoot = document.getElementById('status-apis');
+        var sRoot = document.getElementById('status-scrapers');
+        var fRoot = document.getElementById('status-features');
+        var thr = document.getElementById('latency-threshold');
+        try {
+            var res = await fetch('/api/health');
+            var d = await res.json();
+            var okMs = d.latency_ok_ms || 200;
+            if (thr) thr.textContent = String(okMs);
+            var pq = d.prediction_quality || {};
+            var hq = document.getElementById('status-quality-headline');
+            if (hq) hq.textContent = pq.headline || '—';
+            var ul = document.getElementById('status-quality-bullets');
+            if (ul) {
+                ul.innerHTML = '';
+                (pq.bullets || []).forEach(function (b) {
+                    var li = document.createElement('li');
+                    li.textContent = b;
+                    ul.appendChild(li);
+                });
+            }
+            var pol = document.getElementById('status-scrapers-policy');
+            var sp = d.scrapers_policy || {};
+            if (pol) {
+                pol.innerHTML = 'Scraper policy: heavy scrapers default <strong>' + esc(sp.heavy_scrapers_default || '') + '</strong>; '
+                    + 'auto-skip heavy when APIs already strong: <strong>' + (sp.skip_heavy_when_api_strong ? 'yes' : 'no') + '</strong>.';
+            }
+            var fh = '';
+            (d.features || []).forEach(function (f) { fh += featureRowHtml(f); });
+            if (fRoot) fRoot.innerHTML = fh || '<div class="health-row"><span class="health-name">No feature rows</span></div>';
+            var ah = '';
+            (d.apis || []).forEach(function (a) { ah += rowHtml(a, okMs, true); });
+            var sh = '';
+            (d.scrapers || []).forEach(function (s) { sh += rowHtml(s, okMs, true); });
+            if (aRoot) aRoot.innerHTML = ah || '<div class="health-row"><span class="health-name">No API rows</span></div>';
+            if (sRoot) sRoot.innerHTML = sh || '<div class="health-row"><span class="health-name">No scraper rows</span></div>';
+        } catch (e) {
+            if (aRoot) aRoot.innerHTML = '<div class="health-row"><span class="health-name">Request failed</span></div>';
+            if (sRoot) sRoot.innerHTML = '';
+            if (fRoot) fRoot.innerHTML = '';
+        }
+    }
+
+    function wire() {
+        var b1 = document.getElementById('btn-status-refresh');
+        var b2 = document.getElementById('btn-status-refresh-2');
+        if (b1) b1.addEventListener('click', load);
+        if (b2) b2.addEventListener('click', load);
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        wire();
+        load();
+    });
+})();
+</script>
+{% endblock %}
