@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""hibs.bet — One-Click Launcher. Run: python3 launch.py"""
+"""hibs-bet — one-click launcher. Run: python3 launch.py"""
 
 import os, sys, time, webbrowser, subprocess
 from pathlib import Path
@@ -60,7 +60,7 @@ def main():
     python = str(root/".venv"/"bin"/"python") if (root/".venv"/"bin"/"python").exists() else sys.executable
     script = root / "src" / "hibs_predictor" / "web.py"
 
-    print("🚀  Starting hibs.bet...")
+    print("🚀  Starting hibs-bet...")
     proc = subprocess.Popen([python, str(script)], cwd=str(root),
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
@@ -85,7 +85,7 @@ def main():
             if any(x in line for x in ["ERROR","Exception","Traceback","Running on"]):
                 print("  ", line, end="")
     except KeyboardInterrupt:
-        print("\n🛑  Stopping hibs.bet...")
+        print("\n🛑  Stopping hibs-bet...")
         proc.terminate()
         try: proc.wait(timeout=5)
         except: proc.kill()

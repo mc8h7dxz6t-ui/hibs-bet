@@ -1,4 +1,4 @@
-# HibsBetting Acca Builder — Quick Start Guide
+# hibs-bet Acca Builder — Quick Start Guide
 
 ## 🚀 Getting Started
 
@@ -153,7 +153,7 @@ Response:
   "bet_id": "BET_20250115120304",
   "total_odds": 7.35,
   "potential_returns": 73.50,
-  "affiliate_url": "https://www.williamhill.com/?ref=hibsbetting&...",
+  "affiliate_url": "https://www.williamhill.com/?ref=hibs-bet&...",
   "timestamp": "2025-01-15T12:03:04.123456"
 }
 ```

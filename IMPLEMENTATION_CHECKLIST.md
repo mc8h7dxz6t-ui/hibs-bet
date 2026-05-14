@@ -1,4 +1,4 @@
-# HibsBetting — Implementation Checklist ✅
+# hibs-bet — Implementation Checklist ✅
 
 ## Phase 1: Core Infrastructure ✅
 - [x] 5 API clients implemented (API-Sports, Football-Data.org, SportsMonk, Odds API, Stats API)

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}hibs.bet — Acca Builder{% endblock %}
+{% block title %}hibs-bet — Acca Builder{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -9,6 +9,8 @@
 /* SLIP */
 .slip{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;position:sticky;top:10px;}
 .slip-title{font-family:'Orbitron',monospace;font-size:0.95em;color:var(--green);font-weight:700;letter-spacing:0.08em;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;}
+.slip-brand{display:inline-flex;align-items:center;gap:8px;}
+.slip-brand img{width:26px;height:26px;border-radius:8px;object-fit:contain;box-shadow:0 0 0 1px rgba(124,252,0,0.2);}
 .slip-count{background:var(--green);color:#000;font-size:0.68em;font-weight:800;padding:2px 8px;border-radius:999px;min-width:22px;text-align:center;}
 .slip-empty{text-align:center;padding:20px 10px;color:var(--muted);font-size:0.78em;border:1px dashed rgba(124,252,0,0.12);border-radius:8px;margin-bottom:10px;}
 .slip-sel{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:9px 10px;margin-bottom:7px;position:relative;}
@@ -41,20 +43,14 @@
 .preset:hover{background:rgba(124,252,0,0.08);color:var(--green);border-color:var(--border);}
 
 /* BUTTONS */
-.btn-place{width:100%;padding:11px;border:none;border-radius:8px;background:linear-gradient(135deg,var(--green),#3a7000);color:#000;font-size:0.84em;font-weight:800;font-family:'Inter',sans-serif;cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:7px;transition:opacity 0.2s;}
-.btn-place:hover{opacity:0.85;}
-.btn-place:disabled{opacity:0.3;cursor:not-allowed;}
 .btn-clear{width:100%;padding:7px;border:1px solid rgba(255,68,68,0.18);border-radius:8px;background:rgba(255,68,68,0.05);color:var(--red);font-size:0.72em;font-weight:700;font-family:'Inter',sans-serif;cursor:pointer;margin-bottom:10px;}
 .btn-clear:hover{background:rgba(255,68,68,0.1);}
 
-/* BOOKIES */
-.bookie-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:10px;}
-.bookie-a{padding:7px;border-radius:7px;text-align:center;text-decoration:none;font-size:0.7em;font-weight:700;display:block;}
-.bk-wh{background:#003087;color:#fff;}
-.bk-lb{background:#e4002b;color:#fff;}
-.bk-b365{background:#1a6b3c;color:#fff;}
-.bk-pp{background:#004833;color:#fff;}
-.disclaimer{font-size:0.62em;color:var(--muted);text-align:center;line-height:1.5;}
+/* SLIP ACTIONS */
+.btn-copy-slip{width:100%;padding:11px;border:none;border-radius:8px;background:linear-gradient(135deg,#2a4a6a,#1a3048);color:#e8f4ff;font-size:0.84em;font-weight:800;font-family:'Inter',sans-serif;cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:7px;transition:opacity 0.2s;}
+.btn-copy-slip:hover{opacity:0.9;}
+.btn-copy-slip:disabled{opacity:0.3;cursor:not-allowed;}
+.disclaimer{font-size:0.62em;color:var(--muted);text-align:center;line-height:1.5;margin-top:4px;}
 .disclaimer a{color:var(--muted);}
 
 /* FIXTURE LIST */
@@ -94,7 +90,7 @@
 {% block content %}
 <header>
     <div class="brand">
-        <span class="brand-logo">hibs.bet</span>
+        <span class="brand-logo">hibs-bet</span>
         <div>
             <div class="brand-sub">Acca Builder</div>
             <div class="brand-sub" style="font-size:0.65em;color:var(--green);margin-top:2px;">Click any odds to add to your slip</div>
@@ -102,6 +98,7 @@
     </div>
     <div class="header-right">
         <a href="/" class="nav-btn">← Dashboard</a>
+        <a href="/status" class="nav-btn">API status</a>
     </div>
 </header>
 
@@ -110,7 +107,7 @@
     <!-- BET SLIP -->
     <div class="slip">
         <div class="slip-title">
-            📝 Bet Slip
+            <span class="slip-brand"><img src="{{ url_for('static', filename='badge_harp_shield.png') }}" alt="">Bet Slip</span>
             <span class="slip-count" id="sc">0</span>
         </div>
 
@@ -135,18 +132,10 @@
             <button class="preset" onclick="setStake(100)">£100</button>
         </div>
 
-        <button class="btn-place" id="btn-place" onclick="placeBet('wh')" disabled>🎯 Place on William Hill</button>
-        <button class="btn-place" style="background:linear-gradient(135deg,#e4002b,#a00020);margin-top:0;" id="btn-place-lb" onclick="placeBet('lb')" disabled>🎯 Place on Ladbrokes</button>
+        <button class="btn-copy-slip" id="btn-copy-slip" onclick="copySlipSummary()" disabled>📋 Copy slip summary</button>
         <button class="btn-clear" onclick="clearSlip()">✕ Clear Slip</button>
 
-        <div class="bookie-grid">
-            <a href="https://www.williamhill.com" target="_blank" class="bookie-a bk-wh">William Hill</a>
-            <a href="https://www.ladbrokes.com" target="_blank" class="bookie-a bk-lb">Ladbrokes</a>
-            <a href="https://www.bet365.com" target="_blank" class="bookie-a bk-b365">Bet365</a>
-            <a href="https://www.paddypower.com" target="_blank" class="bookie-a bk-pp">Paddy Power</a>
-        </div>
-
-        <div class="disclaimer">⚠️ For analysis only. Gamble responsibly. 18+<br>
+        <div class="disclaimer">⚠️ For analysis only — we do not link to operators or open bet slips. Place bets only with a licensed bookmaker you choose. Gamble responsibly. 18+<br>
             <a href="https://www.begambleaware.org" target="_blank">BeGambleAware.org</a></div>
     </div>
 
@@ -166,7 +155,7 @@
         {% set p = fixture.prediction %}
         {% set vb = p.value_bets if p else {} %}
         {% set fid = fixture.id | string %}
-        {% set region = 'scotland' if 'SCOTLAND' in fixture.league else 'england' if fixture.league in ['EPL','CHAMPIONSHIP','LEAGUE_ONE','LEAGUE_TWO','FA_CUP'] else 'european' if fixture.league in ['UCL','EUROPA_LEAGUE','UECL','LA_LIGA','SERIE_A','BUNDESLIGA','LIGUE_1','EREDIVISIE','PRIMEIRA'] else 'international' %}
+        {% set region = 'scotland' if 'SCOTLAND' in fixture.league else 'england' if fixture.league in ['EPL','CHAMPIONSHIP','LEAGUE_ONE','LEAGUE_TWO','FA_CUP'] else 'european' if fixture.league in ['UCL','EUROPA_LEAGUE','UECL','LA_LIGA','SERIE_A','BUNDESLIGA','LIGUE_1','EREDIVISIE','PRIMEIRA','BELGIUM_FIRST','DENMARK_SL','GREECE_SL','AUSTRIA_BL'] else 'international' %}
         <div class="afix"
              id="afix-{{ fid }}"
              data-region="{{ region }}"
@@ -184,6 +173,7 @@
             </div>
 
             {% if p %}
+            {% if p.odds_source_bookmaker and p.bookmaker_odds.home is not none %}
             <div class="odds-row">
                 <button class="odd-btn {% if vb and 'home' in vb %}vbet{% endif %}"
                         id="ob-{{ fid }}-home"
@@ -210,6 +200,9 @@
                     <div class="odd-pct">{{ p.probabilities_pct.away }}%</div>
                 </button>
             </div>
+            {% else %}
+            <div class="odds-row" style="font-size:0.72em;color:var(--muted);padding:6px 0;">No synced 1X2 book prices for this fixture — predictions still shown.</div>
+            {% endif %}
             <div class="afix-meta">
                 <span class="mpill">BTTS <strong>{{ p.btts_probability_pct }}%</strong></span>
                 <span class="mpill">O2.5 <strong>{{ p.over25_probability_pct }}%</strong></span>
@@ -299,8 +292,7 @@ function recalc() {
         document.getElementById('t-odds').textContent='—';
         document.getElementById('t-return').textContent='£—';
         document.getElementById('t-profit').textContent='—';
-        document.getElementById('btn-place').disabled = true;
-    document.getElementById('btn-place-lb').disabled = true;
+        document.getElementById('btn-copy-slip').disabled = true;
         return;
     }
     const totalOdds = keys.reduce((a,k)=>a*slip[k].odds,1);
@@ -311,8 +303,7 @@ function recalc() {
     const pp = document.getElementById('t-profit');
     pp.textContent=(profit>=0?'+£':'-£')+Math.abs(profit).toFixed(2);
     pp.style.color=profit>=0?'var(--green)':'var(--red)';
-    document.getElementById('btn-place').disabled = false;
-    document.getElementById('btn-place-lb').disabled = false;
+    document.getElementById('btn-copy-slip').disabled = false;
 }
 
 function setStake(v){
@@ -333,42 +324,50 @@ function buildSummary() {
     return { keys, stake, totalOdds, ret, lines };
 }
 
-function buildWHUrl(lines, stake, totalOdds, ret) {
-    // William Hill bet slip deep link
-    // WH supports a betslip URL with selections encoded
-    const params = new URLSearchParams({
-        action: 'betslip',
-        type: lines.length > 1 ? 'accumulator' : 'single',
-        stake: stake.toFixed(2),
-    });
-    // Append each selection as a readable label in the URL
-    lines.forEach((l, i) => params.append(`sel${i+1}`, l));
-    return `https://sports.williamhill.com/betting/en-gb?${params.toString()}`;
+function buildSummaryText() {
+    const { keys, stake, totalOdds, ret, lines } = buildSummary();
+    if (!keys.length) return '';
+    const betType = keys.length > 1 ? keys.length + '-fold acca' : 'Single';
+    const profit = (parseFloat(ret) - stake).toFixed(2);
+    return [
+        'hibs-bet — slip summary (analysis only)',
+        betType,
+        '',
+        ...lines,
+        '',
+        'Selections: ' + keys.length,
+        'Total odds: ' + totalOdds.toFixed(2),
+        'Stake: £' + stake.toFixed(2),
+        'Potential return: £' + ret,
+        'Profit if all win: £' + profit,
+    ].join('\n');
 }
 
-function buildLBUrl(lines, stake, totalOdds, ret) {
-    // Ladbrokes bet slip deep link
-    const params = new URLSearchParams({
-        betType: lines.length > 1 ? 'accumulator' : 'single',
-        stake: stake.toFixed(2),
-    });
-    lines.forEach((l, i) => params.append(`selection${i+1}`, l));
-    return `https://www.ladbrokes.com/sport/football?${params.toString()}`;
+function copySlipSummary() {
+    const text = buildSummaryText();
+    if (!text) return;
+    const done = () => alert('Slip summary copied. Paste into your notes or bookmaker app.');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+    } else {
+        fallbackCopy(text, done);
+    }
 }
 
-function placeBet(bookie) {
-    const keys = Object.keys(slip);
-    if (!keys.length) return;
-    const { stake, totalOdds, ret, lines } = buildSummary();
-
-    const betType = keys.length > 1 ? `${keys.length}-fold Acca` : 'Single';
-    const bookieName = bookie === 'wh' ? 'William Hill' : 'Ladbrokes';
-    const bookieUrl = bookie === 'wh'
-        ? buildWHUrl(lines, stake, totalOdds, ret)
-        : buildLBUrl(lines, stake, totalOdds, ret);
-
-    const msg = `\ud83c\udfaf ${betType} on ${bookieName}\n\n${lines.join('\n')}\n\nSelections: ${keys.length}\nTotal Odds: ${totalOdds.toFixed(2)}\nStake: \u00a3${stake.toFixed(2)}\nPotential Return: \u00a3${ret}\n\nClick OK to open ${bookieName}.`;
-    if (confirm(msg)) window.open(bookieUrl, '_blank');
+function fallbackCopy(text, onDone) {
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        if (onDone) onDone();
+    } catch (e) {
+        prompt('Copy this slip summary:', text);
+    }
 }
 
 function doFilter(f, btn){

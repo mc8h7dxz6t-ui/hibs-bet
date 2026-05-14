@@ -1,9 +1,9 @@
 @echo off
-REM HibsBetting startup script for Windows
+REM hibs-bet startup script for Windows
 
 setlocal enabledelayedexpansion
 
-echo 🟤💛 HibsBetting Launcher
+echo 🟤💛 hibs-bet launcher
 echo.
 
 REM Check if .env exists

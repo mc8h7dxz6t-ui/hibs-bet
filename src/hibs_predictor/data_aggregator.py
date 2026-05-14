@@ -2,7 +2,7 @@
 
 import os
 from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from dotenv import load_dotenv
 
@@ -13,60 +13,327 @@ from hibs_predictor.api_clients import (
     OddsApiClient,
     StatsApiClient,
 )
-from hibs_predictor.betting_engine import TeamStrengthCalculator, OddsAnalyzer
+from hibs_predictor.betting_engine import TeamStrengthCalculator
 from hibs_predictor.config import LEAGUES
 from hibs_predictor.cache import Cache
+from hibs_predictor.data_quality import compute_fixture_data_quality
+from hibs_predictor.scrapers.supplemental import collect_supplemental
+from hibs_predictor.scrapers import wikipedia_standings as wiki_standings
+
+
+def _project_root() -> str:
+    """Repository root (parent of `src/`), regardless of process cwd."""
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+def _load_dotenv_from_project() -> None:
+    """Load `.env` from the repo root so fixture APIs work when cwd is not the project folder."""
+    root = _project_root()
+    load_dotenv(os.path.join(root, ".env"))
+    load_dotenv(os.path.join(root, ".env.local"))
+
+
+def _looks_like_placeholder(value: str) -> bool:
+    low = value.strip().lower()
+    if not low:
+        return True
+    if "your_" in low and "here" in low:
+        return True
+    if low in ("xxx", "test", "none", "changeme", "null", "n/a", "na"):
+        return True
+    return False
+
+
+def _env_first_usable(*names: str) -> str:
+    for name in names:
+        raw = os.getenv(name)
+        if raw is None:
+            continue
+        val = raw.strip().strip('"').strip("'").lstrip("\ufeff")
+        if not val or val.startswith("#"):
+            continue
+        if _looks_like_placeholder(val):
+            continue
+        return val
+    return ""
+
+
+def _extract_goals_totals_from_api_stats(team_stats: Dict[str, Any]) -> Tuple[int, int]:
+    """Normalize API-Football teams/statistics goals shape to (goals_for, goals_against)."""
+    goals = team_stats.get("goals") or {}
+    out_for, out_against = 0, 0
+    for side_key, target in (("for", "for"), ("against", "against")):
+        side = goals.get(side_key) or {}
+        total = side.get("total")
+        if isinstance(total, dict):
+            v = total.get("total")
+            if v is None:
+                v = (total.get("home") or 0) + (total.get("away") or 0)
+            try:
+                val = int(v or 0)
+            except (TypeError, ValueError):
+                val = 0
+        else:
+            try:
+                val = int(total or 0)
+            except (TypeError, ValueError):
+                val = 0
+        if side_key == "for":
+            out_for = val
+        else:
+            out_against = val
+    return out_for, out_against
+
+
+def _recent_match_rates(matches: List[Dict[str, Any]], team_id: int) -> Dict[str, float]:
+    """BTTS / over rates and per-game goals from the team's last finished matches."""
+    if not team_id or not matches:
+        return {
+            "btts_rate": 0.0,
+            "over15_rate": 0.0,
+            "over25_rate": 0.0,
+            "avg_gf": 0.0,
+            "avg_ga": 0.0,
+            "n": 0.0,
+        }
+    btts = o15 = o25 = 0
+    tgf = tga = 0.0
+    n = 0
+    for match in matches[:10]:
+        teams = match.get("teams", {})
+        goals = match.get("goals", {}) or {}
+        hid = teams.get("home", {}).get("id")
+        home_g = goals.get("home")
+        away_g = goals.get("away")
+        if home_g is None or away_g is None:
+            continue
+        try:
+            hg = int(home_g)
+            ag = int(away_g)
+        except (TypeError, ValueError):
+            continue
+        if hid == team_id:
+            gf, ga = hg, ag
+        elif teams.get("away", {}).get("id") == team_id:
+            gf, ga = ag, hg
+        else:
+            continue
+        n += 1
+        tgf += gf
+        tga += ga
+        if gf > 0 and ag > 0:
+            btts += 1
+        if gf + ga > 1:
+            o15 += 1
+        if gf + ga > 2:
+            o25 += 1
+    if n == 0:
+        return {
+            "btts_rate": 0.0,
+            "over15_rate": 0.0,
+            "over25_rate": 0.0,
+            "avg_gf": 0.0,
+            "avg_ga": 0.0,
+            "n": 0.0,
+        }
+    return {
+        "btts_rate": btts / n,
+        "over15_rate": o15 / n,
+        "over25_rate": o25 / n,
+        "avg_gf": tgf / n,
+        "avg_ga": tga / n,
+        "n": float(n),
+    }
+
+
+def _implied_prob(odds: float) -> float:
+    if odds is None or odds <= 1.0:
+        return 0.0
+    return 1.0 / float(odds)
+
+
+def _max_implied_delta_pct(
+    a: Optional[float],
+    b: Optional[float],
+    c: Optional[float],
+    x: Optional[float],
+    y: Optional[float],
+    z: Optional[float],
+) -> float:
+    if not all(v and v > 1.0 for v in (a, b, c, x, y, z)):
+        return 0.0
+    d = 0.0
+    for p, q in ((a, x), (b, y), (c, z)):
+        d = max(d, abs(_implied_prob(p) - _implied_prob(q)) * 100.0)
+    return round(d, 2)
+
+
+def _parse_api_sports_side_markets(odds_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """BTTS and Over/Under lines from API-Football odds (best decimal per selection)."""
+    btts_yes: List[float] = []
+    btts_no: List[float] = []
+    over15: List[float] = []
+    under15: List[float] = []
+    over25: List[float] = []
+    under25: List[float] = []
+    over35: List[float] = []
+    under35: List[float] = []
+    for entry in odds_data or []:
+        for bm in entry.get("bookmakers", []) or []:
+            for bet in bm.get("bets", []) or []:
+                name = (bet.get("name") or "").strip()
+                vals = bet.get("values", []) or []
+                if name == "Both Teams To Score":
+                    for v in vals:
+                        val = (v.get("value") or "").strip().lower()
+                        try:
+                            p = float(v.get("odd", 0) or 0)
+                        except (TypeError, ValueError):
+                            continue
+                        if p <= 1.0:
+                            continue
+                        if val == "yes":
+                            btts_yes.append(p)
+                        elif val == "no":
+                            btts_no.append(p)
+                elif name in ("Goals Over/Under", "Over/Under", "Total Goals"):
+                    for v in vals:
+                        val = (v.get("value") or "").strip().lower()
+                        try:
+                            p = float(v.get("odd", 0) or 0)
+                        except (TypeError, ValueError):
+                            continue
+                        if p <= 1.0:
+                            continue
+                        if "over 1.5" in val or val in ("o1.5", "over 1.5"):
+                            over15.append(p)
+                        elif "under 1.5" in val or val in ("u1.5", "under 1.5"):
+                            under15.append(p)
+                        if "over 2.5" in val or val in ("o2.5", "over 2.5"):
+                            over25.append(p)
+                        elif "under 2.5" in val or val in ("u2.5", "under 2.5"):
+                            under25.append(p)
+                        if "over 3.5" in val or val in ("o3.5", "over 3.5"):
+                            over35.append(p)
+                        elif "under 3.5" in val or val in ("u3.5", "under 3.5"):
+                            under35.append(p)
+    out: Dict[str, Any] = {}
+    if btts_yes:
+        out["btts_yes"] = max(btts_yes)
+    if btts_no:
+        out["btts_no"] = max(btts_no)
+    if over15:
+        out["over_1_5"] = max(over15)
+    if under15:
+        out["under_1_5"] = max(under15)
+    if over25:
+        out["over_2_5"] = max(over25)
+    if under25:
+        out["under_2_5"] = max(under25)
+    if over35:
+        out["over_3_5"] = max(over35)
+    if under35:
+        out["under_3_5"] = max(under35)
+    return out
 
 
 class DataAggregator:
     """Aggregates data from multiple APIs to enrich fixture data."""
 
     def __init__(self) -> None:
+        _load_dotenv_from_project()
         load_dotenv()
         self.cache = Cache()
         self.clients = self._initialize_clients()
+        if os.getenv("HIBS_CACHE_PRUNE", "1").lower() not in ("0", "false", "no"):
+            try:
+                n = self.cache.prune_stale()
+                if n:
+                    print(f"[Cache] Pruned {n} stale on-disk entries")
+            except OSError as exc:
+                print(f"[Cache] Prune skipped: {exc}")
 
     def _initialize_clients(self) -> Dict[str, Any]:
-        clients = {}
-        
-        if os.getenv("API_SPORTS_FOOTBALL_KEY"):
-            clients["api_sports"] = ApiSportsFootballClient(os.getenv("API_SPORTS_FOOTBALL_KEY", ""))
-        
-        if os.getenv("FOOTBALL_DATA_ORG_KEY"):
-            clients["football_data_org"] = FootballDataOrgClient(os.getenv("FOOTBALL_DATA_ORG_KEY", ""))
-        
-        if os.getenv("SPORTSMONK_KEY"):
-            clients["sportsmonk"] = SportsMonkClient(os.getenv("SPORTSMONK_KEY", ""))
-        
-        if os.getenv("ODDS_API_KEY"):
-            clients["odds_api"] = OddsApiClient(os.getenv("ODDS_API_KEY", ""))
-        
-        if os.getenv("STATS_API_KEY"):
-            clients["stats_api"] = StatsApiClient(os.getenv("STATS_API_KEY", ""))
-        
+        clients: Dict[str, Any] = {}
+
+        api_sports_key = _env_first_usable(
+            "API_SPORTS_FOOTBALL_KEY",
+            "API_SPORTS_KEY",
+            "APISPORTS_KEY",
+        )
+        if (
+            api_sports_key
+            and os.getenv("HIBS_DISABLE_API_SPORTS", "").strip().lower() not in ("1", "true", "yes", "on")
+        ):
+            clients["api_sports"] = ApiSportsFootballClient(api_sports_key)
+
+        fdo_key = _env_first_usable("FOOTBALL_DATA_ORG_KEY", "FOOTBALL_DATA_KEY")
+        if fdo_key:
+            clients["football_data_org"] = FootballDataOrgClient(fdo_key)
+
+        sm_key = _env_first_usable("SPORTSMONK_KEY")
+        if sm_key:
+            clients["sportsmonk"] = SportsMonkClient(sm_key)
+
+        odds_key = _env_first_usable("ODDS_API_KEY")
+        if odds_key:
+            clients["odds_api"] = OddsApiClient(odds_key)
+
+        stats_key = _env_first_usable("STATS_API_KEY")
+        if stats_key:
+            clients["stats_api"] = StatsApiClient(stats_key)
+
         return clients
 
     def enrich_fixture(self, fixture: Dict[str, Any], league_code: str = "EPL") -> Dict[str, Any]:
         """Enrich a fixture with comprehensive data from multiple sources."""
-        fixture_id = fixture.get("fixture", {}).get("id") or fixture.get("id", "")
-        cache_key = f"enriched_fixture_{fixture_id}_{league_code}"
-        cached = self.cache.get(cache_key, ttl_hours=2)
-        if cached:
-            return cached
-
-        enriched = fixture.copy()
         league = LEAGUES.get(league_code, {})
         league_api_id = league.get("api_sports_id")
-        season = datetime.now().year
+        now = datetime.now()
+        season = now.year if now.month >= 7 else now.year - 1
 
         home_id = fixture.get("teams", {}).get("home", {}).get("id")
         away_id = fixture.get("teams", {}).get("away", {}).get("id")
 
-        enriched["home_stats"] = self._fetch_team_stats(home_id, league_code, league_api_id, season)
-        enriched["away_stats"] = self._fetch_team_stats(away_id, league_code, league_api_id, season)
+        fx = fixture.get("fixture")
+        raw_fid = fx.get("id") if isinstance(fx, dict) else None
+        if raw_fid is None:
+            raw_fid = fixture.get("id")
+        fixture_id_str = str(raw_fid).strip() if raw_fid not in (None, "", 0, "0") else ""
+        hk = (fixture.get("teams", {}) or {}).get("home", {}).get("name") or (fixture.get("home", {}) or {}).get("name", "?")
+        ak = (fixture.get("teams", {}) or {}).get("away", {}).get("name") or (fixture.get("away", {}) or {}).get("name", "?")
+        dt = str(fixture.get("date", ""))
+        if fixture_id_str:
+            cache_key = f"enriched_fixture_{fixture_id_str}_{league_code}_dq2"
+        else:
+            cache_key = f"enriched_fixture_teams_{league_code}_{hk}|{ak}|{dt}_dq2"
 
+        try:
+            fixture_id_for_xg = int(raw_fid) if raw_fid not in (None, "", "0", 0) else None
+        except (TypeError, ValueError):
+            fixture_id_for_xg = None
+
+        cached = self.cache.get(cache_key, ttl_hours=2)
+        if cached:
+            return cached
+
+        enriched = dict(fixture)
         enriched["home_recent"] = self._fetch_team_recent_matches(home_id)
         enriched["away_recent"] = self._fetch_team_recent_matches(away_id)
+
+        home_rates = _recent_match_rates(enriched["home_recent"], home_id or 0)
+        away_rates = _recent_match_rates(enriched["away_recent"], away_id or 0)
+        enriched["home_btts_rate"] = home_rates["btts_rate"]
+        enriched["away_btts_rate"] = away_rates["btts_rate"]
+        enriched["home_recent_n"] = int(home_rates["n"])
+        enriched["away_recent_n"] = int(away_rates["n"])
+        enriched["home_over25_rate"] = home_rates["over25_rate"]
+        enriched["away_over25_rate"] = away_rates["over25_rate"]
+        enriched["home_over15_rate"] = home_rates["over15_rate"]
+        enriched["away_over15_rate"] = away_rates["over15_rate"]
+
+        enriched["home_stats"] = self._fetch_team_stats(home_id, league_code, league_api_id, season, home_rates)
+        enriched["away_stats"] = self._fetch_team_stats(away_id, league_code, league_api_id, season, away_rates)
 
         enriched["home_form"] = TeamStrengthCalculator.calculate_form_strength(enriched["home_recent"])
         enriched["away_form"] = TeamStrengthCalculator.calculate_form_strength(enriched["away_recent"])
@@ -78,62 +345,146 @@ class DataAggregator:
             away_id, enriched["away_recent"], is_home=False
         )
 
-        # League positions
-        if league_api_id:
-            enriched["home_position"] = self._fetch_team_position(home_id, league_api_id, season)
-            enriched["away_position"] = self._fetch_team_position(away_id, league_api_id, season)
-        else:
-            enriched["home_position"] = {}
-            enriched["away_position"] = {}
+        home_nm = fixture.get("home", {}).get("name") or fixture.get("teams", {}).get("home", {}).get("name", "")
+        away_nm = fixture.get("away", {}).get("name") or fixture.get("teams", {}).get("away", {}).get("name", "")
+        prefer_wiki = os.getenv("HIBS_PREFER_SCRAPED_STANDINGS", "1").lower() in ("1", "true", "yes")
+        wiki_rows: List[Dict[str, Any]] = []
+        if prefer_wiki and league_code in wiki_standings.WP_SUFFIX:
+            wiki_rows = self._cached_wikipedia_league_table(league_code)
 
-        enriched["xg_home"], enriched["xg_away"] = self._fetch_expected_goals(fixture_id)
-        enriched["odds_home"], enriched["odds_draw"], enriched["odds_away"], enriched["all_bookmaker_odds"] = self._fetch_odds(fixture, league_code)
+        hp: Dict[str, Any] = {}
+        ap: Dict[str, Any] = {}
+        if wiki_rows:
+            wr = wiki_standings.find_team_row(wiki_rows, home_nm)
+            arw = wiki_standings.find_team_row(wiki_rows, away_nm)
+            if wr:
+                hp = wiki_standings.row_to_position_shape(wr)
+            if arw:
+                ap = wiki_standings.row_to_position_shape(arw)
+
+        if league_api_id and "api_sports" in self.clients:
+            skip_api_tbl = os.getenv("HIBS_SKIP_API_STANDINGS", "0").lower() in ("1", "true", "yes")
+            if not skip_api_tbl:
+                if not hp.get("position"):
+                    hp = self._fetch_team_position(home_id, league_api_id, season) or hp
+                if not ap.get("position"):
+                    ap = self._fetch_team_position(away_id, league_api_id, season) or ap
+
+        enriched["home_position"] = hp
+        enriched["away_position"] = ap
+
+        enriched["xg_home"], enriched["xg_away"], enriched["xg_source"] = self._fetch_expected_goals(
+            fixture_id_for_xg, home_rates, away_rates, league.get("strength_factor", 1.0)
+        )
+        bundle = self._fetch_odds_bundle(fixture, league_code)
+        enriched["odds_home"] = bundle["odds_home"]
+        enriched["odds_draw"] = bundle["odds_draw"]
+        enriched["odds_away"] = bundle["odds_away"]
+        enriched["odds_available"] = bundle["odds_available"]
+        enriched["all_bookmaker_odds"] = bundle["all_bookmaker_odds"]
+        enriched["odds_secondary"] = bundle["odds_secondary"]
+        enriched["odds_cross_max_implied_diff_pct"] = bundle["odds_cross_max_implied_diff_pct"]
+        enriched["odds_primary_source"] = bundle["odds_primary_source"]
+        enriched["market_odds"] = bundle["market_odds"]
         enriched["league_factor"] = league.get("strength_factor", 1.0)
+        try:
+            fid_int = int(raw_fid) if raw_fid not in (None, "", "0", 0) else 0
+        except (TypeError, ValueError):
+            fid_int = 0
+        if fid_int and "api_sports" in self.clients and os.getenv("HIBS_SKIP_API_INJURIES", "0").lower() not in (
+            "1",
+            "true",
+            "yes",
+        ):
+            try:
+                enriched["fixture_injuries"] = self.clients["api_sports"].fetch_injuries(fid_int)
+            except Exception:
+                enriched["fixture_injuries"] = []
+        else:
+            enriched["fixture_injuries"] = []
+        enriched["supplemental"] = collect_supplemental(fixture, league_code, enriched)
+        enriched["data_quality"] = compute_fixture_data_quality(enriched)
 
-        self.cache.set(cache_key, enriched)
+        self.cache.set(cache_key, enriched, ttl_hours=2)
         return enriched
 
-    def _fetch_team_stats(self, team_id: Optional[int], league_code: str, league_api_id: Optional[int] = None, season: int = None) -> Dict[str, Any]:
-        """Fetch team statistics from available APIs."""
+    def _fetch_team_stats(
+        self,
+        team_id: Optional[int],
+        league_code: str,
+        league_api_id: Optional[int] = None,
+        season: int = None,
+        recent_rates: Optional[Dict[str, float]] = None,
+    ) -> Dict[str, Any]:
+        """Fetch team statistics from API-Football; augment with recent-match aggregates when sparse."""
+        recent_rates = recent_rates or {}
         if not team_id:
-            return {"goals_for": 30, "goals_against": 25, "shots_on_target": 100}
+            return {}
 
-        season = season or datetime.now().year
+        season = season or (datetime.now().year if datetime.now().month >= 7 else datetime.now().year - 1)
         cache_key = f"team_stats_{team_id}_{league_code}_{season}"
         cached = self.cache.get(cache_key, ttl_hours=12)
         if cached:
             return cached
 
-        stats = {
-            "goals_for": 30, "goals_against": 25,
-            "shots_on_target": 100, "expected_goals": 28.0,
-            "expected_goals_against": 24.0, "shots_on_target_against": 95,
-        }
+        stats: Dict[str, Any] = {}
 
         if "api_sports" in self.clients:
-            # Try current season then previous
             for s in [season, season - 1]:
                 try:
                     team_stats = self.clients["api_sports"].fetch_team_statistics(team_id, s, league_api_id)
-                    if team_stats:
-                        goals = team_stats.get("goals", {})
-                        shots = team_stats.get("shots", {})
-                        fixtures = team_stats.get("fixtures", {})
-                        stats.update({
-                            "goals_for": goals.get("for", {}).get("total", {}).get("total", 30) or 30,
-                            "goals_against": goals.get("against", {}).get("total", {}).get("total", 25) or 25,
-                            "shots_on_target": shots.get("on", {}).get("total", 100) or 100,
-                            "played": fixtures.get("played", {}).get("total", 0) or 0,
-                            "wins": fixtures.get("wins", {}).get("total", 0) or 0,
-                            "draws": fixtures.get("draws", {}).get("total", 0) or 0,
-                            "losses": fixtures.get("loses", {}).get("total", 0) or 0,
-                        })
-                        if stats["goals_for"] > 0:
-                            break
+                    if not team_stats:
+                        continue
+                    goals_for, goals_against = _extract_goals_totals_from_api_stats(team_stats)
+                    shots = team_stats.get("shots", {}) or {}
+                    on_blk = shots.get("on", {}) or {}
+                    sot_raw = on_blk.get("total")
+                    if isinstance(sot_raw, dict):
+                        sot_val = int(sot_raw.get("total") or 0)
+                    else:
+                        try:
+                            sot_val = int(sot_raw or 0)
+                        except (TypeError, ValueError):
+                            sot_val = 0
+                    fixtures_blk = team_stats.get("fixtures", {}) or {}
+                    played = fixtures_blk.get("played", {}) or {}
+                    played_total = played.get("total")
+                    try:
+                        played_n = int(played_total or 0)
+                    except (TypeError, ValueError):
+                        played_n = 0
+                    stats = {
+                        "goals_for": goals_for,
+                        "goals_against": goals_against,
+                        "shots_on_target": sot_val,
+                        "played": played_n,
+                        "wins": (fixtures_blk.get("wins", {}) or {}).get("total", 0),
+                        "draws": (fixtures_blk.get("draws", {}) or {}).get("total", 0),
+                        "losses": (fixtures_blk.get("loses", {}) or {}).get("total", 0),
+                    }
+                    if goals_for or goals_against or played_n:
+                        break
                 except Exception:
                     continue
 
-        self.cache.set(cache_key, stats)
+        if (not stats or (stats.get("goals_for", 0) == 0 and stats.get("goals_against", 0) == 0)) and recent_rates.get("n", 0) >= 3:
+            gf = recent_rates["avg_gf"] * 10.0
+            ga = recent_rates["avg_ga"] * 10.0
+            stats = {
+                "goals_for": max(0.0, gf),
+                "goals_against": max(0.0, ga),
+                "shots_on_target": stats.get("shots_on_target", 0) if stats else 0,
+                "played": int(recent_rates.get("n", 0)),
+                "expected_goals": max(0.1, gf * 0.92),
+                "expected_goals_against": max(0.1, ga * 0.92),
+            }
+
+        if stats and stats.get("played", 0) and stats.get("goals_for", 0) is not None:
+            gp = max(1, int(stats.get("played", 1)))
+            stats.setdefault("expected_goals", float(stats.get("goals_for", 0)) * 0.92)
+            stats.setdefault("expected_goals_against", float(stats.get("goals_against", 0)) * 0.92)
+
+        self.cache.set(cache_key, stats, ttl_hours=12)
         return stats
 
     def _fetch_team_position(self, team_id: Optional[int], league_api_id: int, season: int) -> Dict[str, Any]:
@@ -147,8 +498,19 @@ class DataAggregator:
             pass
         return {}
 
+    def _cached_wikipedia_league_table(self, league_code: str) -> List[Dict[str, Any]]:
+        """One Wikipedia standings parse per league per ~12h (disk cache)."""
+        sk = wiki_standings._season_wiki_title_part()
+        cache_key = f"wiki_stand_{league_code}_{sk}"
+        cached = self.cache.get(cache_key, ttl_hours=12)
+        if cached is not None:
+            return cached if isinstance(cached, list) else []
+        rows = wiki_standings.fetch_league_table(league_code)
+        self.cache.set(cache_key, rows, ttl_hours=12)
+        return rows
+
     def _fetch_team_recent_matches(self, team_id: Optional[int], limit: int = 10) -> List[Dict[str, Any]]:
-        """Fetch team's last 10 matches from API-Sports."""
+        """Fetch team's last matches from API-Sports."""
         if not team_id:
             return []
 
@@ -157,142 +519,286 @@ class DataAggregator:
         if cached:
             return cached
 
-        matches = []
+        matches: List[Dict[str, Any]] = []
         if "api_sports" in self.clients:
             try:
                 matches = self.clients["api_sports"].fetch_team_last_matches(team_id, limit=limit)
             except Exception:
                 pass
 
-        self.cache.set(cache_key, matches)
+        self.cache.set(cache_key, matches, ttl_hours=4)
         return matches
 
-    def _fetch_expected_goals(self, fixture_id: Optional[int]) -> Tuple[float, float]:
-        """Fetch expected goals from available APIs."""
+    def _fetch_expected_goals(
+        self,
+        fixture_id: Optional[int],
+        home_rates: Dict[str, float],
+        away_rates: Dict[str, float],
+        league_strength: float,
+    ) -> Tuple[float, float, str]:
+        """Expected goals from APIs; fall back to attack vs defence estimates from recent real results.
+
+        Returns (xg_home, xg_away, source_tag) where source_tag is one of:
+        api_fixture_xg, stats_api_xg, mixed_api_goals_proxy, goals_proxy.
+        """
         if not fixture_id:
-            return 1.5, 1.2
+            h, a = self._lambda_from_rates(home_rates, away_rates, league_strength)
+            return (h, a, "goals_proxy")
 
-        cache_key = f"xg_data_{fixture_id}"
+        cache_key = f"xg_data_v2_{fixture_id}"
         cached = self.cache.get(cache_key, ttl_hours=6)
-        if cached:
-            return cached
+        if isinstance(cached, (list, tuple)) and len(cached) >= 3:
+            return float(cached[0]), float(cached[1]), str(cached[2])
 
-        xg_home, xg_away = 1.5, 1.2
+        xg_home: Optional[float] = None
+        xg_away: Optional[float] = None
+        from_stats_api = False
+        filled_via_api_fixture = False
 
-        if "stats_api" in self.clients:
+        if "stats_api" in self.clients and os.getenv("HIBS_SKIP_RAPID_STATS_XG", "1").lower() not in (
+            "1",
+            "true",
+            "yes",
+        ):
             try:
                 xg_data = self.clients["stats_api"].fetch_xg_data(fixture_id)
-                if xg_data.get("response"):
-                    for stat in xg_data["response"]:
-                        if stat.get("team", {}).get("name") == "Home":
-                            xg_home = float(stat.get("statistics", [{}])[0].get("value", 1.5))
+                resp = xg_data.get("response") if isinstance(xg_data, dict) else None
+                if resp:
+                    for stat in resp:
+                        tname = (stat.get("team", {}) or {}).get("name", "")
+                        stats_list = stat.get("statistics") or []
+                        val_raw = stats_list[0].get("value") if stats_list else None
+                        try:
+                            val = float(val_raw)
+                        except (TypeError, ValueError):
+                            continue
+                        if tname == "Home":
+                            xg_home = val
                         else:
-                            xg_away = float(stat.get("statistics", [{}])[0].get("value", 1.2))
+                            xg_away = val
+                    if xg_home and xg_away:
+                        from_stats_api = True
             except Exception:
                 pass
 
         if "api_sports" in self.clients:
             try:
-                fixture_data = self.clients["api_sports"].fetch_fixture(fixture_id)
-                if fixture_data.get("statistics"):
-                    stats = fixture_data["statistics"]
-                    xg_home = float(stats[0].get("expected_goals", {}).get("value", 1.5)) if len(stats) > 0 else 1.5
-                    xg_away = float(stats[1].get("expected_goals", {}).get("value", 1.2)) if len(stats) > 1 else 1.2
+                fixture_data = self.clients["api_sports"].fetch_fixture(int(fixture_id))
+                stats_list = fixture_data.get("statistics") or []
+                if len(stats_list) >= 2:
+                    for block in stats_list:
+                        team = block.get("team", {}) or {}
+                        tid = team.get("id")
+                        xg_block = block.get("expected_goals") or {}
+                        raw = xg_block.get("value") or xg_block.get("total")
+                        if raw is None:
+                            continue
+                        try:
+                            val = float(raw)
+                        except (TypeError, ValueError):
+                            continue
+                        hid = fixture_data.get("teams", {}).get("home", {}).get("id")
+                        if tid == hid:
+                            xg_home = val
+                            filled_via_api_fixture = True
+                        else:
+                            xg_away = val
+                            filled_via_api_fixture = True
             except Exception:
                 pass
 
-        result = (xg_home, xg_away)
-        self.cache.set(cache_key, result)
-        return result
+        if xg_home is not None and xg_away is not None and xg_home > 0 and xg_away > 0:
+            if filled_via_api_fixture:
+                tag = "api_fixture_xg"
+            elif from_stats_api:
+                tag = "stats_api_xg"
+            else:
+                tag = "mixed_api_goals_proxy"
+            result = (float(xg_home), float(xg_away), tag)
+            self.cache.set(cache_key, result, ttl_hours=6)
+            return result
 
-    def _fetch_odds(self, fixture: Dict[str, Any], league_code: str) -> Tuple[float, float, float, List]:
-        """Fetch odds from The Odds API and API-Sports, return best odds + all bookmaker data."""
+        est_h, est_a = self._lambda_from_rates(home_rates, away_rates, league_strength)
+        use_h = xg_home if xg_home and xg_home > 0 else est_h
+        use_a = xg_away if xg_away and xg_away > 0 else est_a
+        had_any = (xg_home is not None and xg_home > 0) or (xg_away is not None and xg_away > 0)
+        tag = "mixed_api_goals_proxy" if had_any else "goals_proxy"
+        out = (float(use_h), float(use_a), tag)
+        self.cache.set(cache_key, out, ttl_hours=6)
+        return out
+
+    @staticmethod
+    def _lambda_from_rates(home_rates: Dict[str, float], away_rates: Dict[str, float], league_strength: float) -> Tuple[float, float]:
+        """Derive Poisson lambdas from recent goals (real matches) when API xG is unavailable."""
+        base = 1.15 * max(0.55, min(1.45, float(league_strength or 1.0)))
+        hgf = home_rates.get("avg_gf") or 0.0
+        hga = home_rates.get("avg_ga") or 0.0
+        agf = away_rates.get("avg_gf") or 0.0
+        aga = away_rates.get("avg_ga") or 0.0
+        if home_rates.get("n", 0) < 2 and away_rates.get("n", 0) < 2:
+            return base * 1.1, base * 0.95
+        lam_h = max(0.35, min(3.8, (hgf + aga) / 2.0 * (0.85 + 0.15 * float(league_strength or 1.0))))
+        lam_a = max(0.35, min(3.8, (agf + hga) / 2.0 * (0.85 + 0.15 * float(league_strength or 1.0))))
+        return lam_h, lam_a
+
+    def _fetch_odds_bundle(self, fixture: Dict[str, Any], league_code: str) -> Dict[str, Any]:
+        """Primary + secondary 1X2 sources, cross-implied delta, and side markets from API-Football."""
         fixture_id = fixture.get("fixture", {}).get("id")
-        home_name = fixture.get("home", {}).get("name", "").lower()
-        away_name = fixture.get("away", {}).get("name", "").lower()
+        home_name = (fixture.get("home", {}).get("name", "") or "").lower()
+        away_name = (fixture.get("away", {}).get("name", "") or "").lower()
 
-        cache_key = f"odds_full_{fixture_id}_{league_code}"
+        cache_key = f"odds_bundle_{fixture_id}_{league_code}"
         cached = self.cache.get(cache_key, ttl_hours=1)
-        if cached:
-            return tuple(cached)
+        if isinstance(cached, dict):
+            return cached
 
-        odds_home, odds_draw, odds_away = 2.0, 3.2, 3.0
-        all_bookmakers = []
+        oa_home = oa_draw = oa_away = None
+        as_home = as_draw = as_away = None
+        all_bookmakers: List = []
+        api_odds_raw: List[Dict[str, Any]] = []
 
-        # Primary: The Odds API - best real bookmaker odds
-        if "odds_api" in self.clients:
+        if (
+            "odds_api" in self.clients
+            and os.getenv("HIBS_SKIP_ODDS_API", "1").lower() not in ("1", "true", "yes")
+        ):
             try:
                 events = self.clients["odds_api"].fetch_odds_for_league(league_code)
-                for event in events:
+                for event in events or []:
                     eh = (event.get("home_team") or "").lower()
                     ea = (event.get("away_team") or "").lower()
-                    # fuzzy match team names
-                    if (home_name[:4] in eh or eh[:4] in home_name) and \
-                       (away_name[:4] in ea or ea[:4] in away_name):
-                        bookmakers = event.get("bookmakers", [])
-                        home_odds_list, draw_odds_list, away_odds_list = [], [], []
-                        for bm in bookmakers:
-                            bm_name = bm.get("title", "")
-                            bm_odds = {"bookmaker": bm_name}
-                            for market in bm.get("markets", []):
-                                if market.get("key") == "h2h":
-                                    outcomes = market.get("outcomes", [])
-                                    for o in outcomes:
-                                        oname = (o.get("name") or "").lower()
-                                        price = float(o.get("price", 0))
-                                        if "draw" in oname:
-                                            bm_odds["draw"] = price
-                                            draw_odds_list.append(price)
-                                        elif home_name[:4] in oname or oname[:4] in home_name:
-                                            bm_odds["home"] = price
-                                            home_odds_list.append(price)
-                                        else:
-                                            bm_odds["away"] = price
-                                            away_odds_list.append(price)
-                            if len(bm_odds) > 1:
-                                all_bookmakers.append(bm_odds)
-                        if home_odds_list:
-                            odds_home = max(home_odds_list)  # best available
-                        if draw_odds_list:
-                            odds_draw = max(draw_odds_list)
-                        if away_odds_list:
-                            odds_away = max(away_odds_list)
+                    if len(home_name) >= 3 and len(away_name) >= 3:
+                        if not (
+                            (home_name[:4] in eh or eh[:4] in home_name)
+                            and (away_name[:4] in ea or ea[:4] in away_name)
+                        ):
+                            continue
+                    home_odds_list, draw_odds_list, away_odds_list = [], [], []
+                    for bm in event.get("bookmakers", []) or []:
+                        bm_name = bm.get("name", "")
+                        bm_odds: Dict[str, Any] = {"bookmaker": bm_name, "source": "the_odds_api"}
+                        for market in bm.get("markets", []):
+                            if market.get("key") != "h2h":
+                                continue
+                            for o in market.get("outcomes", []):
+                                oname = (o.get("name") or "").lower()
+                                try:
+                                    price = float(o.get("price", 0) or 0)
+                                except (TypeError, ValueError):
+                                    continue
+                                if price <= 1.0:
+                                    continue
+                                if "draw" in oname:
+                                    bm_odds["draw"] = price
+                                    draw_odds_list.append(price)
+                                elif home_name[:4] in oname or oname[:4] in home_name:
+                                    bm_odds["home"] = price
+                                    home_odds_list.append(price)
+                                else:
+                                    bm_odds["away"] = price
+                                    away_odds_list.append(price)
+                        if len(bm_odds) > 1:
+                            all_bookmakers.append(bm_odds)
+                    if home_odds_list:
+                        oa_home = max(home_odds_list)
+                    if draw_odds_list:
+                        oa_draw = max(draw_odds_list)
+                    if away_odds_list:
+                        oa_away = max(away_odds_list)
+                    if oa_home and oa_draw and oa_away:
                         break
             except Exception:
                 pass
 
-        # Fallback: API-Sports odds
-        if odds_home == 2.0 and "api_sports" in self.clients and fixture_id:
+        if "api_sports" in self.clients and fixture_id:
             try:
-                odds_data = self.clients["api_sports"].fetch_odds(fixture_id)
-                if odds_data:
-                    bookmakers = odds_data[0].get("bookmakers", [])
-                    for bm in bookmakers:
-                        bets = bm.get("bets", [])
-                        for bet in bets:
-                            if bet.get("name") == "Match Winner":
-                                values = bet.get("values", [])
-                                bm_entry = {"bookmaker": bm.get("name", "")}
+                api_odds_raw = self.clients["api_sports"].fetch_odds(int(fixture_id))
+                if api_odds_raw:
+                    for entry in api_odds_raw:
+                        for bm in entry.get("bookmakers", []) or []:
+                            bets = bm.get("bets", []) or []
+                            for bet in bets:
+                                if bet.get("name") != "Match Winner":
+                                    continue
+                                values = bet.get("values", []) or []
+                                bm_entry = {"bookmaker": bm.get("name", ""), "source": "api_sports"}
                                 for v in values:
-                                    val = v.get("value", "").lower()
-                                    price = float(v.get("odd", 0))
+                                    val = (v.get("value") or "").lower()
+                                    try:
+                                        price = float(v.get("odd", 0) or 0)
+                                    except (TypeError, ValueError):
+                                        continue
+                                    if price <= 1.0:
+                                        continue
                                     if val == "home":
                                         bm_entry["home"] = price
-                                        odds_home = price
+                                        as_home = price if as_home is None else max(as_home, price)
                                     elif val == "draw":
                                         bm_entry["draw"] = price
-                                        odds_draw = price
+                                        as_draw = price if as_draw is None else max(as_draw, price)
                                     elif val == "away":
                                         bm_entry["away"] = price
-                                        odds_away = price
+                                        as_away = price if as_away is None else max(as_away, price)
                                 if len(bm_entry) > 1:
                                     all_bookmakers.append(bm_entry)
             except Exception:
                 pass
 
-        result = [odds_home, odds_draw, odds_away, all_bookmakers]
-        self.cache.set(cache_key, result)
-        return tuple(result)
+        side = _parse_api_sports_side_markets(api_odds_raw)
+        market_odds: Dict[str, Any] = {}
+        if side.get("btts_yes") or side.get("btts_no"):
+            market_odds["btts"] = {k: v for k, v in (("yes", side.get("btts_yes")), ("no", side.get("btts_no"))) if v}
+        if side.get("over_2_5") or side.get("under_2_5"):
+            market_odds["totals_2_5"] = {
+                k: v for k, v in (("over", side.get("over_2_5")), ("under", side.get("under_2_5"))) if v
+            }
+        if side.get("over_1_5") or side.get("under_1_5"):
+            market_odds["totals_1_5"] = {
+                k: v for k, v in (("over", side.get("over_1_5")), ("under", side.get("under_1_5"))) if v
+            }
+        if side.get("over_3_5") or side.get("under_3_5"):
+            market_odds["totals_3_5"] = {
+                k: v for k, v in (("over", side.get("over_3_5")), ("under", side.get("under_3_5"))) if v
+            }
+
+        as_ok = bool(as_home and as_draw and as_away and as_home > 1 and as_draw > 1 and as_away > 1)
+        oa_ok = bool(oa_home and oa_draw and oa_away and oa_home > 1 and oa_draw > 1 and oa_away > 1)
+        cross = 0.0
+        if as_ok and oa_ok:
+            cross = _max_implied_delta_pct(as_home, as_draw, as_away, oa_home, oa_draw, oa_away)
+            ph, pd, pa = max(as_home, oa_home), max(as_draw, oa_draw), max(as_away, oa_away)
+            sh, sd, sa = oa_home, oa_draw, oa_away
+            primary_src = "merged_best"
+        elif as_ok:
+            ph, pd, pa = as_home, as_draw, as_away
+            sh, sd, sa = oa_home, oa_draw, oa_away
+            primary_src = "api_sports"
+        elif oa_ok:
+            ph, pd, pa = oa_home, oa_draw, oa_away
+            sh, sd, sa = as_home, as_draw, as_away
+            primary_src = "the_odds_api"
+        else:
+            ph = as_home if as_home else oa_home
+            pd = as_draw if as_draw else oa_draw
+            pa = as_away if as_away else oa_away
+            sh = oa_home if ph == as_home and oa_home else (as_home if ph == oa_home and as_home else None)
+            sd = oa_draw if pd == as_draw and oa_draw else (as_draw if pd == oa_draw and as_draw else None)
+            sa = oa_away if pa == as_away and oa_away else (as_away if pa == oa_away and as_away else None)
+            primary_src = "partial"
+
+        avail = bool(ph and pd and pa and ph > 1 and pd > 1 and pa > 1)
+        bundle = {
+            "odds_home": ph,
+            "odds_draw": pd,
+            "odds_away": pa,
+            "odds_available": avail,
+            "all_bookmaker_odds": all_bookmakers,
+            "odds_secondary": {"home": sh, "draw": sd, "away": sa},
+            "odds_cross_max_implied_diff_pct": cross,
+            "odds_primary_source": primary_src,
+            "market_odds": market_odds,
+        }
+        self.cache.set(cache_key, bundle, ttl_hours=1)
+        return bundle
 
     def get_all_clients(self) -> Dict[str, Any]:
         """Return all initialized API clients."""

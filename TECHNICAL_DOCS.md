@@ -1,4 +1,4 @@
-# HibsBetting — Complete Technical Documentation
+# hibs-bet — Complete Technical Documentation
 
 ## System Architecture Overview
 

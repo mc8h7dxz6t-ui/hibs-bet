@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Streamlit interface for HibsBetting with minimal desktop launch input."""
+"""Streamlit interface for hibs-bet with minimal desktop launch input."""
 
 import os
 import sys
@@ -16,12 +16,12 @@ from hibs_predictor.config import HIBS_LEAGUE_FOCUS, LEAGUES
 from hibs_predictor.web import fetch_next_48h_fixtures
 
 st.set_page_config(
-    page_title="HibsBetting Streamlit",
+    page_title="hibs-bet streamlit",
     page_icon="⚽",
     layout="wide",
 )
 
-st.title("HibsBetting Streamlit Dashboard")
+st.title("hibs-bet streamlit dashboard")
 st.markdown(
     "Compact football market intelligence for UK and European fixtures — "
     "double-click the desktop launcher to start with zero extra input."

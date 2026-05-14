@@ -1,0 +1,11 @@
+"""Supplemental data sources (open APIs + rate-limited public pages).
+
+See ``source_registry.SOURCE_CATALOG`` for FBref, Understat, SofaScore, Wikipedia,
+StatsBomb open, WhoScored (experimental), and planned sites (Transfermarkt,
+FootyStats, SoccerStats, DataMB) with ToS / implementation notes.
+"""
+
+from hibs_predictor.scrapers.supplemental import collect_supplemental
+from hibs_predictor.scrapers.source_registry import SOURCE_CATALOG, sources_by_status
+
+__all__ = ["collect_supplemental", "SOURCE_CATALOG", "sources_by_status"]

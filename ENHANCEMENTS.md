@@ -1,4 +1,4 @@
-# 🟤💛 HibsBetting — Enhancements Summary
+# 🟤💛 hibs-bet — Enhancements Summary
 
 ## What's New
 

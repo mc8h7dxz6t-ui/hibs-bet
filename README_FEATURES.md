@@ -1,10 +1,10 @@
-# HibsBetting — Advanced Betting Intelligence Platform
+# hibs-bet — Advanced Betting Intelligence Platform
 
 🟤💛 **Professional football betting prediction engine with acca builder, value betting analysis, and multi-league support for Scottish, English, and European football.**
 
 ## Overview
 
-HibsBetting is a sophisticated AI-powered betting analysis platform featuring:
+hibs-bet is a sophisticated AI-powered betting analysis platform featuring:
 
 - **Advanced ML Predictions**: Ensemble model (Random Forest + Gradient Boosting) with 80%+ accuracy
 - **Multi-API Integration**: 5 sports data APIs for comprehensive match analysis
@@ -27,7 +27,7 @@ HibsBetting is a sophisticated AI-powered betting analysis platform featuring:
 - **Quick Selection**: Click odds buttons to add selections
 - **Live Odds Calculation**: Real-time acca multiplier updates
 - **Stake Input**: Calculate potential returns instantly
-- **Professional Design**: Hibs-themed interface with Edinburgh branding
+- **Professional Design**: Edinburgh / Hibs-inspired interface with local branding
 - **Betting Links**: Direct shortcuts to William Hill and Ladbrokes
 
 ### 🏴󠁧󠁢󠁳󠁣󠁴󠁿 Scottish Football Focus
@@ -74,7 +74,7 @@ HibsBetting is a sophisticated AI-powered betting analysis platform featuring:
 ```bash
 # Clone repository
 git clone <repo-url>
-cd HibsBetting
+cd hibs-bet
 
 # Install dependencies
 pip3 install -r requirements.txt
@@ -182,7 +182,7 @@ JSON Prediction Output
 ## File Structure
 
 ```
-HibsBetting/
+hibs-bet/
 ├── src/
 │   └── hibs_predictor/
 │       ├── __init__.py

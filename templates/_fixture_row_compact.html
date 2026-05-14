@@ -1,0 +1,52 @@
+{% set p = fixture.prediction %}
+{% set vb = p.value_bets if p else {} %}
+{% set best = p.best_bet if p else none %}
+{% set hp = fixture.home_position %}
+{% set ap = fixture.away_position %}
+{% set hl10 = fixture.home_last10 %}
+{% set al10 = fixture.away_last10 %}
+{% set lo = p.line_odds if p and p.line_odds is defined else {} %}
+<details class="fixture-card fr-compact {% if fixture.has_value_bet %}value-card value-multi{% endif %}"
+     data-league="{{ fixture.league }}"
+     data-has-value="{% if fixture.has_value_bet %}1{% else %}0{% endif %}"
+     data-data-q="{% if fixture.data_quality is defined and fixture.data_quality %}{{ fixture.data_quality.score_pct }}{% else %}0{% endif %}"
+     data-search="{{ (fixture.home ~ ' ' ~ fixture.away)|lower }}">
+<summary class="fr-sum">
+    <span class="fr-ko">{% if fixture.date and 'T' in fixture.date %}{{ fixture.date[11:16] }}{% else %}—{% endif %}</span>
+    <div class="fr-match">
+        <div class="fr-teams">{{ fixture.home }} <span class="fr-vs">v</span> {{ fixture.away }}</div>
+        {% if p %}
+        {% if p.predicted_outcome == 'home' %}
+        <div class="fr-pred fr-pred-home">Home Win {{ p.probabilities_pct.home }}%</div>
+        {% elif p.predicted_outcome == 'draw' %}
+        <div class="fr-pred fr-pred-draw">Draw {{ p.probabilities_pct.draw }}%</div>
+        {% else %}
+        <div class="fr-pred fr-pred-away">Away Win {{ p.probabilities_pct.away }}%</div>
+        {% endif %}
+        {% endif %}
+        {% if fixture.data_quality is defined and fixture.data_quality and fixture.data_quality.score_pct is defined %}
+        {% set dq = fixture.data_quality.score_pct %}
+        <span class="fr-dq {% if dq >= 85 %}ok{% elif dq >= 70 %}mid{% else %}low{% endif %}">{{ dq }}% data</span>
+        {% endif %}
+        {% if hl10 or al10 %}
+        <div class="fr-l10-preview" aria-hidden="true">
+            {% if hl10 %}<span class="fr-l10-lbl">H</span><div class="form-strip form-dots-compact">{% for r in hl10 %}<span class="fd fd-{{ r.result }}" title="{{ fixture.home }} {{ r.score }}">{{ r.result }}</span>{% endfor %}</div>{% endif %}
+            {% if hl10 and al10 %}<span class="fr-l10-sep">·</span>{% endif %}
+            {% if al10 %}<span class="fr-l10-lbl">A</span><div class="form-strip form-dots-compact">{% for r in al10 %}<span class="fd fd-{{ r.result }}" title="{{ fixture.away }} {{ r.score }}">{{ r.result }}</span>{% endfor %}</div>{% endif %}
+        </div>
+        {% endif %}
+    </div>
+    <span class="fr-od fr-od-h">{% if p and p.bookmaker_odds.home is not none %}{{ "%.2f"|format(p.bookmaker_odds.home) }}{% else %}—{% endif %}</span>
+    <span class="fr-od fr-od-x">{% if p and p.bookmaker_odds.draw is not none %}{{ "%.2f"|format(p.bookmaker_odds.draw) }}{% else %}—{% endif %}</span>
+    <span class="fr-od fr-od-a">{% if p and p.bookmaker_odds.away is not none %}{{ "%.2f"|format(p.bookmaker_odds.away) }}{% else %}—{% endif %}</span>
+    <span class="fr-od">{% if lo.get('btts_yes') %}{{ "%.2f"|format(lo.btts_yes) }}{% else %}—{% endif %}</span>
+    <span class="fr-od">{% if lo.get('over15') %}{{ "%.2f"|format(lo.over15) }}{% else %}—{% endif %}</span>
+    <span class="fr-od">{% if lo.get('over25') %}{{ "%.2f"|format(lo.over25) }}{% else %}—{% endif %}</span>
+    <span class="fr-od">{% if lo.get('under25') %}{{ "%.2f"|format(lo.under25) }}{% else %}—{% endif %}</span>
+    <span class="fr-od">{% if lo.get('over35') %}{{ "%.2f"|format(lo.over35) }}{% else %}—{% endif %}</span>
+    <span class="fr-od">{% if lo.get('under35') %}{{ "%.2f"|format(lo.under35) }}{% else %}—{% endif %}</span>
+    <span class="fr-chev" aria-hidden="true">▾</span>
+    {% if fixture.has_value_bet %}<span class="fr-val-tag">VALUE</span>{% endif %}
+</summary>
+{% include '_fixture_expand_panel.html' %}
+</details>

@@ -1,9 +1,9 @@
-# HibsBetting — Complete File Reference
+# hibs-bet — Complete File Reference
 
 ## 📁 Directory Structure with Descriptions
 
 ```
-HibsBetting/
+hibs-bet/
 │
 ├─ 📄 README_FEATURES.md ...................... Feature overview & installation guide
 ├─ 📄 README.md (existing) ................... Quick start reference
@@ -93,7 +93,7 @@ HibsBetting/
 │     ├─ Sky gradient ..................... #87CEEB to #E0F6FF
 │     ├─ Yellow sun ....................... #FFD700 (opacity 0.8)
 │     ├─ Green ground ..................... #2d5a1f
-│     └─ Text overlay ..................... "HIBSBETTING — EDINBURGH"
+│     └─ Text overlay ..................... "HIBS-BET — EDINBURGH"
 │
 ├─ .cache/ (Auto-created)
 │  ├─ next_48h_fixtures_EPL.json ......... Cached fixtures
@@ -293,4 +293,4 @@ python3 -c "from hibs_predictor.web import app; print([str(r) for r in app.url_m
 
 ---
 
-*Last Updated: January 2025 | HibsBetting v1.0*
+*Last Updated: January 2025 | hibs-bet v1.0*

@@ -1,12 +1,12 @@
 #!/bin/bash
-# HibsBetting One-Click Launcher
+# hibs-bet one-click launcher
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON=${PYTHON:-python3}
 
-echo "🟤💛 HibsBetting — Advanced Betting Intelligence"
+echo "🟤💛 hibs-bet — advanced betting intelligence"
 echo "═══════════════════════════════════════════════════"
 echo ""
 

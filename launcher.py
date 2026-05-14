@@ -12,7 +12,7 @@ def start_app():
     script_dir = Path(__file__).parent
     app_script = script_dir / "src" / "hibs_predictor" / "main.py"
     
-    print("🟤💛 HibsBetting — Starting Advanced Betting App")
+    print("🟤💛 hibs-bet — starting advanced betting app")
     print("=" * 50)
     
     # Start Flask app in subprocess
