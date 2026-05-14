@@ -42,9 +42,55 @@
             inset:0;
             z-index:0;
             pointer-events:none;
-            opacity:0.045;
+            opacity:0.032;
             background:url('/static/hibs_badge.svg') repeat;
             background-size:100px 100px;
+        }
+        /* Hibs watermark: primary shield + heritage montage + individual crests (all assets in /static/). */
+        body::after{
+            content:'';
+            position:fixed;
+            inset:0;
+            z-index:0;
+            pointer-events:none;
+            opacity:0.055;
+            background-repeat:no-repeat;
+            background-image:
+                url('/static/badge_harp_shield.png'),
+                url('/static/badges_heritage_montage.png'),
+                url('/static/crest_variant_circle.png'),
+                url('/static/crest_classic_fc.png'),
+                url('/static/crest_official_circle.png');
+            background-size:
+                min(380px, 42vmin),
+                min(340px, 52vw),
+                min(100px, 15vmin),
+                min(104px, 15vmin),
+                min(104px, 15vmin);
+            background-position:
+                50% 40%,
+                50% 88%,
+                8% 88%,
+                94% 10%,
+                6% 10%;
+            filter:drop-shadow(0 0 40px rgba(2,6,23,0.85));
+        }
+        @media(max-width:640px){
+            body::after{
+                opacity:0.04;
+                background-size:
+                    min(260px, 52vmin),
+                    min(260px, 88vw),
+                    min(72px, 18vmin),
+                    min(76px, 18vmin),
+                    min(76px, 18vmin);
+                background-position:
+                    50% 38%,
+                    50% 92%,
+                    4% 90%,
+                    96% 6%,
+                    4% 6%;
+            }
         }
         .container{max-width:1400px;margin:0 auto;position:relative;z-index:1;}
         .dash-outer{position:relative;z-index:1;}
@@ -154,8 +200,26 @@
         .ot-active{background:rgba(57,255,20,0.12);color:var(--neon-value);}
         .btn-refresh{background:rgba(57,255,20,0.15);border:1px solid rgba(57,255,20,0.45);color:var(--neon-value);padding:6px 14px;border-radius:8px;font-size:0.72em;font-weight:800;cursor:pointer;font-family:'Inter',sans-serif;}
         .btn-refresh:hover{filter:brightness(1.08);}
-        .ref-cols{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start;}
-        @media(max-width:1100px){.ref-cols{grid-template-columns:1fr;}}
+        .ref-cols{display:grid;grid-template-columns:minmax(220px,280px) minmax(0,1fr) minmax(220px,280px);gap:16px;align-items:start;}
+        @media(max-width:1180px){.ref-cols{grid-template-columns:1fr;}}
+        .dash-sidebar{align-self:start;position:sticky;top:12px;z-index:2;}
+        @media(max-width:1180px){.dash-sidebar{position:static;}}
+        .dash-sidebar-inner{
+            border:1px solid var(--border);border-radius:14px;padding:12px 12px 14px;
+            background:rgba(15,23,42,0.96);box-shadow:0 8px 28px rgba(0,0,0,0.35);
+        }
+        .dash-side-hd{font-family:'Orbitron',monospace;font-size:0.72em;font-weight:800;color:var(--hibs-neon);letter-spacing:0.12em;text-transform:uppercase;margin:0 0 10px;}
+        .dash-sidebar .search-chips{margin-bottom:10px;flex-direction:column;align-items:stretch;}
+        .dash-sidebar .dash-search{max-width:none;width:100%;}
+        .dash-sidebar .chip-row{max-height:220px;overflow-y:auto;padding-bottom:2px;}
+        .dash-health-details{border:1px solid var(--border);border-radius:10px;margin-top:12px;background:rgba(2,6,23,0.45);}
+        .dash-health-details > summary{cursor:pointer;padding:8px 10px;font-size:0.72em;font-weight:700;color:var(--muted);list-style:none;}
+        .dash-health-details > summary::-webkit-details-marker{display:none;}
+        .dash-health-details .health-grid-tight{padding:0 6px 8px;}
+        .dash-h-row{font-size:0.68em;padding:5px 6px;}
+        .dash-h-row .health-name{font-size:0.92em;}
+        .btn-health-mini{width:100%;margin-top:8px;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:rgba(56,189,248,0.08);color:var(--text);font-size:0.68em;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;}
+        .btn-health-mini:hover{border-color:rgba(56,189,248,0.35);}
         .hero-strip{margin-bottom:12px;}
         .hero-title{font-family:'Orbitron',monospace;font-size:clamp(1.1rem,2.4vw,1.45rem);font-weight:900;color:var(--text);letter-spacing:0.04em;}
         .hero-brand{color:var(--hibs-neon);}

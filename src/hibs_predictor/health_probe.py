@@ -1,5 +1,6 @@
 """Lightweight latency and scraper-shape probes for the dashboard health panel."""
 
+import json
 import os
 import time
 from typing import Any, Dict, List
@@ -12,6 +13,44 @@ from hibs_predictor.scrapers.statsbomb_open import OPEN_BASE
 
 def _ms_since(t0: float) -> float:
     return round((time.perf_counter() - t0) * 1000, 1)
+
+
+def cache_disk_summary() -> Dict[str, Any]:
+    """Summarise on-disk JSON cache (TTL metadata + size) for /api/health — no writes."""
+    try:
+        from hibs_predictor.cache import Cache
+
+        c = Cache()
+        root = c.cache_dir
+        n_files = 0
+        bytes_total = 0
+        with_ttl = 0
+        if root.exists():
+            for path in root.glob("*.json"):
+                try:
+                    bytes_total += path.stat().st_size
+                    n_files += 1
+                    with open(path, "r", encoding="utf-8") as fh:
+                        data = json.load(fh)
+                    if isinstance(data, dict) and data.get("ttl_hours") is not None:
+                        with_ttl += 1
+                except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                    continue
+        return {
+            "cache_dir": str(root.resolve()),
+            "files": n_files,
+            "bytes_approx": bytes_total,
+            "entries_with_ttl_metadata": with_ttl,
+            "ttl_note": "Entries written via Cache.set store cached_at + ttl_hours; prune_stale() removes expired JSON.",
+        }
+    except Exception as exc:
+        return {
+            "cache_dir": ".cache",
+            "files": 0,
+            "bytes_approx": 0,
+            "entries_with_ttl_metadata": 0,
+            "error": str(exc)[:160],
+        }
 
 
 def gather_health() -> Dict[str, Any]:
@@ -278,4 +317,9 @@ def gather_health() -> Dict[str, Any]:
             }
         )
 
-    return {"apis": apis, "scrapers": scrapers, "latency_ok_ms": 200}
+    return {
+        "apis": apis,
+        "scrapers": scrapers,
+        "latency_ok_ms": 200,
+        "cache_disk": cache_disk_summary(),
+    }

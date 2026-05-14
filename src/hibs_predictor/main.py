@@ -12,7 +12,19 @@ from hibs_predictor.features import build_feature_matrix, normalize_strength
 from hibs_predictor.model import train_model, save_model, load_model, predict_probabilities
 
 
+def _project_root() -> str:
+    """Repository root (parent of `src/`), same as DataAggregator."""
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+def _load_env_from_project() -> None:
+    root = _project_root()
+    load_dotenv(os.path.join(root, ".env"))
+    load_dotenv(os.path.join(root, ".env.local"))
+
+
 def load_keys() -> Dict[str, str]:
+    _load_env_from_project()
     load_dotenv()
     return {
         "football_data_org": os.getenv("FOOTBALL_DATA_ORG_KEY", ""),
@@ -100,7 +112,20 @@ def fetch_remote_fixtures() -> List[Dict[str, Any]]:
     season = now.year if now.month >= 7 else now.year - 1
 
     rows: List[Dict[str, Any]] = []
-    for code in ("EPL", "SCOTLAND", "CHAMPIONSHIP", "LA_LIGA", "SERIE_A"):
+    # Finished fixtures + Match Winner odds for sklearn training (wider league mix).
+    train_codes = (
+        "EPL",
+        "SCOTLAND",
+        "CHAMPIONSHIP",
+        "LEAGUE_ONE",
+        "LA_LIGA",
+        "SERIE_A",
+        "BUNDESLIGA",
+        "LIGUE_1",
+        "EREDIVISIE",
+        "UCL",
+    )
+    for code in train_codes:
         league = LEAGUES.get(code)
         if not league or not league.get("api_sports_id"):
             continue
@@ -111,7 +136,7 @@ def fetch_remote_fixtures() -> List[Dict[str, Any]]:
             )
         except Exception:
             continue
-        for fx in (raw or [])[:100]:
+        for fx in (raw or [])[:80]:
             goals = fx.get("goals") or {}
             try:
                 hg = int(goals.get("home"))
@@ -148,6 +173,7 @@ def fetch_remote_fixtures() -> List[Dict[str, Any]]:
 
 
 def run_train(use_sample: bool = False) -> None:
+    _load_env_from_project()
     if use_sample:
         fixtures = sample_fixtures()
     else:
@@ -161,14 +187,17 @@ def run_train(use_sample: bool = False) -> None:
 
     X, y = build_feature_matrix(fixtures)
     pipeline, score = train_model(X, y)
-    save_model(pipeline)
-    print(f"Trained model saved to model.joblib with test accuracy: {score:.3f}")
+    model_path = os.path.join(_project_root(), "model.joblib")
+    save_model(pipeline, model_path)
+    print(f"Trained model saved to {model_path} with test accuracy: {score:.3f}")
 
 
 def run_predict(args: argparse.Namespace) -> None:
     import numpy as np
 
-    pipeline = load_model()
+    _load_env_from_project()
+    model_path = os.path.join(_project_root(), "model.joblib")
+    pipeline = load_model(model_path)
     fixture = [
         [
             normalize_strength({"pace": args.home_strength, "form": 0.75, "defence": 0.7, "attack": 0.75}),
