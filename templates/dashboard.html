@@ -37,7 +37,7 @@
 
             {% if not has_api_clients %}
             <div class="api-missing-banner" role="alert">
-                <strong>No fixture API keys loaded.</strong> Add <code>API_SPORTS_FOOTBALL_KEY</code> and/or <code>FOOTBALL_DATA_ORG_KEY</code> to your <code>.env</code>, then restart.
+                <strong>No fixture API keys loaded.</strong> Add a real key (not the <code>your_*_here</code> placeholders) to <code>.env</code> in the project root: <code>API_SPORTS_FOOTBALL_KEY</code> and/or <code>FOOTBALL_DATA_ORG_KEY</code> (aliases <code>API_SPORTS_KEY</code>, <code>FOOTBALL_DATA_KEY</code> also work). Restart the server after saving.
             </div>
             {% endif %}
 

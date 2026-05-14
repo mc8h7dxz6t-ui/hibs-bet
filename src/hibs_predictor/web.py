@@ -8,6 +8,11 @@ from typing import Any, Dict, List, Optional
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(BASE_DIR, "src"))
 
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(BASE_DIR, ".env"))
+load_dotenv(os.path.join(BASE_DIR, ".env.local"))
+
 from flask import Flask, render_template, jsonify, request, abort
 from hibs_predictor.config import LEAGUES, ALL_LEAGUE_CODES, LEAGUE_REGIONS, DASHBOARD_LEAGUE_ORDER
 from hibs_predictor.cache import Cache
@@ -41,9 +46,9 @@ def _fixture_key(fixture: Dict[str, Any]) -> str:
 
 def _fetch_window_days() -> int:
     try:
-        d = int(os.getenv("HIBS_FETCH_DAYS", "4"))
+        d = int(os.getenv("HIBS_FETCH_DAYS", "5"))
     except ValueError:
-        d = 4
+        d = 5
     return max(1, min(14, d))
 
 
@@ -64,7 +69,7 @@ def _ui_data_quality_min_pct() -> int:
 
 
 def _all_fixtures_cache_key() -> str:
-    return f"all_fixtures_{_fetch_window_days()}d_v8"
+    return f"all_fixtures_{_fetch_window_days()}d_v9"
 
 
 def _safe_enrich(fixture: Dict[str, Any], league_code: str) -> Dict[str, Any]:

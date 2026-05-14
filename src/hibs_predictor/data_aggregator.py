@@ -21,6 +21,43 @@ from hibs_predictor.scrapers.supplemental import collect_supplemental
 from hibs_predictor.scrapers import wikipedia_standings as wiki_standings
 
 
+def _project_root() -> str:
+    """Repository root (parent of `src/`), regardless of process cwd."""
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+def _load_dotenv_from_project() -> None:
+    """Load `.env` from the repo root so fixture APIs work when cwd is not the project folder."""
+    root = _project_root()
+    load_dotenv(os.path.join(root, ".env"))
+    load_dotenv(os.path.join(root, ".env.local"))
+
+
+def _looks_like_placeholder(value: str) -> bool:
+    low = value.strip().lower()
+    if not low:
+        return True
+    if "your_" in low and "here" in low:
+        return True
+    if low in ("xxx", "test", "none", "changeme", "null", "n/a", "na"):
+        return True
+    return False
+
+
+def _env_first_usable(*names: str) -> str:
+    for name in names:
+        raw = os.getenv(name)
+        if raw is None:
+            continue
+        val = raw.strip().strip('"').strip("'").lstrip("\ufeff")
+        if not val or val.startswith("#"):
+            continue
+        if _looks_like_placeholder(val):
+            continue
+        return val
+    return ""
+
+
 def _extract_goals_totals_from_api_stats(team_stats: Dict[str, Any]) -> Tuple[int, int]:
     """Normalize API-Football teams/statistics goals shape to (goals_for, goals_against)."""
     goals = team_stats.get("goals") or {}
@@ -184,6 +221,7 @@ class DataAggregator:
     """Aggregates data from multiple APIs to enrich fixture data."""
 
     def __init__(self) -> None:
+        _load_dotenv_from_project()
         load_dotenv()
         self.cache = Cache()
         self.clients = self._initialize_clients()
@@ -198,20 +236,29 @@ class DataAggregator:
     def _initialize_clients(self) -> Dict[str, Any]:
         clients: Dict[str, Any] = {}
 
-        if os.getenv("API_SPORTS_FOOTBALL_KEY"):
-            clients["api_sports"] = ApiSportsFootballClient(os.getenv("API_SPORTS_FOOTBALL_KEY", ""))
+        api_sports_key = _env_first_usable(
+            "API_SPORTS_FOOTBALL_KEY",
+            "API_SPORTS_KEY",
+            "APISPORTS_KEY",
+        )
+        if api_sports_key:
+            clients["api_sports"] = ApiSportsFootballClient(api_sports_key)
 
-        if os.getenv("FOOTBALL_DATA_ORG_KEY"):
-            clients["football_data_org"] = FootballDataOrgClient(os.getenv("FOOTBALL_DATA_ORG_KEY", ""))
+        fdo_key = _env_first_usable("FOOTBALL_DATA_ORG_KEY", "FOOTBALL_DATA_KEY")
+        if fdo_key:
+            clients["football_data_org"] = FootballDataOrgClient(fdo_key)
 
-        if os.getenv("SPORTSMONK_KEY"):
-            clients["sportsmonk"] = SportsMonkClient(os.getenv("SPORTSMONK_KEY", ""))
+        sm_key = _env_first_usable("SPORTSMONK_KEY")
+        if sm_key:
+            clients["sportsmonk"] = SportsMonkClient(sm_key)
 
-        if os.getenv("ODDS_API_KEY"):
-            clients["odds_api"] = OddsApiClient(os.getenv("ODDS_API_KEY", ""))
+        odds_key = _env_first_usable("ODDS_API_KEY")
+        if odds_key:
+            clients["odds_api"] = OddsApiClient(odds_key)
 
-        if os.getenv("STATS_API_KEY"):
-            clients["stats_api"] = StatsApiClient(os.getenv("STATS_API_KEY", ""))
+        stats_key = _env_first_usable("STATS_API_KEY")
+        if stats_key:
+            clients["stats_api"] = StatsApiClient(stats_key)
 
         return clients
 
