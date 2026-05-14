@@ -59,9 +59,9 @@ def _fetch_window_days() -> int:
 def _min_league_chip_fixtures() -> int:
     """Leagues with fewer upcoming fixtures in the window are hidden from filter chips (still in All)."""
     try:
-        n = int(os.getenv("HIBS_MIN_LEAGUE_CHIP_FIXTURES", "2"))
+        n = int(os.getenv("HIBS_MIN_LEAGUE_CHIP_FIXTURES", "1"))
     except ValueError:
-        n = 2
+        n = 1
     return max(1, min(20, n))
 
 
@@ -73,7 +73,7 @@ def _ui_data_quality_min_pct() -> int:
 
 
 def _all_fixtures_cache_key() -> str:
-    return f"all_fixtures_{_fetch_window_days()}d_v9"
+    return f"all_fixtures_{_fetch_window_days()}d_v10"
 
 
 def _safe_enrich(fixture: Dict[str, Any], league_code: str) -> Dict[str, Any]:

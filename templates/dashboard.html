@@ -46,7 +46,7 @@
                 <input type="search" id="dash-search" class="dash-search" placeholder="Search teams…" autocomplete="off" aria-label="Search fixtures">
                 <label class="chk-inline"><input type="checkbox" id="flt-value"> Value bets only</label>
                 <label class="chk-inline" title="Only matches meeting data coverage threshold (see expand panel)."><input type="checkbox" id="flt-data-full"> Full data (≥{{ data_quality_ui_min }}%)</label>
-                <p class="chip-hint">League shortcuts only show competitions with at least <strong>{{ min_league_chip_fixtures }}</strong> upcoming fixtures in this window (better form/xG coverage). Use <strong>All</strong> to browse every game.</p>
+                <p class="chip-hint">League chips: competitions with at least <strong>{{ min_league_chip_fixtures }}</strong> upcoming fixture(s) in this window (default 1 so more comps stay visible). <strong>All</strong> still lists every match we fetch — value can appear in any league.</p>
                 <div class="chip-row" id="chip-row">
                     <button type="button" class="chip chip-lg active" data-league="">All</button>
                     {% for code, name in leagues_for_filter %}

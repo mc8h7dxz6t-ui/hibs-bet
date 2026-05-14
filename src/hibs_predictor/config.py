@@ -267,6 +267,8 @@ LEAGUES = {
     },
 }
 
+# All competitions below are fetched for the dashboard window; value detection runs across
+# every league with data. Wider coverage + richer per-fixture enrichment improve edge quality.
 ALL_LEAGUE_CODES = [
     "SCOTLAND",
     "EPL",
