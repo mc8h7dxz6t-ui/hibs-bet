@@ -528,6 +528,8 @@ def test_scottish_fbref_xg():
             {"home": "Rangers", "away": "Hearts", "xg_home": 2.0, "xg_away": 0.7},
             {"home": "Motherwell", "away": "Livingston", "xg_home": 1.2, "xg_away": 0.9},
             {"home": "Aberdeen", "away": "St Johnstone", "xg_home": 1.3, "xg_away": 1.0},
+            {"home": "Motherwell", "away": "Kilmarnock", "xg_home": 1.05, "xg_away": 1.15},
+            {"home": "St Mirren", "away": "Aberdeen", "xg_home": 0.95, "xg_away": 1.35},
         ]
         fixture = {
             "teams": {"home": {"id": 10, "name": "Hibernian"}, "away": {"id": 20, "name": "Celtic"}},
@@ -547,9 +549,9 @@ def test_scottish_fbref_xg():
             return_value=sample_rows,
         ):
             out = apply_scraped_xg_to_enriched(fixture, "SCOTLAND", enriched)
-        assert out["xg_source"] == "scottish_fbref_xg", out.get("xg_source")
-        assert out["xg_home"] == 1.4
-        assert out["xg_away"] == 1.9
+            assert out["xg_source"] == "scottish_fbref_xg", out.get("xg_source")
+            assert out["xg_home"] == 1.4
+            assert out["xg_away"] == 1.9
 
         enriched2 = {
             "xg_home": 1.0,
@@ -572,9 +574,9 @@ def test_scottish_fbref_xg():
                 "SCOTLAND",
                 enriched2,
             )
-        assert out2["xg_source"] == "scottish_fbref_avg_xg", out2.get("xg_source")
-        assert out2["xg_home"] > 0.5
-        assert out2["xg_away"] > 0.5
+            assert out2["xg_source"] == "scottish_fbref_avg_xg", out2.get("xg_source")
+            assert out2["xg_home"] > 0.5
+            assert out2["xg_away"] > 0.5
         print("  ✓ Scottish FBref xG fixture + team avg")
         return True
     except Exception as e:
