@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Cheeky Monkeys — Telling the Time Game</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&family=Nunito:wght@600;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="watermark" aria-hidden="true"></div>
+
+  <header class="top-bar">
+    <span class="logo-monkey" aria-hidden="true">🐵</span>
+    <div class="title-block">
+      <h1>Cheeky Monkeys</h1>
+      <p class="tagline">Telling the Time Game!</p>
+    </div>
+    <button type="button" class="btn-icon" id="btn-sound" title="Sound on/off" aria-label="Toggle sound">🔊</button>
+  </header>
+
+  <main id="screen-home" class="screen active">
+    <section class="hero-card">
+      <p class="animal-quip" id="home-quip"></p>
+      <div class="monkey-bubble">
+        <span class="bubble-emoji" id="home-monkey-mood">🐵</span>
+        <p id="home-greeting">Ready for a cheeky clock adventure?</p>
+      </div>
+    </section>
+
+    <section class="stars-today">
+      <h2>Today’s stars <span class="star-count" id="today-star-count">0/4</span></h2>
+      <ul class="star-tasks" id="star-tasks-list"></ul>
+    </section>
+
+    <section class="game-pick">
+      <h2>Pick a game</h2>
+      <div class="game-grid">
+        <button type="button" class="game-card" data-game="set">
+          <span class="card-icon">🚜</span>
+          <span class="card-title">Set the Clock</span>
+          <span class="card-desc">Move the short hand — Tractor Ted is watching!</span>
+        </button>
+        <button type="button" class="game-card" data-game="read">
+          <span class="card-icon">🐔</span>
+          <span class="card-title">Barnyard Quiz</span>
+          <span class="card-desc">What time is it? Clucky Hen needs your help!</span>
+        </button>
+        <button type="button" class="game-card" data-game="half">
+          <span class="card-icon">🐄</span>
+          <span class="card-title">Half Past Moo</span>
+          <span class="card-desc">Long hand on the 6 — Cowbert says well done!</span>
+        </button>
+        <button type="button" class="game-card challenge" data-game="daily">
+          <span class="card-icon">⭐</span>
+          <span class="card-title">Daily Animal Challenge</span>
+          <span class="card-desc" id="daily-challenge-hint"></span>
+        </button>
+      </div>
+    </section>
+
+    <button type="button" class="btn-grownups" id="btn-grownups">🌟 Grown-ups: week stars</button>
+  </main>
+
+  <main id="screen-play" class="screen">
+    <div class="play-header">
+      <button type="button" class="btn-back" id="btn-back">← Home</button>
+      <h2 id="play-title">Set the Clock</h2>
+      <div class="score-pill"><span id="session-score">0</span> ⭐ this go</div>
+    </div>
+
+    <p class="animal-quip play-quip" id="play-quip"></p>
+
+    <div class="clock-wrap">
+      <svg id="clock-svg" viewBox="0 0 320 320" role="img" aria-label="Teaching clock">
+        <circle class="clock-face" cx="160" cy="160" r="145" />
+        <g id="clock-numbers"></g>
+        <circle class="clock-centre" cx="160" cy="160" r="8" />
+        <line id="hand-minute" class="hand-minute" x1="160" y1="160" x2="160" y2="55" />
+        <line id="hand-hour" class="hand-hour" x1="160" y1="160" x2="160" y2="95" />
+        <circle id="hand-knob" class="hand-knob" cx="160" cy="95" r="18" />
+      </svg>
+      <p class="clock-hint" id="clock-hint">Drag the <strong>blue</strong> short hand!</p>
+    </div>
+
+    <p class="prompt big-prompt" id="play-prompt">Make it three o’clock!</p>
+
+    <div id="choices-row" class="choices-row hidden"></div>
+
+    <div class="play-actions">
+      <button type="button" class="btn-primary hidden" id="btn-check">Check! ✓</button>
+      <button type="button" class="btn-secondary hidden" id="btn-next">Next cheeky go →</button>
+    </div>
+  </main>
+
+  <main id="screen-grownups" class="screen">
+    <div class="play-header">
+      <button type="button" class="btn-back" id="btn-back-grownups">← Home</button>
+      <h2>Your week of stars</h2>
+    </div>
+    <p class="grownups-intro">Each day has <strong>4 stars</strong> to earn. Use them for a treat at the end of the week!</p>
+    <div class="week-grid" id="week-grid"></div>
+    <p class="week-total">Week total: <strong id="week-total">0</strong> / 28 stars</p>
+    <button type="button" class="btn-secondary" id="btn-reset-week">Reset this week (grown-ups only)</button>
+  </main>
+
+  <div id="celebration" class="celebration hidden" aria-live="polite">
+    <div class="celebration-inner">
+      <span class="celebration-emoji">⭐</span>
+      <p id="celebration-text">Star earned!</p>
+    </div>
+  </div>
+
+  <canvas id="confetti" class="confetti-canvas"></canvas>
+
+  <script src="app.js"></script>
+</body>
+</html>
