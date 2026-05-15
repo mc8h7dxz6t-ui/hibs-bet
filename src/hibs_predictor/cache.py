@@ -1,14 +1,19 @@
 """Local caching system with TTL metadata and safe on-disk stale pruning."""
 
 import json
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
 
+def default_cache_dir() -> str:
+    return (os.getenv("HIBS_CACHE_DIR") or ".cache").strip() or ".cache"
+
+
 class Cache:
-    def __init__(self, cache_dir: str = ".cache") -> None:
-        self.cache_dir = Path(cache_dir)
+    def __init__(self, cache_dir: Optional[str] = None) -> None:
+        self.cache_dir = Path(cache_dir if cache_dir is not None else default_cache_dir())
         self.cache_dir.mkdir(exist_ok=True)
 
     def _sanitize_key(self, key: str) -> str:
@@ -66,9 +71,48 @@ class Cache:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f)
 
+    def clear_all(self) -> int:
+        """Delete every ``*.json`` file in the cache directory. Returns files removed."""
+        removed = 0
+        for path in self.cache_dir.glob("*.json"):
+            if not path.is_file():
+                continue
+            try:
+                path.unlink()
+                removed += 1
+            except OSError:
+                pass
+        return removed
+
+    def clear_pattern(self, substring: str, *, prefix: bool = False) -> int:
+        """Delete cache files whose on-disk stem matches ``substring`` (after key sanitization).
+
+        With ``prefix=True``, only stems that start with the sanitized substring are removed
+        (so ``fixtures_`` does not match ``all_fixtures_``).
+        """
+        needle = self._sanitize_key((substring or "").strip())
+        if not needle:
+            return 0
+        removed = 0
+        for path in self.cache_dir.glob("*.json"):
+            if not path.is_file():
+                continue
+            stem = path.stem
+            if prefix:
+                if not stem.startswith(needle):
+                    continue
+            elif needle not in stem:
+                continue
+            try:
+                path.unlink()
+                removed += 1
+            except OSError:
+                pass
+        return removed
+
     def clear(self) -> None:
-        for file in self.cache_dir.glob("*.json"):
-            file.unlink()
+        """Remove all cache files (legacy alias; prefer :meth:`clear_all`)."""
+        self.clear_all()
 
     def prune_stale(self, *, legacy_unknown_ttl_hours: float = 168.0) -> int:
         """Delete cache files that are past TTL.

@@ -23,6 +23,7 @@
             <p>Live probes against the same endpoints the dashboard uses. Green: OK and responsive; amber: reachable but slow; red: down, misconfigured, or layout drift.</p>
             <div class="status-actions">
                 <button type="button" class="status-btn" id="btn-status-refresh-2">Run checks again</button>
+                <button type="button" class="status-btn" id="btn-clear-cache">Clear disk cache</button>
                 <a href="/" class="nav-btn" style="text-decoration:none;display:inline-flex;align-items:center;">← Back to dashboard</a>
             </div>
         </div>
@@ -129,11 +130,19 @@
         }
     }
 
+    function clearCacheThenLoad() {
+        fetch('/api/cache/clear?all=1', { method: 'POST' })
+            .catch(function () { return null; })
+            .finally(load);
+    }
+
     function wire() {
         var b1 = document.getElementById('btn-status-refresh');
         var b2 = document.getElementById('btn-status-refresh-2');
+        var bc = document.getElementById('btn-clear-cache');
         if (b1) b1.addEventListener('click', load);
         if (b2) b2.addEventListener('click', load);
+        if (bc) bc.addEventListener('click', clearCacheThenLoad);
     }
 
     document.addEventListener('DOMContentLoaded', function () {

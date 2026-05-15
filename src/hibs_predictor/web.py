@@ -37,6 +37,8 @@ betting_engine = BettingEngine(aggregator.get_all_clients())
 
 _health_cache: Dict[str, Any] = {"t": 0.0, "payload": None}
 _HEALTH_TTL_SEC = 90.0
+_cache_prune_last: float = 0.0
+_CACHE_PRUNE_INTERVAL_SEC = 300.0
 
 
 def _api_football_season_year(now: datetime) -> int:
@@ -115,6 +117,47 @@ def _ui_data_quality_min_pct() -> int:
 
 def _all_fixtures_cache_key() -> str:
     return f"all_fixtures_{_fetch_window_days()}d_v14"
+
+
+def _cache_ttl_hours(default: float = 1.0) -> float:
+    try:
+        return max(0.01, float(os.getenv("HIBS_CACHE_TTL_HOURS", str(default))))
+    except ValueError:
+        return default
+
+
+def _maybe_prune_cache(cache: Cache) -> None:
+    """Lightweight stale prune (throttled) when HIBS_CACHE_PRUNE is enabled."""
+    global _cache_prune_last
+    if (os.getenv("HIBS_CACHE_PRUNE") or "1").strip().lower() in ("0", "false", "no"):
+        return
+    import time as _time
+
+    now = _time.monotonic()
+    if now - _cache_prune_last < _CACHE_PRUNE_INTERVAL_SEC:
+        return
+    _cache_prune_last = now
+    try:
+        cache.prune_stale()
+    except Exception:
+        pass
+
+
+def _clear_health_cache() -> None:
+    _health_cache["t"] = 0.0
+    _health_cache["payload"] = None
+
+
+def clear_application_caches(*, all_disk: bool = False) -> int:
+    """Clear in-memory health cache and on-disk fixture caches (or all JSON when all_disk)."""
+    _clear_health_cache()
+    cache = Cache()
+    if all_disk:
+        return cache.clear_all()
+    removed = 0
+    for pattern in ("all_fixtures_", "fixtures_"):
+        removed += cache.clear_pattern(pattern, prefix=True)
+    return removed
 
 
 def _safe_enrich(fixture: Dict[str, Any], league_code: str) -> Dict[str, Any]:
@@ -235,8 +278,9 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     cache = Cache()
     prefer_fdo = _env_truthy("HIBS_PREFER_FOOTBALL_DATA_FIXTURES")
     skip_as_fx = _env_truthy("HIBS_SKIP_API_SPORTS_FIXTURES")
+    ttl = _cache_ttl_hours(1.0)
     cache_key = f"fixtures_{days}d_{league_code}_v14_{int(prefer_fdo)}{int(skip_as_fx)}"
-    cached = cache.get(cache_key, ttl_hours=1)
+    cached = cache.get(cache_key, ttl_hours=ttl)
     if cached:
         return cached
 
@@ -375,7 +419,7 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
         )
 
     fixtures.sort(key=lambda x: x.get("date") or "")
-    cache.set(cache_key, fixtures, ttl_hours=1)
+    cache.set(cache_key, fixtures, ttl_hours=ttl)
     return fixtures
 
 
@@ -431,8 +475,10 @@ def _finalize_fixture_bundle(all_fixtures: List[Dict[str, Any]]) -> Dict[str, An
 
 def fetch_all_fixtures() -> Dict:
     cache = Cache()
+    _maybe_prune_cache(cache)
+    ttl = _cache_ttl_hours(1.0)
     ck = _all_fixtures_cache_key()
-    cached = cache.get(ck, ttl_hours=1)
+    cached = cache.get(ck, ttl_hours=ttl)
     if cached:
         all_f = cached.get("all") or []
         if all_f:
@@ -448,7 +494,7 @@ def fetch_all_fixtures() -> Dict:
             print(f"[AllFixtures] {league_code}: {e}")
 
     result = _finalize_fixture_bundle(all_fixtures)
-    cache.set(ck, result, ttl_hours=1)
+    cache.set(ck, result, ttl_hours=ttl)
     return result
 
 
@@ -565,6 +611,8 @@ def _assistant_bundle(fixtures: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 @app.route("/")
 def index():
+    if request.args.get("refresh") == "1":
+        clear_application_caches(all_disk=request.args.get("all") == "1")
     data = fetch_all_fixtures()
     assistant_bundle = _assistant_bundle(data["all"])
     assistant_packets = assistant_bundle["packets"]
@@ -616,6 +664,27 @@ def api_assistant_recommendations():
     )
 
 
+@app.route("/api/assistant/chat", methods=["POST"])
+def api_assistant_chat():
+    """Natural-language assistant: stats, accas, best bets (data-gated)."""
+    from hibs_predictor.assistant_chat import handle_chat
+
+    payload = request.get_json(silent=True) or {}
+    question = (payload.get("question") or payload.get("q") or "").strip()
+    if not question:
+        return jsonify({"error": "question required"}), 400
+    fixture_id = payload.get("fixture_id")
+    data = fetch_all_fixtures()
+    bundle = _assistant_bundle(data["all"])
+    reply = handle_chat(
+        question,
+        bundle.get("packets") or [],
+        recommendations=bundle.get("recommendations"),
+        fixture_id=fixture_id,
+    )
+    return jsonify(reply)
+
+
 @app.route("/api/audit/summary")
 def api_audit_summary():
     """Calibration / audit metrics from the prediction log SQLite (optional)."""
@@ -625,6 +694,18 @@ def api_audit_summary():
     from hibs_predictor.prediction_log import report_summary_dict
 
     return jsonify(report_summary_dict())
+
+
+@app.route("/api/cache/clear", methods=["POST", "GET"])
+def api_cache_clear():
+    """Clear fixture disk cache and in-memory /api/health cache. GET is for local dev only."""
+    all_disk = request.args.get("all") == "1"
+    if request.method == "POST" and request.is_json:
+        body = request.get_json(silent=True) or {}
+        if isinstance(body, dict) and body.get("all"):
+            all_disk = True
+    cleared = clear_application_caches(all_disk=all_disk)
+    return jsonify({"cleared": cleared, "all_disk": all_disk})
 
 
 @app.route("/api/health")

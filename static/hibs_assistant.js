@@ -3,7 +3,8 @@
 
     var packets = [];
     var recommendations = null;
-    var panel, body, fab, closeBtn, fixtureSel;
+    var panel, body, fab, closeBtn, fixtureSel, form, inputEl, sendBtn;
+    var busy = false;
 
     function init() {
         loadSnapshot(window.HIBS_ASSISTANT);
@@ -12,19 +13,18 @@
         fab = document.getElementById('hibs-assistant-fab');
         closeBtn = document.getElementById('hibs-assistant-close');
         fixtureSel = document.getElementById('hibs-assistant-fixture');
+        form = document.getElementById('hibs-assistant-form');
+        inputEl = document.getElementById('hibs-assistant-input');
+        sendBtn = document.getElementById('hibs-assistant-send');
         if (!panel || !body || !fab) return;
 
         populateFixtureSelect();
         fab.addEventListener('click', togglePanel);
         if (closeBtn) closeBtn.addEventListener('click', function () { panel.classList.remove('open'); });
-        document.querySelectorAll('.hibs-assistant-quick button').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                runPrompt(btn.getAttribute('data-prompt'));
-            });
-        });
-        if (fixtureSel) {
-            fixtureSel.addEventListener('change', function () {
-                if (fixtureSel.value) runPrompt('analyze');
+        if (form) {
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+                submitQuestion();
             });
         }
     }
@@ -56,179 +56,163 @@
     function togglePanel() {
         panel.classList.toggle('open');
         if (panel.classList.contains('open') && body && !body.childElementCount) {
-            appendBot('Tap <strong>Deep dive all</strong> for a full-window scan, or pick an acca / singles prompt. Only fixtures with strong data coverage are used.');
+            appendBot(welcomeHtml());
         }
     }
 
-    function findPacket(id) {
-        return packets.find(function (p) {
-            var key = String(p.id != null ? p.id : (p.home + '|' + p.away));
-            return key === String(id);
-        });
+    function welcomeHtml() {
+        return '<div class="hibs-assistant-card"><p class="ac-line">Ask anything about fixtures, stats, value, or accas. I only use matches with <strong>strong data coverage</strong>.</p><p class="ac-line" style="font-size:0.88em;color:var(--muted);">Try: <em>best bets</em>, <em>mixed acca</em>, <em>BTTS acca</em>, <em>stats for Hibs v Hearts</em>, <em>deep dive all</em>.</p></div>';
     }
 
-    function selectedPacket() {
-        if (!fixtureSel || !fixtureSel.value) return null;
-        return findPacket(fixtureSel.value);
+    function setBusy(on) {
+        busy = on;
+        if (sendBtn) sendBtn.disabled = on;
+        if (inputEl) inputEl.disabled = on;
     }
 
-    function ensureRecommendations(cb) {
-        if (recommendations) {
-            cb(recommendations);
-            return;
-        }
-        fetch('/api/assistant/snapshot')
+    function submitQuestion() {
+        if (busy || !inputEl) return;
+        var q = (inputEl.value || '').trim();
+        if (!q) return;
+        inputEl.value = '';
+        appendUser(q);
+        setBusy(true);
+        var fid = fixtureSel && fixtureSel.value ? fixtureSel.value : null;
+        fetch('/api/assistant/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question: q, fixture_id: fid })
+        })
             .then(function (r) { return r.json(); })
             .then(function (data) {
-                loadSnapshot(data);
-                populateFixtureSelect();
-                cb(recommendations || { deep_dive_summary: {}, acca_suggestions: [], best_singles: [] });
+                if (data.error) {
+                    appendBot(esc(data.error));
+                    return;
+                }
+                renderReply(data);
             })
             .catch(function () {
-                cb({ deep_dive_summary: {}, acca_suggestions: [], best_singles: [] });
-            });
+                appendBot('Could not reach the assistant API. Check the server is running and refresh the dashboard.');
+            })
+            .finally(function () { setBusy(false); });
     }
 
-    function runPrompt(kind) {
-        if (kind === 'deep-dive') {
-            appendUser('Deep dive all matches');
-            ensureRecommendations(function (rec) {
-                renderDeepDive(rec);
-            });
+    function renderReply(data) {
+        var blocks = data.blocks || [];
+        if (!blocks.length) {
+            appendBot('No response blocks — try rephrasing or type <em>help</em>.');
             return;
         }
-        if (kind === 'best-singles') {
-            appendUser('Best singles');
-            ensureRecommendations(function (rec) {
-                renderBestSingles(rec);
-            });
-            return;
-        }
-        if (kind === 'btts-acca') {
-            appendUser('BTTS acca');
-            ensureRecommendations(function (rec) {
-                renderAccaByType(rec, 'btts');
-            });
-            return;
-        }
-        if (kind === 'goals-acca') {
-            appendUser('Goals acca (Over 2.5)');
-            ensureRecommendations(function (rec) {
-                renderAccaByType(rec, 'over25');
-            });
-            return;
-        }
-        if (kind === 'win-acca') {
-            appendUser('Win acca');
-            ensureRecommendations(function (rec) {
-                renderAccaByType(rec, 'win');
-            });
-            return;
-        }
-        if (kind === 'value-all') {
-            analyzeAllValue();
-            return;
-        }
-        var pkt = selectedPacket();
-        if (!pkt) {
-            appendBot('Choose a fixture from the dropdown first.');
-            return;
-        }
-        if (kind === 'analyze') {
-            appendUser('Analyze ' + pkt.home + ' v ' + pkt.away);
-            appendStructuredCard(pkt);
+        blocks.forEach(function (block) {
+            renderBlock(block);
+        });
+        if (data.disclaimer) {
+            appendBot('<p class="ac-line" style="font-size:0.82em;color:var(--muted);margin-top:8px;">' + esc(data.disclaimer) + '</p>');
         }
     }
 
-    function renderDeepDive(rec) {
-        var sum = rec.deep_dive_summary || {};
-        var html = '<div class="hibs-assistant-card">';
-        html += '<p class="ac-line"><strong>Deep dive</strong></p>';
-        html += '<p class="ac-line">' + esc(sum.summary_line || 'Scan complete.') + '</p>';
-        if (sum.excluded_by_reason) {
-            html += '<p class="ac-line" style="font-size:0.88em;color:var(--muted);">Excluded: ';
-            var parts = [];
-            Object.keys(sum.excluded_by_reason).forEach(function (k) {
-                parts.push(k.replace(/_/g, ' ') + ' (' + sum.excluded_by_reason[k] + ')');
+    function renderBlock(block) {
+        var t = block.type;
+        if (t === 'text') {
+            var html = '<div class="hibs-assistant-card"><ul>';
+            (block.lines || []).forEach(function (line) {
+                html += '<li>' + formatLine(line) + '</li>';
             });
-            html += esc(parts.join('; ') || 'none') + '</p>';
+            html += '</ul></div>';
+            appendBot(html);
+            return;
         }
-        html += '<p class="ac-line" style="font-size:0.85em;">Bar: ≥' + (sum.min_data_pct || 78) + '% data, form sample ≥' + (sum.min_form_matches || 3) + ' matches per side where possible.</p>';
-        html += '</div>';
-        appendBot(html);
-
-        var accas = rec.acca_suggestions || [];
-        if (accas.length) {
-            appendBot('<p class="ac-line"><strong>Acca ideas</strong> (' + accas.length + ' built from eligible fixtures):</p>');
-            accas.forEach(function (a) { appendAccaCard(a); });
-        } else {
-            appendBot('No acca met the 3-leg minimum with book prices — try refreshing or widening the fixture window.');
+        if (t === 'summary') {
+            var s = block.data || {};
+            var h = '<div class="hibs-assistant-card"><p class="ac-line"><strong>Deep dive</strong></p>';
+            h += '<p class="ac-line">' + esc(s.summary_line || '') + '</p>';
+            if (s.excluded_by_reason) {
+                var parts = [];
+                Object.keys(s.excluded_by_reason).forEach(function (k) {
+                    parts.push(k.replace(/_/g, ' ') + ' (' + s.excluded_by_reason[k] + ')');
+                });
+                h += '<p class="ac-line" style="font-size:0.88em;color:var(--muted);">Excluded: ' + esc(parts.join('; ')) + '</p>';
+            }
+            h += '</div>';
+            appendBot(h);
+            return;
         }
-
-        var mh = rec.market_highlights || {};
-        var mhKeys = Object.keys(mh);
-        if (mhKeys.length) {
+        if (t === 'singles') {
+            appendBot('<p class="ac-line"><strong>Best singles</strong></p>');
+            (block.items || []).forEach(function (leg) {
+                appendBot(singleCardHtml(leg));
+            });
+            return;
+        }
+        if (t === 'accas') {
+            (block.items || []).forEach(function (a) { appendBot(accaCardHtml(a)); });
+            return;
+        }
+        if (t === 'highlights') {
             appendBot('<p class="ac-line"><strong>Market highlights</strong></p>');
-            mhKeys.forEach(function (bucket) {
+            var mh = block.data || {};
+            Object.keys(mh).forEach(function (bucket) {
                 var rows = mh[bucket] || [];
                 if (!rows.length) return;
                 appendBot('<p class="ac-line" style="font-weight:700;margin-top:6px;">' + esc(bucketLabel(bucket)) + '</p>');
                 rows.slice(0, 3).forEach(function (leg) {
-                    appendLegLine(leg, true);
+                    appendBot('<p class="ac-line">' + legHtml(leg) + '</p>');
                 });
             });
-        }
-        if (rec.disclaimer) {
-            appendBot('<p class="ac-line" style="font-size:0.82em;color:var(--muted);">' + esc(rec.disclaimer) + '</p>');
-        }
-    }
-
-    function renderBestSingles(rec) {
-        var singles = rec.best_singles || [];
-        if (!singles.length) {
-            appendBot('No singles cleared the data bar. Use Deep dive all for exclusion reasons.');
             return;
         }
-        appendBot(singles.length + ' top single(s) by model + value score:');
-        singles.forEach(function (leg) {
-            var html = '<div class="hibs-assistant-card">';
-            html += '<p class="ac-line"><strong>' + esc(leg.match || (leg.home + ' v ' + leg.away)) + '</strong>';
-            if (leg.kickoff_time) html += ' · ' + esc(leg.kickoff_time);
-            html += '</p>';
-            html += '<p class="ac-line"><strong>Pick:</strong> <span style="color:var(--neon)">' + esc(leg.market_label) + '</span>';
-            if (leg.odds) html += ' @ ' + leg.odds;
-            if (leg.model_pct != null) html += ' · model ' + leg.model_pct + '%';
-            html += '</p>';
-            if (leg.is_value && leg.edge_pct != null) {
-                html += '<p class="ac-line" style="color:var(--gold);">Value edge +' + leg.edge_pct + '%</p>';
-            }
-            if (leg.rationale && leg.rationale.length) {
-                html += '<ul>';
-                leg.rationale.forEach(function (b) { html += '<li>' + esc(b) + '</li>'; });
-                html += '</ul>';
-            }
-            html += '</div>';
-            appendBot(html);
-        });
-    }
-
-    function renderAccaByType(rec, type) {
-        var accas = rec.acca_suggestions || [];
-        var match = accas.filter(function (a) { return a.type === type; });
-        if (!match.length) {
-            appendBot('No ' + type + ' acca available — need ≥3 eligible legs with prices. Run Deep dive all for context.');
+        if (t === 'stats') {
+            var sh = '<div class="hibs-assistant-card">';
+            (block.lines || []).forEach(function (line) {
+                sh += '<p class="ac-line">' + formatLine(line) + '</p>';
+            });
+            sh += '</div>';
+            appendBot(sh);
             return;
         }
-        match.forEach(function (a) { appendAccaCard(a); });
+        if (t === 'fixture') {
+            if (block.packet) appendBot(fixtureCardHtml(block.packet, block.compact));
+            return;
+        }
+        if (t === 'fixtures') {
+            (block.items || []).forEach(function (p) {
+                appendBot(fixtureCardHtml(p, block.compact));
+            });
+        }
     }
 
-    function appendAccaCard(acca) {
+    function formatLine(line) {
+        var s = esc(line);
+        return s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    }
+
+    function singleCardHtml(leg) {
+        var h = '<div class="hibs-assistant-card">';
+        h += '<p class="ac-line"><strong>' + esc(leg.match || (leg.home + ' v ' + leg.away)) + '</strong>';
+        if (leg.kickoff_time) h += ' · ' + esc(leg.kickoff_time);
+        h += '</p><p class="ac-line"><strong>Pick:</strong> <span style="color:var(--neon)">' + esc(leg.market_label) + '</span>';
+        if (leg.odds) h += ' @ ' + leg.odds;
+        if (leg.model_pct != null) h += ' · model ' + leg.model_pct + '%';
+        h += '</p>';
+        if (leg.is_value && leg.edge_pct != null) {
+            h += '<p class="ac-line" style="color:var(--gold);">Value +' + leg.edge_pct + '% edge</p>';
+        }
+        if (leg.rationale && leg.rationale.length) {
+            h += '<ul>';
+            leg.rationale.forEach(function (b) { h += '<li>' + esc(b) + '</li>'; });
+            h += '</ul>';
+        }
+        h += '</div>';
+        return h;
+    }
+
+    function accaCardHtml(acca) {
         var html = '<div class="hibs-assistant-card hibs-acca-card">';
         html += '<p class="ac-line"><strong>' + esc(acca.title) + '</strong> · ' + acca.leg_count + ' legs</p>';
         if (acca.combined_odds) {
-            html += '<p class="ac-line">Combined odds <strong style="color:var(--gold);">' + acca.combined_odds + '</strong>';
+            html += '<p class="ac-line">Combined <strong style="color:var(--gold);">' + acca.combined_odds + '</strong>';
             if (acca.joint_confidence_pct != null) {
-                html += ' · joint model conf. ~' + acca.joint_confidence_pct + '%';
+                html += ' · joint conf. ~' + acca.joint_confidence_pct + '%';
             }
             html += '</p>';
         }
@@ -239,21 +223,53 @@
         html += '</ol>';
         if (acca.rationale && acca.rationale.length) {
             html += '<ul style="margin-top:6px;">';
-            acca.rationale.forEach(function (b) { html += '<li style="font-size:0.88em;color:var(--muted);">' + esc(b) + '</li>'; });
+            acca.rationale.forEach(function (b) {
+                html += '<li style="font-size:0.88em;color:var(--muted);">' + esc(b) + '</li>';
+            });
             html += '</ul>';
         }
+        html += '<p class="ac-line" style="margin-top:8px;"><button type="button" class="hibs-assistant-send hibs-acca-slip" data-acca-slip="1">Add legs to betslip</button></p>';
         html += '</div>';
-        appendBot(html);
+        return html;
     }
 
-    function appendLegLine(leg, compact) {
-        appendBot('<p class="ac-line">' + legHtml(leg) + (compact && leg.model_pct != null ? ' · ' + leg.model_pct + '%' : '') + '</p>');
+    function fixtureCardHtml(pkt, compact) {
+        var si = pkt.structured_insight || {};
+        var html = '<div class="hibs-assistant-card">';
+        var ko = pkt.kickoff_time || '';
+        html += '<p class="ac-line"><strong>Match:</strong> ' + esc(si.match || (pkt.home + ' vs ' + pkt.away));
+        if (ko) html += ' · ' + esc(ko);
+        html += '</p>';
+        html += '<p class="ac-line"><strong>Pick:</strong> <span style="color:var(--neon)">' + esc(si.pick || '—') + '</span></p>';
+        if (si.mode === 'odds_only') {
+            html += '<p class="ac-line" style="color:#fde68a;">Thin data — odds only, not used in accas.</p>';
+        }
+        if (si.rationale && si.rationale.length && !compact) {
+            html += '<ul>';
+            si.rationale.forEach(function (b) { html += '<li>' + esc(b) + '</li>'; });
+            html += '</ul>';
+        }
+        if (si.confidence_pct != null) {
+            html += '<p class="ac-line"><strong>Confidence:</strong> ' + si.confidence_pct + '%</p>';
+        }
+        if (pkt.data_quality_pct != null) {
+            html += '<p class="ac-line" style="font-size:0.88em;">Data ' + pkt.data_quality_pct + '%</p>';
+        }
+        if (pkt.has_value_bet && pkt.value_bets_display && pkt.value_bets_display[0]) {
+            var v = pkt.value_bets_display[0];
+            html += '<p class="ac-line" style="color:var(--gold);">Value: ' + esc(v.market_label) + ' @ ' + v.odds;
+            if (v.edge_pct != null) html += ' · +' + v.edge_pct + '%';
+            html += '</p>';
+        }
+        html += '</div>';
+        return html;
     }
 
     function legHtml(leg) {
         var ko = leg.kickoff_time ? esc(leg.kickoff_time) + ' ' : '';
         var s = ko + '<strong>' + esc(leg.home) + '</strong> v <strong>' + esc(leg.away) + '</strong> — ' + esc(leg.market_label);
         if (leg.odds) s += ' @ ' + leg.odds;
+        if (leg.model_pct != null) s += ' (' + leg.model_pct + '%)';
         if (leg.is_value) s += ' <span style="color:var(--gold);">VALUE</span>';
         return s;
     }
@@ -268,22 +284,6 @@
             win_combo: 'Win + BTTS combos'
         };
         return map[key] || key;
-    }
-
-    function analyzeAllValue() {
-        appendUser('Value scan');
-        var hits = packets.filter(function (p) { return p.has_value_bet; });
-        if (!hits.length) {
-            appendBot('No value-flagged fixtures in the current snapshot.');
-            return;
-        }
-        appendBot(hits.length + ' value fixture(s) (data-gated model vs book):');
-        hits.slice(0, 10).forEach(function (p) {
-            appendStructuredCard(p, true);
-        });
-        if (hits.length > 10) {
-            appendBot('… and ' + (hits.length - 10) + ' more.');
-        }
     }
 
     function appendUser(text) {
@@ -303,45 +303,20 @@
             el.textContent = html;
         }
         body.appendChild(el);
+        wireAccaSlipButtons(el);
         body.scrollTop = body.scrollHeight;
     }
 
-    function appendStructuredCard(pkt, compact) {
-        var si = pkt.structured_insight || {};
-        var html = '<div class="hibs-assistant-card">';
-        var ko = pkt.kickoff_time || '';
-        html += '<p class="ac-line"><strong>Match:</strong> ' + esc(si.match || (pkt.home + ' vs ' + pkt.away));
-        if (ko) html += ' · ' + esc(ko);
-        html += '</p>';
-        html += '<p class="ac-line"><strong>Pick:</strong> <span style="color:var(--neon)">' + esc(si.pick || '—') + '</span></p>';
-        if (si.mode === 'odds_only') {
-            html += '<p class="ac-line" style="color:#fde68a;">Insufficient data for model acca legs — prices only.</p>';
-        }
-        if (si.rationale && si.rationale.length && !compact) {
-            html += '<ul>';
-            si.rationale.forEach(function (b) { html += '<li>' + esc(b) + '</li>'; });
-            html += '</ul>';
-        }
-        if (si.confidence_pct != null) {
-            html += '<p class="ac-line"><strong>Confidence:</strong> ' + si.confidence_pct + '%</p>';
-        }
-        if (si.predicted_scoreline) {
-            html += '<p class="ac-line"><strong>Scoreline:</strong> ' + esc(si.predicted_scoreline) + '</p>';
-        }
-        if (pkt.data_quality_pct != null) {
-            html += '<p class="ac-line" style="font-size:0.88em;">Data ' + pkt.data_quality_pct + '%</p>';
-        }
-        if (pkt.has_value_bet && pkt.value_bets_display && pkt.value_bets_display[0]) {
-            var v = pkt.value_bets_display[0];
-            html += '<p class="ac-line" style="color:var(--gold);">Value: ' + esc(v.market_label) + ' @ ' + v.odds;
-            if (v.edge_pct != null) html += ' · +' + v.edge_pct + '% edge';
-            html += '</p>';
-        }
-        if (si.disclaimer && !compact) {
-            html += '<p class="ac-line" style="font-size:0.85em;color:var(--muted);">' + esc(si.disclaimer) + '</p>';
-        }
-        html += '</div>';
-        appendBot(html);
+    function wireAccaSlipButtons(root) {
+        if (!root || !window.HibsBetslip) return;
+        root.querySelectorAll('[data-acca-slip]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var card = btn.closest('.hibs-acca-card');
+                if (!card) return;
+                /* legs parsed from DOM is fragile — user can use pick menus on dashboard */
+                HibsBetslip.openDrawer();
+            });
+        });
     }
 
     function esc(s) {

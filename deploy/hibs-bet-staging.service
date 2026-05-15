@@ -1,0 +1,28 @@
+# Staging systemd unit for hibs-bet (side-by-side with production on :8000).
+# Copy to /etc/systemd/system/hibs-bet-staging.service, then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now hibs-bet-staging
+#
+# Use a separate deploy tree or the same repo with EnvironmentFile pointing at
+# .env.staging (see deploy/staging.env.example). Never share production cache with staging.
+
+[Unit]
+Description=hibs-bet staging (gunicorn :8001)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/hibs-bet-staging
+Environment=PYTHONPATH=src
+EnvironmentFile=-/opt/hibs-bet-staging/.env.staging
+ExecStart=/opt/hibs-bet-staging/.venv/bin/gunicorn \
+  --workers 2 \
+  --bind 0.0.0.0:8001 \
+  hibs_predictor.web:app
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

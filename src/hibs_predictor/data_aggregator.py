@@ -350,9 +350,9 @@ class DataAggregator:
         ak = (fixture.get("teams", {}) or {}).get("away", {}).get("name") or (fixture.get("away", {}) or {}).get("name", "?")
         dt = str(fixture.get("date", ""))
         if fixture_id_str:
-            cache_key = f"enriched_fixture_{fixture_id_str}_{league_code}_dq3"
+            cache_key = f"enriched_fixture_{fixture_id_str}_{league_code}_dq4"
         else:
-            cache_key = f"enriched_fixture_teams_{league_code}_{hk}|{ak}|{dt}_dq3"
+            cache_key = f"enriched_fixture_teams_{league_code}_{hk}|{ak}|{dt}_dq4"
 
         try:
             fixture_id_for_xg = int(raw_fid) if raw_fid not in (None, "", "0", 0) else None
@@ -514,6 +514,12 @@ class DataAggregator:
         except Exception as exc:
             print(f"[enrich supplemental] {league_code} fid={fixture_id_str}: {exc!r}")
             enriched["supplemental"] = {}
+        try:
+            from hibs_predictor.scraped_xg import apply_scraped_xg_to_enriched
+
+            enriched = apply_scraped_xg_to_enriched(fixture, league_code, enriched)
+        except Exception as exc:
+            print(f"[enrich scraped_xg] {league_code} fid={fixture_id_str}: {exc!r}")
         try:
             enriched["data_quality"] = compute_fixture_data_quality(enriched)
         except Exception as exc:

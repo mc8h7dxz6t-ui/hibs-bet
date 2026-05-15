@@ -6,6 +6,7 @@
 # Edit WorkingDirectory, User/Group, and ExecStart venv path to match the server.
 # Create a venv once: cd /opt/hibs-bet && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 # Put secrets in /opt/hibs-bet/.env (never commit .env); the app loads it from repo root.
+# Staging side-by-side: see deploy/README.md and hibs-bet-staging.service (:8001).
 
 [Unit]
 Description=hibs-bet Flask application (gunicorn)

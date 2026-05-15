@@ -7,7 +7,9 @@
 {% set hl10 = fixture.home_last10 %}
 {% set al10 = fixture.away_last10 %}
 {% set lo = p.line_odds if p and p.line_odds is defined else {} %}
-<details class="fixture-card fr-compact {% if fixture.has_value_bet %}value-card value-multi{% endif %}"
+{% set vb_list = p.value_bets_display if p and p.value_bets_display is defined and p.value_bets_display else [] %}
+{% set vb_multi = vb_list|length > 1 %}
+<details class="fixture-card fr-compact {% if fixture.has_value_bet %}value-card value-multi{% if vb_multi %} value-multi-many{% endif %}{% endif %}"
      data-fid="{{ fixture.id }}"
      data-home="{{ fixture.home }}"
      data-away="{{ fixture.away }}"
@@ -20,6 +22,23 @@
     <span class="fr-ko" title="Kick-off {{ display_tz_label|default('UK') }} time">{% if fixture.kickoff_time is defined and fixture.kickoff_time %}{{ fixture.kickoff_time }}{% elif fixture.date and 'T' in fixture.date %}{{ fixture.date[11:16] }}{% else %}—{% endif %}</span>
     <div class="fr-match">
         <div class="fr-teams">{{ fixture.home }} <span class="fr-vs">v</span> {{ fixture.away }}</div>
+        {% if fixture.has_value_bet and vb_list %}
+        <div class="fr-value-strip" aria-label="Value bets in this match">
+            {% for v in vb_list[:5] %}
+            <span class="fr-value-box" title="Model edge vs book implied probability">
+                <span class="fr-value-ico" aria-hidden="true">⚡</span>
+                <span class="fr-value-lbl">{{ v.market_label }}</span>
+                <span class="fr-value-odds">@ {{ "%.2f"|format(v.odds) }}</span>
+                {% if v.edge_pct is defined and v.edge_pct is not none %}
+                <span class="fr-value-edge">+{{ "%.1f"|format(v.edge_pct) }}%</span>
+                {% endif %}
+            </span>
+            {% endfor %}
+            {% if vb_list|length > 5 %}
+            <span class="fr-value-box fr-value-more">+{{ vb_list|length - 5 }} more</span>
+            {% endif %}
+        </div>
+        {% endif %}
         {% if p.structured_insight is defined and p.structured_insight and p.structured_insight.pick %}
         <div class="fr-pred" style="{% if p.structured_insight.pick_key == 'avoid' %}color:var(--muted){% elif p.structured_insight.mode == 'odds_only' %}color:#fde68a{% else %}color:var(--green){% endif %};font-size:0.72em;">{{ p.structured_insight.pick }}{% if p.structured_insight.confidence_pct is not none %} · {{ p.structured_insight.confidence_pct }}%{% endif %}</div>
         {% elif show_pred %}
@@ -77,19 +96,19 @@
         </div>
         {% endif %}
     </div>
-    <span class="fr-od fr-od-h">{% if p and p.bookmaker_odds.home is not none %}{{ "%.2f"|format(p.bookmaker_odds.home) }}{% else %}—{% endif %}</span>
-    <span class="fr-od fr-od-x">{% if p and p.bookmaker_odds.draw is not none %}{{ "%.2f"|format(p.bookmaker_odds.draw) }}{% else %}—{% endif %}</span>
-    <span class="fr-od fr-od-a">{% if p and p.bookmaker_odds.away is not none %}{{ "%.2f"|format(p.bookmaker_odds.away) }}{% else %}—{% endif %}</span>
-    <span class="fr-od">{% if lo.get('btts_yes') %}{{ "%.2f"|format(lo.btts_yes) }}{% else %}—{% endif %}</span>
-    <span class="fr-od">{% if lo.get('over15') %}{{ "%.2f"|format(lo.over15) }}{% else %}—{% endif %}</span>
-    <span class="fr-od">{% if lo.get('over25') %}{{ "%.2f"|format(lo.over25) }}{% else %}—{% endif %}</span>
-    <span class="fr-od">{% if lo.get('under25') %}{{ "%.2f"|format(lo.under25) }}{% else %}—{% endif %}</span>
-    <span class="fr-od">{% if lo.get('over35') %}{{ "%.2f"|format(lo.over35) }}{% else %}—{% endif %}</span>
-    <span class="fr-od">{% if lo.get('under35') %}{{ "%.2f"|format(lo.under35) }}{% else %}—{% endif %}</span>
+    <span class="fr-od fr-od-h{% if vb.get('home') %} fr-od-value{% endif %}" title="{% if vb.get('home') %}Value: Home{% endif %}">{% if p and p.bookmaker_odds.home is not none %}{{ "%.2f"|format(p.bookmaker_odds.home) }}{% else %}—{% endif %}</span>
+    <span class="fr-od fr-od-x{% if vb.get('draw') %} fr-od-value{% endif %}" title="{% if vb.get('draw') %}Value: Draw{% endif %}">{% if p and p.bookmaker_odds.draw is not none %}{{ "%.2f"|format(p.bookmaker_odds.draw) }}{% else %}—{% endif %}</span>
+    <span class="fr-od fr-od-a{% if vb.get('away') %} fr-od-value{% endif %}" title="{% if vb.get('away') %}Value: Away{% endif %}">{% if p and p.bookmaker_odds.away is not none %}{{ "%.2f"|format(p.bookmaker_odds.away) }}{% else %}—{% endif %}</span>
+    <span class="fr-od{% if vb.get('btts_yes') %} fr-od-value{% endif %}" title="{% if vb.get('btts_yes') %}Value: BTTS Yes{% endif %}">{% if lo.get('btts_yes') %}{{ "%.2f"|format(lo.btts_yes) }}{% else %}—{% endif %}</span>
+    <span class="fr-od{% if vb.get('over15') %} fr-od-value{% endif %}" title="{% if vb.get('over15') %}Value: Over 1.5{% endif %}">{% if lo.get('over15') %}{{ "%.2f"|format(lo.over15) }}{% else %}—{% endif %}</span>
+    <span class="fr-od{% if vb.get('over25') %} fr-od-value{% endif %}" title="{% if vb.get('over25') %}Value: Over 2.5{% endif %}">{% if lo.get('over25') %}{{ "%.2f"|format(lo.over25) }}{% else %}—{% endif %}</span>
+    <span class="fr-od{% if vb.get('under25') %} fr-od-value{% endif %}" title="{% if vb.get('under25') %}Value: Under 2.5{% endif %}">{% if lo.get('under25') %}{{ "%.2f"|format(lo.under25) }}{% else %}—{% endif %}</span>
+    <span class="fr-od{% if vb.get('over35') %} fr-od-value{% endif %}" title="{% if vb.get('over35') %}Value: Over 3.5{% endif %}">{% if lo.get('over35') %}{{ "%.2f"|format(lo.over35) }}{% else %}—{% endif %}</span>
+    <span class="fr-od{% if vb.get('under35') %} fr-od-value{% endif %}" title="{% if vb.get('under35') %}Value: Under 3.5{% endif %}">{% if lo.get('under35') %}{{ "%.2f"|format(lo.under35) }}{% else %}—{% endif %}</span>
     <span class="fr-chev" aria-hidden="true">▾</span>
     {% if fixture.has_value_bet %}
-    {% set top_v = p.value_bets_display[0] if p and p.value_bets_display is defined and p.value_bets_display else none %}
-    <span class="fr-val-tag" title="Model edge vs book implied probability">{% if top_v and top_v.edge_pct is defined %}+{{ top_v.edge_pct }}% edge{% else %}VALUE{% endif %}</span>
+    {% set top_v = vb_list[0] if vb_list else none %}
+    <span class="fr-val-tag" title="{% if top_v %}{{ top_v.market_label }} value{% else %}Value bet{% endif %}">⚡ {% if top_v and top_v.edge_pct is defined %}+{{ "%.1f"|format(top_v.edge_pct) }}%{% else %}VALUE{% endif %}</span>
     {% endif %}
 </summary>
 {% include '_fixture_expand_panel.html' %}

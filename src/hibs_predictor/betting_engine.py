@@ -601,8 +601,9 @@ class BettingEngine:
         xg_home = float(metadata["xg_home"])
         xg_away = float(metadata["xg_away"])
         sup_xg_dbg: Optional[Dict[str, Any]] = None
-        if os.getenv("HIBS_USE_SUPPLEMENTAL_XG_PRIOR", "0").lower() in ("1", "true", "yes"):
-            us = (fixture.get("supplemental") or {}).get("understat_light") or {}
+        if os.getenv("HIBS_USE_SUPPLEMENTAL_XG_PRIOR", "1").lower() not in ("0", "false", "no", "off"):
+            sup = fixture.get("supplemental") or {}
+            us = sup.get("understat_light") or sup.get("understat") or {}
             u_h, u_a = us.get("xg_home"), us.get("xg_away")
             if u_h is not None and u_a is not None:
                 try:

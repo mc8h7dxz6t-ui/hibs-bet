@@ -263,6 +263,35 @@ def _build_acca(
     }
 
 
+def build_mixed_market_acca(packets: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """One strongest priced leg per fixture; markets can differ (BTTS, O/U, 1X2, combos)."""
+    legs: List[Dict[str, Any]] = []
+    for pkt in packets:
+        if not is_analyzable(pkt):
+            continue
+        candidates = _collect_candidate_legs(pkt, allowed_keys=None)
+        if not candidates:
+            vl = _value_leg_from_display(pkt)
+            if vl:
+                candidates = [vl]
+        if not candidates:
+            continue
+        best = max(candidates, key=lambda x: float(x.get("score") or 0))
+        best["rationale"] = _leg_rationale(pkt, best)
+        legs.append(best)
+    legs.sort(key=lambda x: -float(x.get("score") or 0))
+    return _build_acca(
+        "Multi-market Acca (strongest stats per match)",
+        "mixed",
+        legs,
+        [
+            "Each leg is the highest-scoring market for that fixture (BTTS, goals, win, combos).",
+            "One selection per match — use as standard acca or same-game multi where your book allows.",
+            "Only fixtures passing the professional data bar are included.",
+        ],
+    )
+
+
 def _rank_all_legs(packets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     all_legs: List[Dict[str, Any]] = []
     seen_fixture_market: set = set()
@@ -396,6 +425,7 @@ def build_assistant_recommendations(packets: List[Dict[str, Any]]) -> Dict[str, 
     o15_legs = _legs_for_acca_type(packets, "over15")
     win_legs = _legs_for_acca_type(packets, "win")
     value_legs = _legs_for_acca_type(packets, "value")
+    mixed_legs_acca = build_mixed_market_acca(packets)
 
     acca_suggestions: List[Dict[str, Any]] = []
     acca_defs: List[Tuple[str, str, List[Dict[str, Any]], List[str]]] = [
@@ -458,6 +488,8 @@ def build_assistant_recommendations(packets: List[Dict[str, Any]]) -> Dict[str, 
         built = _build_acca(title, atype, legs, rat)
         if built:
             acca_suggestions.append(built)
+    if mixed_legs_acca:
+        acca_suggestions.append(mixed_legs_acca)
 
     return {
         "deep_dive_summary": {

@@ -4,7 +4,9 @@ Env:
   HIBS_ENABLE_SUPPLEMENTAL — default on; set 0 to skip all supplemental HTTP.
   HIBS_ENABLE_HEAVY_SCRAPERS — FBref + full Understat (default **on**). Set to 0 only when heavy HTML is **detrimental** (rate limits, IP blocks, policy).
   HIBS_SKIP_HEAVY_WHEN_API_STRONG — default 1: per-fixture, skip heavy **only** when APIs already supply book odds, API/Stats xG, 4+ recent games each side, season stats, **and** league positions (same signal FBref/Understat would mainly reinforce).
-  HIBS_ENABLE_UNDERSTAT_LIGHT — Understat xG row for fixtures in ``data_source_policy`` window (off default).
+  HIBS_ENABLE_UNDERSTAT_LIGHT — Understat xG row for fixtures in policy window (default **on** for supported leagues).
+  HIBS_SCRAPE_XG — after supplemental, apply Understat + Scottish FBref + recent-match xG into ``xg_home`` / ``xg_away`` (default on).
+  HIBS_ENABLE_SCOTTISH_FBREF_XG — FBref SPFL schedule xG for SCOTLAND* leagues (default on).
   HIBS_ENABLE_STATSBOMB_OPEN_MATCHES — StatsBomb open-data goals proxy for teams in policy window (off default).
   HIBS_PREFER_SCRAPED_STANDINGS — Wikipedia league table first (default on in aggregator).
   HIBS_SKIP_ODDS_API — skip The Odds API (explicit opt-out only when ODDS_API_KEY is usable).
@@ -95,7 +97,7 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
     except Exception as exc:
         out["statsbomb_error"] = str(exc)
 
-    light_us = os.getenv("HIBS_ENABLE_UNDERSTAT_LIGHT", "0").lower() in ("1", "true", "yes")
+    light_us = os.getenv("HIBS_ENABLE_UNDERSTAT_LIGHT", "1").lower() not in ("0", "false", "no", "off")
     if light_us:
         try:
             from hibs_predictor.data_source_policy import fixture_in_policy_window
@@ -133,7 +135,12 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
         try:
             from hibs_predictor.scrapers import understat_client as us
 
-            row = us.find_fixture_row(league_code, datetime.now().year, home, (fixture.get("away", {}) or {}).get("name", ""))
+            away_nm = (fixture.get("away", {}) or {}).get("name", "")
+            row = None
+            for sy in _understat_season_years_for_fixture(fixture):
+                row = us.find_fixture_row(league_code, sy, home, away_nm)
+                if row:
+                    break
             if row:
                 out["understat"] = us.extract_xg_from_row(row)
         except Exception as exc:

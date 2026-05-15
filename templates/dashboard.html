@@ -239,7 +239,14 @@
 
     function wireRefresh() {
         var b = document.getElementById('btn-refresh');
-        if (b) b.addEventListener('click', function () { window.location.reload(); });
+        if (!b) return;
+        b.addEventListener('click', function () {
+            b.disabled = true;
+            b.textContent = 'Refreshing…';
+            fetch('/api/cache/clear?all=1', { method: 'POST' })
+                .catch(function () { return null; })
+                .finally(function () { window.location.reload(); });
+        });
     }
 
     function wireOddsToggle() {

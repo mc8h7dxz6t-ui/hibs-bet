@@ -67,6 +67,16 @@ def test_cache():
             assert pruned >= 1, "prune should remove expired entry"
             assert c2.get("expire_me", ttl_hours=1) is None
 
+            c2.set("fixtures_EPL_v14", {"x": 1})
+            c2.set("all_fixtures_5d_v14", {"y": 2})
+            c2.set("enriched_fixture_99", {"z": 3})
+            assert c2.clear_pattern("fixtures_", prefix=True) == 1
+            assert c2.clear_pattern("all_fixtures_", prefix=True) == 1
+            assert c2.get("enriched_fixture_99", ttl_hours=24) is not None
+            c2.set("keep_a", 1)
+            c2.set("keep_b", 2)
+            assert c2.clear_all() == 3
+
         print("  ✓ Cache working correctly")
         return True
     except Exception as e:
@@ -103,7 +113,9 @@ def test_flask_routes():
             "/api/value-bets",
             "/api/assistant/snapshot",
             "/api/assistant/recommendations",
+            "/api/assistant/chat",
             "/api/audit/summary",
+            "/api/cache/clear",
             "/acca",
             "/status",
         }
@@ -146,6 +158,46 @@ def test_api_health_prediction_quality():
         return True
     except Exception as e:
         print(f"  ✗ Health payload test failed: {e}")
+        return False
+
+
+def test_api_cache_clear():
+    """POST /api/cache/clear removes fixture cache files and resets health cache."""
+    print("\nTesting /api/cache/clear...")
+    try:
+        import tempfile
+        from hibs_predictor.cache import Cache
+        from hibs_predictor.web import app, clear_application_caches, _health_cache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["HIBS_CACHE_DIR"] = tmp
+            c = Cache()
+            c.set("fixtures_test_league", [1])
+            c.set("other_key", [2])
+            _health_cache["t"] = 999.0
+            _health_cache["payload"] = {"stub": True}
+            n = clear_application_caches(all_disk=False)
+            assert n >= 1
+            assert c.get("fixtures_test_league", ttl_hours=24) is None
+            assert c.get("other_key", ttl_hours=24) is not None
+            assert _health_cache["payload"] is None
+
+            client = app.test_client()
+            res = client.post("/api/cache/clear?all=1")
+            assert res.status_code == 200, res.status_code
+            body = res.get_json()
+            assert body.get("cleared", 0) >= 1
+            assert body.get("all_disk") is True
+            assert c.get("other_key", ttl_hours=24) is None
+
+        if "HIBS_CACHE_DIR" in os.environ:
+            del os.environ["HIBS_CACHE_DIR"]
+        print("  ✓ /api/cache/clear clears fixture + optional full disk cache")
+        return True
+    except Exception as e:
+        if "HIBS_CACHE_DIR" in os.environ:
+            del os.environ["HIBS_CACHE_DIR"]
+        print(f"  ✗ Cache clear API test failed: {e}")
         return False
 
 
@@ -314,6 +366,39 @@ def test_structured_insight():
         return False
 
 
+def test_assistant_chat():
+    """NL assistant routes questions to structured blocks."""
+    print("\nTesting assistant chat...")
+    try:
+        from hibs_predictor.assistant_chat import handle_chat
+
+        pkt = {
+            "id": 1,
+            "home": "Hibs",
+            "away": "Hearts",
+            "kickoff_time": "15:00",
+            "data_quality_pct": 88.0,
+            "home_recent_n": 5,
+            "away_recent_n": 5,
+            "structured_insight": {"mode": "prediction", "match": "Hibs vs Hearts", "pick": "Over 2.5"},
+            "pick_menu": [
+                {"key": "over_25", "label": "Over 2.5", "model_pct": 61.0, "odds": 1.85},
+                {"key": "btts_yes", "label": "BTTS Yes", "model_pct": 62.0, "odds": 1.72},
+            ],
+            "probability_scores": {"over25_pct": 61, "btts_pct": 62},
+        }
+        r = handle_chat("stats for Hibs v Hearts", [pkt])
+        assert r["intent"] == "stats"
+        assert any(b.get("type") == "stats" for b in r["blocks"])
+        h = handle_chat("help", [pkt])
+        assert h["intent"] == "help"
+        print("  ✓ Assistant chat OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Assistant chat test failed: {e}")
+        return False
+
+
 def test_assistant_recommendations():
     """Acca / singles builder respects data-quality gate on synthetic packets."""
     print("\nTesting assistant recommendations...")
@@ -429,6 +514,134 @@ def test_dashboard_days_grouping():
         return False
 
 
+def test_scottish_fbref_xg():
+    """Scottish FBref schedule xG resolves without live HTTP."""
+    print("\nTesting Scottish FBref xG...")
+    try:
+        from unittest.mock import patch
+
+        from hibs_predictor.scraped_xg import apply_scraped_xg_to_enriched
+
+        sample_rows = [
+            {"home": "Hibernian", "away": "Celtic", "xg_home": 1.4, "xg_away": 1.9},
+            {"home": "Hearts", "away": "Hibernian", "xg_home": 1.1, "xg_away": 1.6},
+            {"home": "Rangers", "away": "Hearts", "xg_home": 2.0, "xg_away": 0.7},
+            {"home": "Motherwell", "away": "Livingston", "xg_home": 1.2, "xg_away": 0.9},
+            {"home": "Aberdeen", "away": "St Johnstone", "xg_home": 1.3, "xg_away": 1.0},
+        ]
+        fixture = {
+            "teams": {"home": {"id": 10, "name": "Hibernian"}, "away": {"id": 20, "name": "Celtic"}},
+            "home": {"name": "Hibernian"},
+            "away": {"name": "Celtic"},
+        }
+        enriched = {
+            "xg_home": 1.0,
+            "xg_away": 1.0,
+            "xg_source": "goals_proxy",
+            "home_recent": [],
+            "away_recent": [],
+            "supplemental": {},
+        }
+        with patch(
+            "hibs_predictor.scrapers.fbref_scottish_xg.fetch_schedule_rows",
+            return_value=sample_rows,
+        ):
+            out = apply_scraped_xg_to_enriched(fixture, "SCOTLAND", enriched)
+        assert out["xg_source"] == "scottish_fbref_xg", out.get("xg_source")
+        assert out["xg_home"] == 1.4
+        assert out["xg_away"] == 1.9
+
+        enriched2 = {
+            "xg_home": 1.0,
+            "xg_away": 1.0,
+            "xg_source": "goals_proxy",
+            "home_recent": [],
+            "away_recent": [],
+            "supplemental": {},
+        }
+        with patch(
+            "hibs_predictor.scrapers.fbref_scottish_xg.fetch_schedule_rows",
+            return_value=sample_rows,
+        ):
+            out2 = apply_scraped_xg_to_enriched(
+                {
+                    "teams": {"home": {"id": 11, "name": "Motherwell"}, "away": {"id": 12, "name": "Aberdeen"}},
+                    "home": {"name": "Motherwell"},
+                    "away": {"name": "Aberdeen"},
+                },
+                "SCOTLAND",
+                enriched2,
+            )
+        assert out2["xg_source"] == "scottish_fbref_avg_xg", out2.get("xg_source")
+        assert out2["xg_home"] > 0.5
+        assert out2["xg_away"] > 0.5
+        print("  ✓ Scottish FBref xG fixture + team avg")
+        return True
+    except Exception as e:
+        print(f"  ✗ Scottish FBref xG test failed: {e}")
+        return False
+
+
+def test_scraped_xg_resolution():
+    """Scraped xG from recent API matches upgrades goals_proxy."""
+    print("\nTesting scraped xG...")
+    try:
+        from hibs_predictor.scraped_xg import apply_scraped_xg_to_enriched
+
+        fixture = {
+            "teams": {"home": {"id": 1, "name": "Home FC"}, "away": {"id": 2, "name": "Away FC"}},
+            "home": {"name": "Home FC"},
+            "away": {"name": "Away FC"},
+        }
+        enriched = {
+            "xg_home": 1.1,
+            "xg_away": 1.0,
+            "xg_source": "goals_proxy",
+            "home_recent": [
+                {
+                    "teams": {"home": {"id": 1}, "away": {"id": 99}},
+                    "statistics": [
+                        {"team": {"id": 1}, "expected_goals": {"total": "1.8"}},
+                        {"team": {"id": 99}, "expected_goals": {"total": "0.9"}},
+                    ],
+                },
+                {
+                    "teams": {"home": {"id": 88}, "away": {"id": 1}},
+                    "statistics": [
+                        {"team": {"id": 88}, "expected_goals": {"total": "1.0"}},
+                        {"team": {"id": 1}, "expected_goals": {"total": "2.1"}},
+                    ],
+                },
+            ],
+            "away_recent": [
+                {
+                    "teams": {"home": {"id": 2}, "away": {"id": 77}},
+                    "statistics": [
+                        {"team": {"id": 2}, "expected_goals": {"total": "1.5"}},
+                        {"team": {"id": 77}, "expected_goals": {"total": "1.0"}},
+                    ],
+                },
+                {
+                    "teams": {"home": {"id": 66}, "away": {"id": 2}},
+                    "statistics": [
+                        {"team": {"id": 66}, "expected_goals": {"total": "0.8"}},
+                        {"team": {"id": 2}, "expected_goals": {"total": "1.6"}},
+                    ],
+                },
+            ],
+            "supplemental": {},
+        }
+        out = apply_scraped_xg_to_enriched(fixture, "SCOTLAND", enriched)
+        assert out["xg_source"] == "scraped_recent_xg", out.get("xg_source")
+        assert out["xg_home"] > 1.4
+        assert out["xg_away"] > 1.3
+        print("  ✓ Scraped recent-match xG applied")
+        return True
+    except Exception as e:
+        print(f"  ✗ Scraped xG test failed: {e}")
+        return False
+
+
 def test_kickoff_display_tz():
     """Kick-off shown in Europe/London (BST: UTC+1)."""
     print("\nTesting kick-off timezone display...")
@@ -479,12 +692,16 @@ def main():
         test_main_cli_help,
         test_flask_routes,
         test_api_health_prediction_quality,
+        test_api_cache_clear,
         test_structured_insight,
         test_value_edge_fields,
         test_pick_menu,
         test_dashboard_days_grouping,
         test_kickoff_display_tz,
+        test_scottish_fbref_xg,
+        test_scraped_xg_resolution,
         test_assistant_recommendations,
+        test_assistant_chat,
         test_templates,
     ]
     

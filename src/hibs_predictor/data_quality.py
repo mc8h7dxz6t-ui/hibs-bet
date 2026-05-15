@@ -80,7 +80,9 @@ def compute_fixture_data_quality(enriched: Dict[str, Any]) -> Dict[str, Any]:
         xg_pts = 18.0
     elif src == "stats_api_xg":
         xg_pts = 15.0
-    elif src in ("mixed_api_goals_proxy", "partial_single_side", "partial_xg"):
+    elif src in ("understat_xg", "scraped_recent_xg", "scottish_fbref_xg", "scottish_fbref_avg_xg"):
+        xg_pts = 15.0
+    elif src in ("partial_scraped_xg", "mixed_api_goals_proxy", "partial_single_side", "partial_xg"):
         xg_pts = 10.0
     else:
         xg_pts = 4.0
