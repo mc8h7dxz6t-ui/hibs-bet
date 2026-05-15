@@ -88,7 +88,7 @@ def prediction_unavailable_payload(fixture: Dict[str, Any], reason: str) -> Dict
         cross_implied = float(fixture.get("odds_cross_max_implied_diff_pct") or 0.0)
     except (TypeError, ValueError):
         cross_implied = 0.0
-    return {
+    out: Dict[str, Any] = {
         "prediction_unavailable": True,
         "prediction_unavailable_reason": reason,
         "fixture": f"{home} vs {away}",
@@ -141,6 +141,13 @@ def prediction_unavailable_payload(fixture: Dict[str, Any], reason: str) -> Dict
         "blend_weights_1x2": None,
         "poisson_probs_calibrated_pct": None,
     }
+    try:
+        from hibs_predictor.match_insight import attach_structured_insight
+
+        attach_structured_insight(fixture, out)
+    except Exception:
+        pass
+    return out
 
 
 class TeamStrengthCalculator:
@@ -711,6 +718,8 @@ class BettingEngine:
         over15_prob = self._poisson_over_goals_probability(lam_h_side, lam_a_side, 1.5)
         over25_prob = self._poisson_over_goals_probability(lam_h_side, lam_a_side, 2.5)
         over35_prob = self._poisson_over_goals_probability(lam_h_side, lam_a_side, 3.5)
+        under15_prob = max(0.02, min(0.98, 1.0 - over15_prob))
+        under35_prob = max(0.02, min(0.98, 1.0 - over35_prob))
         j_home_btts = self._poisson_joint_home_win_and_btts(lam_h_side, lam_a_side)
         j_draw_btts = self._poisson_joint_draw_and_btts(lam_h_side, lam_a_side)
         j_away_btts = self._poisson_joint_away_win_and_btts(lam_h_side, lam_a_side)
@@ -718,8 +727,12 @@ class BettingEngine:
             **ensemble_probs,
             "btts_yes": btts_prob,
             "btts_no": max(0.02, min(0.98, 1.0 - btts_prob)),
+            "over15": over15_prob,
+            "under15": under15_prob,
             "over25": over25_prob,
             "under25": max(0.02, min(0.98, 1.0 - over25_prob)),
+            "over35": over35_prob,
+            "under35": under35_prob,
             "home_and_btts": j_home_btts,
             "draw_and_btts": j_draw_btts,
             "away_and_btts": j_away_btts,
@@ -785,8 +798,12 @@ class BettingEngine:
             "away": "1X2 Away",
             "btts_yes": "BTTS Yes",
             "btts_no": "BTTS No",
+            "over15": "Over 1.5",
+            "under15": "Under 1.5",
             "over25": "Over 2.5",
             "under25": "Under 2.5",
+            "over35": "Over 3.5",
+            "under35": "Under 3.5",
             "home_and_btts": "Home + BTTS",
             "draw_and_btts": "Draw + BTTS",
             "away_and_btts": "Away + BTTS",
@@ -898,6 +915,12 @@ class BettingEngine:
                 {k: round(v * 100, 1) for k, v in poisson_probs_cal.items()} if poisson_probs_cal else None
             ),
         }
+        try:
+            from hibs_predictor.match_insight import attach_structured_insight
+
+            attach_structured_insight(fixture, out)
+        except Exception:
+            pass
         try:
             from hibs_predictor.prediction_log import maybe_log_prediction_snapshot
 

@@ -269,6 +269,8 @@ LEAGUES = {
 
 # All competitions below are fetched for the dashboard window; value detection runs across
 # every league with data. Wider coverage + richer per-fixture enrichment improve edge quality.
+# Fetch + display order: SPL → EPL → lower Scotland → lower England → European leagues →
+# World Cup / internationals → Champions League / Europa / Conference.
 ALL_LEAGUE_CODES = [
     "SCOTLAND",
     "EPL",
@@ -280,9 +282,6 @@ ALL_LEAGUE_CODES = [
     "LEAGUE_ONE",
     "LEAGUE_TWO",
     "FA_CUP",
-    "UCL",
-    "EUROPA_LEAGUE",
-    "UECL",
     "LA_LIGA",
     "SERIE_A",
     "BUNDESLIGA",
@@ -296,47 +295,22 @@ ALL_LEAGUE_CODES = [
     "WORLD_CUP",
     "EUROS",
     "NATIONS_LEAGUE",
+    "UCL",
+    "EUROPA_LEAGUE",
+    "UECL",
 ]
 
-# Dashboard day blocks: SPL → EPL → lower Scotland → lower England → Europe → internationals.
-DASHBOARD_LEAGUE_ORDER = [
-    "SCOTLAND",
-    "EPL",
-    "SCOTLAND_CHAMP",
-    "SCOTLAND_L1",
-    "SCOTLAND_L2",
-    "SCOTTISH_CUP",
-    "CHAMPIONSHIP",
-    "LEAGUE_ONE",
-    "LEAGUE_TWO",
-    "FA_CUP",
-    "UCL",
-    "EUROPA_LEAGUE",
-    "UECL",
-    "LA_LIGA",
-    "SERIE_A",
-    "BUNDESLIGA",
-    "LIGUE_1",
-    "EREDIVISIE",
-    "PRIMEIRA",
-    "BELGIUM_FIRST",
-    "DENMARK_SL",
-    "GREECE_SL",
-    "AUSTRIA_BL",
-    "WORLD_CUP",
-    "EUROS",
-    "NATIONS_LEAGUE",
-]
+DASHBOARD_LEAGUE_ORDER = list(ALL_LEAGUE_CODES)
 
 LEAGUE_REGIONS = {
     "🏴󠁧󠁢󠁳󠁣󠁴󠁿 Scotland": ["SCOTLAND", "SCOTLAND_CHAMP", "SCOTLAND_L1", "SCOTLAND_L2", "SCOTTISH_CUP"],
     "🏴󠁧󠁢󠁥󠁮󠁧󠁿 England": ["EPL", "CHAMPIONSHIP", "LEAGUE_ONE", "LEAGUE_TWO", "FA_CUP"],
     "🏆 European": [
-        "UCL", "EUROPA_LEAGUE", "UECL",
         "LA_LIGA", "SERIE_A", "BUNDESLIGA", "LIGUE_1", "EREDIVISIE", "PRIMEIRA",
         "BELGIUM_FIRST", "DENMARK_SL", "GREECE_SL", "AUSTRIA_BL",
     ],
     "🌍 International": ["WORLD_CUP", "EUROS", "NATIONS_LEAGUE"],
+    "🏆 UEFA club": ["UCL", "EUROPA_LEAGUE", "UECL"],
 }
 
 DEFAULT_CACHE_TTL_HOURS = 4

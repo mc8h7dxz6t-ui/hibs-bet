@@ -102,6 +102,8 @@
     </div>
 </header>
 
+{% include '_betting_guide.html' %}
+
 <div class="acca-layout">
 
     <!-- BET SLIP -->
@@ -224,6 +226,15 @@
 {% block extra_js %}
 <script>
 const slip = {};
+if (window.HibsBetslip && typeof HibsBetslip.loadSlip === 'function') {
+    Object.assign(slip, HibsBetslip.loadSlip());
+}
+
+function persistSlip() {
+    if (window.HibsBetslip && typeof HibsBetslip.saveSlip === 'function') {
+        HibsBetslip.saveSlip(slip);
+    }
+}
 
 function toggle(fid, home, away, league, outcome, odds) {
     if (slip[fid] && slip[fid].outcome === outcome) {
@@ -267,6 +278,7 @@ function renderSlip() {
         body.appendChild(d);
     });
     recalc();
+    persistSlip();
 }
 
 function removeSel(fid) {
@@ -280,6 +292,7 @@ function removeSel(fid) {
     }
     delete slip[fid];
     renderSlip();
+    persistSlip();
 }
 
 function clearSlip() {
@@ -383,6 +396,7 @@ function doFilter(f, btn){
     });
 }
 
+renderSlip();
 // Default: show value bets
 doFilter('value', document.querySelector('.fbtn.fgold'));
 </script>

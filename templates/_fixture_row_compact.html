@@ -8,15 +8,21 @@
 {% set al10 = fixture.away_last10 %}
 {% set lo = p.line_odds if p and p.line_odds is defined else {} %}
 <details class="fixture-card fr-compact {% if fixture.has_value_bet %}value-card value-multi{% endif %}"
+     data-fid="{{ fixture.id }}"
+     data-home="{{ fixture.home }}"
+     data-away="{{ fixture.away }}"
      data-league="{{ fixture.league }}"
      data-has-value="{% if fixture.has_value_bet %}1{% else %}0{% endif %}"
      data-data-q="{% if fixture.data_quality is defined and fixture.data_quality %}{{ fixture.data_quality.score_pct }}{% else %}0{% endif %}"
-     data-search="{{ (fixture.home ~ ' ' ~ fixture.away)|lower }}">
+     data-search="{{ (fixture.home ~ ' ' ~ fixture.away)|lower }}"
+     {% if fixture.id is not none %}id="fix-{{ fixture.id }}"{% endif %}>
 <summary class="fr-sum">
-    <span class="fr-ko">{% if fixture.date and 'T' in fixture.date %}{{ fixture.date[11:16] }}{% else %}—{% endif %}</span>
+    <span class="fr-ko" title="Kick-off {{ display_tz_label|default('UK') }} time">{% if fixture.kickoff_time is defined and fixture.kickoff_time %}{{ fixture.kickoff_time }}{% elif fixture.date and 'T' in fixture.date %}{{ fixture.date[11:16] }}{% else %}—{% endif %}</span>
     <div class="fr-match">
         <div class="fr-teams">{{ fixture.home }} <span class="fr-vs">v</span> {{ fixture.away }}</div>
-        {% if show_pred %}
+        {% if p.structured_insight is defined and p.structured_insight and p.structured_insight.pick %}
+        <div class="fr-pred" style="{% if p.structured_insight.pick_key == 'avoid' %}color:var(--muted){% elif p.structured_insight.mode == 'odds_only' %}color:#fde68a{% else %}color:var(--green){% endif %};font-size:0.72em;">{{ p.structured_insight.pick }}{% if p.structured_insight.confidence_pct is not none %} · {{ p.structured_insight.confidence_pct }}%{% endif %}</div>
+        {% elif show_pred %}
         {% if p.predicted_outcome == 'home' %}
         <div class="fr-pred fr-pred-home">Home Win {{ p.probabilities_pct.home }}%</div>
         {% elif p.predicted_outcome == 'draw' %}
@@ -32,6 +38,37 @@
         {% set dq = fixture.data_quality.score_pct %}
         <span class="fr-dq {% if dq >= 85 %}ok{% elif dq >= 70 %}mid{% else %}low{% endif %}">{{ dq }}% data</span>
         {% endif %}
+        <div class="fr-menus" onclick="event.stopPropagation();">
+            {% set pick_menu = p.pick_menu if p and p.pick_menu is defined and p.pick_menu else [] %}
+            {% if pick_menu %}
+            <select class="fr-pick-menu" title="Pick market (1X2, goals, combos)" onclick="event.stopPropagation();" onmousedown="event.stopPropagation();"
+                data-fid="{{ fixture.id }}" data-home="{{ fixture.home }}" data-away="{{ fixture.away }}" data-league="{{ fixture.league_name or fixture.league }}">
+                {% for item in pick_menu %}
+                <option value="{{ item.key }}" {% if item.recommended %}selected{% endif %}
+                    data-odds="{{ item.odds if item.odds else '' }}" data-label="{{ item.label }}">
+                    {{ item.label }}{% if item.model_pct is not none %} · {{ item.model_pct }}%{% endif %}{% if item.odds %} @ {{ "%.2f"|format(item.odds) }}{% endif %}{% if item.is_value %} · VALUE{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+            <button type="button" class="fr-add-slip" title="Add selected pick to betslip">+ Slip</button>
+            {% endif %}
+            <select class="fr-league-snap" title="League table snapshot" onclick="event.stopPropagation();" onmousedown="event.stopPropagation();">
+                {% if (hp and hp.position) or (ap and ap.position) %}
+                {% if hp and hp.position %}
+                <optgroup label="{{ fixture.home }}">
+                    <option selected>Pos {{ hp.position }} · P {{ hp.played }} W {{ hp.won }} D {{ hp.drawn }} L {{ hp.lost }} · GF {{ hp.goals_for }} GA {{ hp.goals_against }} GD {% if hp.goal_diff > 0 %}+{% endif %}{{ hp.goal_diff }} · {{ hp.points }} pts</option>
+                </optgroup>
+                {% endif %}
+                {% if ap and ap.position %}
+                <optgroup label="{{ fixture.away }}">
+                    <option>Pos {{ ap.position }} · P {{ ap.played }} W {{ ap.won }} D {{ ap.drawn }} L {{ ap.lost }} · GF {{ ap.goals_for }} GA {{ ap.goals_against }} GD {% if ap.goal_diff > 0 %}+{% endif %}{{ ap.goal_diff }} · {{ ap.points }} pts</option>
+                </optgroup>
+                {% endif %}
+                {% else %}
+                <option selected>Table N/A</option>
+                {% endif %}
+            </select>
+        </div>
         {% if hl10 or al10 %}
         <div class="fr-l10-preview" aria-hidden="true">
             {% if hl10 %}<span class="fr-l10-lbl">H</span><div class="form-strip form-dots-compact">{% for r in hl10 %}<span class="fd fd-{{ r.result }}" title="{{ fixture.home }} {{ r.score }}">{{ r.result }}</span>{% endfor %}</div>{% endif %}
@@ -50,7 +87,10 @@
     <span class="fr-od">{% if lo.get('over35') %}{{ "%.2f"|format(lo.over35) }}{% else %}—{% endif %}</span>
     <span class="fr-od">{% if lo.get('under35') %}{{ "%.2f"|format(lo.under35) }}{% else %}—{% endif %}</span>
     <span class="fr-chev" aria-hidden="true">▾</span>
-    {% if fixture.has_value_bet %}<span class="fr-val-tag">VALUE</span>{% endif %}
+    {% if fixture.has_value_bet %}
+    {% set top_v = p.value_bets_display[0] if p and p.value_bets_display is defined and p.value_bets_display else none %}
+    <span class="fr-val-tag" title="Model edge vs book implied probability">{% if top_v and top_v.edge_pct is defined %}+{{ top_v.edge_pct }}% edge{% else %}VALUE{% endif %}</span>
+    {% endif %}
 </summary>
 {% include '_fixture_expand_panel.html' %}
 </details>

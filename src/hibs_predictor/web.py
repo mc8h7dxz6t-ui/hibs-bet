@@ -24,6 +24,7 @@ from hibs_predictor.betting_engine import (
     prediction_unavailable_payload,
 )
 from hibs_predictor.health_probe import gather_health
+from hibs_predictor.display_tz import display_tz_label
 
 TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -113,7 +114,7 @@ def _ui_data_quality_min_pct() -> int:
 
 
 def _all_fixtures_cache_key() -> str:
-    return f"all_fixtures_{_fetch_window_days()}d_v11"
+    return f"all_fixtures_{_fetch_window_days()}d_v14"
 
 
 def _safe_enrich(fixture: Dict[str, Any], league_code: str) -> Dict[str, Any]:
@@ -234,7 +235,7 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     cache = Cache()
     prefer_fdo = _env_truthy("HIBS_PREFER_FOOTBALL_DATA_FIXTURES")
     skip_as_fx = _env_truthy("HIBS_SKIP_API_SPORTS_FIXTURES")
-    cache_key = f"fixtures_{days}d_{league_code}_v11_{int(prefer_fdo)}{int(skip_as_fx)}"
+    cache_key = f"fixtures_{days}d_{league_code}_v14_{int(prefer_fdo)}{int(skip_as_fx)}"
     cached = cache.get(cache_key, ttl_hours=1)
     if cached:
         return cached
@@ -378,40 +379,43 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     return fixtures
 
 
-def fetch_all_fixtures() -> Dict:
-    cache = Cache()
-    ck = _all_fixtures_cache_key()
-    cached = cache.get(ck, ttl_hours=1)
-    if cached:
-        return cached
+def _ensure_fixture_pick_menus(all_fixtures: List[Dict[str, Any]]) -> None:
+    """Backfill pick_menu / structured_insight on cached rows from older bundle versions."""
+    from hibs_predictor.match_insight import attach_structured_insight
 
-    all_fixtures: List[Dict] = []
-    by_region: Dict[str, List] = {r: [] for r in LEAGUE_REGIONS}
-    value_bets_only: List[Dict] = []
-    fixtures_by_league: Dict[str, List] = {c: [] for c in DASHBOARD_LEAGUE_ORDER}
-
-    for league_code in ALL_LEAGUE_CODES:
+    for f in all_fixtures:
+        p = f.get("prediction")
+        if not isinstance(p, dict):
+            continue
+        if p.get("pick_menu"):
+            continue
         try:
-            fixtures = fetch_next_48h_fixtures(league_code)
-            all_fixtures.extend(fixtures)
-            if league_code in fixtures_by_league:
-                fixtures_by_league[league_code].extend(fixtures)
-            for region, codes in LEAGUE_REGIONS.items():
-                if league_code in codes:
-                    by_region[region].extend(fixtures)
-            for f in fixtures:
-                if f.get("has_value_bet"):
-                    value_bets_only.append(f)
-        except Exception as e:
-            print(f"[AllFixtures] {league_code}: {e}")
+            attach_structured_insight(f, p)
+        except Exception as exc:
+            print(f"[Pick menu] {f.get('home')} v {f.get('away')}: {exc!r}")
 
-    for c in fixtures_by_league:
-        fixtures_by_league[c].sort(key=lambda x: x.get("date") or "")
 
-    all_fixtures.sort(key=lambda x: x.get("date") or "")
+def _finalize_fixture_bundle(all_fixtures: List[Dict[str, Any]]) -> Dict[str, Any]:
+    from hibs_predictor.display_tz import enrich_fixtures_kickoff
+
+    all_fixtures = enrich_fixtures_kickoff(all_fixtures)
+    _ensure_fixture_pick_menus(all_fixtures)
+    all_fixtures.sort(key=lambda x: x.get("kickoff_sort") or x.get("date") or "")
+    value_bets_only = [f for f in all_fixtures if f.get("has_value_bet")]
     value_bets_only.sort(key=lambda x: -(x.get("prediction", {}).get("best_bet_roi") or 0))
-
-    result = {
+    fixtures_by_league: Dict[str, List] = {c: [] for c in DASHBOARD_LEAGUE_ORDER}
+    for f in all_fixtures:
+        lc = f.get("league")
+        if lc in fixtures_by_league:
+            fixtures_by_league[lc].append(f)
+    for c in fixtures_by_league:
+        fixtures_by_league[c].sort(key=lambda x: x.get("kickoff_sort") or x.get("date") or "")
+    by_region: Dict[str, List] = {r: [] for r in LEAGUE_REGIONS}
+    for f in all_fixtures:
+        for region, codes in LEAGUE_REGIONS.items():
+            if f.get("league") in codes:
+                by_region[region].append(f)
+    return {
         "all": all_fixtures,
         "by_region": by_region,
         "by_league": fixtures_by_league,
@@ -420,75 +424,150 @@ def fetch_all_fixtures() -> Dict:
         "total": len(all_fixtures),
         "value_bet_count": len(value_bets_only),
         "fetch_days": _fetch_window_days(),
-        # Fixture lists come only from API-Sports or Football-Data.org, not Odds API / Rapid / SportMonks.
         "has_api_clients": ("api_sports" in aggregator.clients or "football_data_org" in aggregator.clients),
+        "sidebar_upcoming": _sidebar_upcoming(all_fixtures),
     }
+
+
+def fetch_all_fixtures() -> Dict:
+    cache = Cache()
+    ck = _all_fixtures_cache_key()
+    cached = cache.get(ck, ttl_hours=1)
+    if cached:
+        all_f = cached.get("all") or []
+        if all_f:
+            return _finalize_fixture_bundle(all_f)
+        return cached
+
+    all_fixtures: List[Dict] = []
+
+    for league_code in ALL_LEAGUE_CODES:
+        try:
+            all_fixtures.extend(fetch_next_48h_fixtures(league_code))
+        except Exception as e:
+            print(f"[AllFixtures] {league_code}: {e}")
+
+    result = _finalize_fixture_bundle(all_fixtures)
     cache.set(ck, result, ttl_hours=1)
     return result
 
 
+def _fixture_ko_sort_key(fixture: Dict[str, Any]) -> str:
+    """Sort key: kick-off datetime (UTC ISO, empty last)."""
+    return str(fixture.get("kickoff_sort") or fixture.get("date") or "9999")
+
+
+def _sidebar_upcoming(all_fixtures: List[Dict[str, Any]], limit: int = 80) -> List[Dict[str, Any]]:
+    """Compact upcoming list for the left rail (navigation only)."""
+    rows: List[Dict[str, Any]] = []
+    for f in sorted(all_fixtures, key=_fixture_ko_sort_key):
+        fid = f.get("id")
+        if fid is None:
+            continue
+        rows.append(
+            {
+                "id": fid,
+                "home": f.get("home", "?"),
+                "away": f.get("away", "?"),
+                "league": f.get("league", ""),
+                "league_name": f.get("league_name", ""),
+                "kickoff_time": f.get("kickoff_time") or "—",
+                "kickoff_day_local": f.get("kickoff_day_local") or "",
+            }
+        )
+        if len(rows) >= limit:
+            break
+    return rows
+
+
 def _dashboard_days_groups(all_fixtures: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Group fixtures by calendar day, then by league (dashboard order)."""
+    """Group fixtures by local calendar day, leagues in DASHBOARD_LEAGUE_ORDER, each league by KO time."""
     from collections import defaultdict
+    from hibs_predictor.display_tz import day_heading_for_local_date, local_today
 
     by_day: Dict[str, Dict[str, List[Dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
     for f in all_fixtures:
-        raw = f.get("date") or ""
-        if len(raw) < 10:
-            continue
-        day_iso = raw[:10]
+        day_iso = (f.get("kickoff_day_local") or "").strip()
+        if not day_iso:
+            raw = f.get("date") or ""
+            if len(raw) < 10:
+                continue
+            day_iso = raw[:10]
         lc = f.get("league") or ""
         if lc:
             by_day[day_iso][lc].append(f)
-    today_utc = datetime.now(timezone.utc).date()
+    today_local = local_today()
+    order_index = {c: i for i, c in enumerate(DASHBOARD_LEAGUE_ORDER)}
     out: List[Dict[str, Any]] = []
     for day_iso in sorted(by_day.keys()):
         leagues_block: List[Dict[str, Any]] = []
-        for lc in DASHBOARD_LEAGUE_ORDER:
+        seen_lc = set()
+
+        def _append_league(lc: str) -> None:
             fl = by_day[day_iso].get(lc, [])
-            if fl:
-                fl.sort(key=lambda x: x.get("date") or "")
-                leagues_block.append(
-                    {
-                        "code": lc,
-                        "name": LEAGUES.get(lc, {}).get("name", lc),
-                        "fixtures": fl,
-                    }
-                )
+            if not fl:
+                return
+            fl.sort(key=_fixture_ko_sort_key)
+            leagues_block.append(
+                {
+                    "code": lc,
+                    "name": LEAGUES.get(lc, {}).get("name", lc),
+                    "fixtures": fl,
+                }
+            )
+            seen_lc.add(lc)
+
+        for lc in DASHBOARD_LEAGUE_ORDER:
+            _append_league(lc)
+        for lc in sorted(by_day[day_iso].keys(), key=lambda c: (order_index.get(c, 999), c)):
+            if lc not in seen_lc and by_day[day_iso][lc]:
+                _append_league(lc)
         if not leagues_block:
             continue
-        try:
-            d = date.fromisoformat(day_iso)
-        except ValueError:
-            heading = day_iso
-        else:
-            day_mon = f"{d.day} {d.strftime('%b')}"
-            if d == today_utc:
-                heading = f"Today • {day_mon}"
-            elif d == today_utc + timedelta(days=1):
-                heading = f"Tomorrow • {day_mon}"
-            else:
-                heading = f"{d.strftime('%a')} • {day_mon}"
-        out.append({"date_iso": day_iso, "heading": heading, "leagues": leagues_block})
+        day_count = sum(len(lb["fixtures"]) for lb in leagues_block)
+        heading = day_heading_for_local_date(day_iso, day_count, today_local)
+        out.append({"date_iso": day_iso, "heading": heading, "fixture_count": day_count, "leagues": leagues_block})
     return out
 
 
 def _leagues_for_filter(by_league: Dict[str, List]) -> List[tuple]:
-    """League chips only for competitions with enough upcoming games for stable model inputs."""
+    """League filter chips in dashboard order — every competition with fixtures in the window."""
     order_index = {c: i for i, c in enumerate(DASHBOARD_LEAGUE_ORDER)}
     min_n = _min_league_chip_fixtures()
-    codes = [
-        c
-        for c in ALL_LEAGUE_CODES
-        if c in LEAGUES and len(by_league.get(c) or []) >= min_n
-    ]
-    pairs = [(c, LEAGUES[c].get("name", c)) for c in codes]
-    return sorted(pairs, key=lambda x: (order_index.get(x[0], 999), x[1].lower()))
+    codes: List[str] = []
+    seen: set = set()
+    for c in DASHBOARD_LEAGUE_ORDER:
+        if c in LEAGUES and len(by_league.get(c) or []) >= min_n:
+            codes.append(c)
+            seen.add(c)
+    for c in sorted(by_league.keys(), key=lambda x: (order_index.get(x, 999), x)):
+        if c in LEAGUES and c not in seen and len(by_league.get(c) or []) >= min_n:
+            codes.append(c)
+    return [(c, LEAGUES[c].get("name", c)) for c in codes]
+
+
+def _assistant_packets_from_fixtures(fixtures: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    from hibs_predictor.match_insight import build_assistant_packet
+
+    return [build_assistant_packet(f) for f in fixtures]
+
+
+def _assistant_bundle(fixtures: List[Dict[str, Any]]) -> Dict[str, Any]:
+    from hibs_predictor.assistant_recommendations import build_assistant_recommendations
+
+    packets = _assistant_packets_from_fixtures(fixtures)
+    return {
+        "packets": packets,
+        "recommendations": build_assistant_recommendations(packets),
+        "count": len(packets),
+    }
 
 
 @app.route("/")
 def index():
     data = fetch_all_fixtures()
+    assistant_bundle = _assistant_bundle(data["all"])
+    assistant_packets = assistant_bundle["packets"]
     return render_template(
         "dashboard.html",
         all_fixtures=data["all"],
@@ -509,6 +588,31 @@ def index():
         ),
         leagues=LEAGUES,
         data_quality_ui_min=_ui_data_quality_min_pct(),
+        assistant_packets=assistant_packets,
+        assistant_recommendations=assistant_bundle.get("recommendations"),
+        sidebar_upcoming=data.get("sidebar_upcoming", []),
+        display_tz_label=display_tz_label(),
+    )
+
+
+@app.route("/api/assistant/snapshot")
+def api_assistant_snapshot():
+    """Structured insight packets + acca/market recommendations for the Betting Assistant."""
+    data = fetch_all_fixtures()
+    bundle = _assistant_bundle(data["all"])
+    return jsonify(bundle)
+
+
+@app.route("/api/assistant/recommendations")
+def api_assistant_recommendations():
+    """Acca and market recommendations only (packets omitted for lighter payload)."""
+    data = fetch_all_fixtures()
+    bundle = _assistant_bundle(data["all"])
+    return jsonify(
+        {
+            "recommendations": bundle.get("recommendations"),
+            "count": bundle.get("count", 0),
+        }
     )
 
 

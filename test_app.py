@@ -101,6 +101,8 @@ def test_flask_routes():
             "/api/fixtures",
             "/api/health",
             "/api/value-bets",
+            "/api/assistant/snapshot",
+            "/api/assistant/recommendations",
             "/api/audit/summary",
             "/acca",
             "/status",
@@ -194,6 +196,258 @@ def test_main_cli_help():
         return False
 
 
+def test_value_edge_fields():
+    """Value bet rows expose edge, ROI, and Kelly; O/U 1.5 and 3.5 in merged model."""
+    print("\nTesting value edge fields...")
+    try:
+        from hibs_predictor.betting_engine import OddsAnalyzer
+
+        vb = OddsAnalyzer.identify_value_bets(
+            {"home": 0.55, "over15": 0.72, "over35": 0.40},
+            {"home": 2.2, "over15": 1.55, "over35": 3.0},
+            margin=0.04,
+        )
+        assert "home" in vb
+        for key in vb:
+            assert "edge_pct" in vb[key]
+            assert "roi_percent" in vb[key]
+            assert "kelly" in vb[key]
+        print("  ✓ Value edge fields OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Value edge fields test failed: {e}")
+        return False
+
+
+def test_pick_menu():
+    """Per-fixture pick menu for summary dropdowns."""
+    print("\nTesting pick menu...")
+    try:
+        from hibs_predictor.match_insight import build_pick_menu, build_structured_insight
+
+        fixture = {
+            "home": "Hibs",
+            "away": "Hearts",
+            "league": "SCOTLAND",
+            "home_recent_n": 8,
+            "away_recent_n": 8,
+            "data_quality": {"score_pct": 82},
+        }
+        prediction = {
+            "probabilities": {"home": 0.45, "draw": 0.28, "away": 0.27},
+            "probabilities_pct": {"home": 45.0, "draw": 28.0, "away": 27.0},
+            "bookmaker_odds": {"home": 2.1, "draw": 3.4, "away": 3.2},
+            "btts_probability": 0.55,
+            "btts_probability_pct": 55.0,
+            "over25_probability_pct": 52.0,
+            "expected_goals_home": 1.4,
+            "expected_goals_away": 1.1,
+        }
+        prediction["structured_insight"] = build_structured_insight(fixture, prediction)
+        prediction["value_bets"] = {
+            "home": {
+                "edge_pct": 5.0,
+                "roi_percent": 12.0,
+            }
+        }
+        menu = build_pick_menu(fixture, prediction)
+        assert len(menu) >= 3
+        assert any(m.get("recommended") for m in menu)
+        labels = [m["label"] for m in menu]
+        assert any("Home Win" in x for x in labels)
+        home_row = next(m for m in menu if m["key"] == "home_win")
+        assert home_row.get("is_value") is True
+        assert home_row.get("edge_pct") == 5.0
+        print("  ✓ Pick menu OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Pick menu test failed: {e}")
+        return False
+
+
+def test_structured_insight():
+    """Structured match card: pick, rationale, odds-only for thin data."""
+    print("\nTesting structured match insight...")
+    try:
+        from hibs_predictor.match_insight import build_structured_insight, should_use_odds_only
+
+        fixture = {
+            "home": "Hibs",
+            "away": "Hearts",
+            "league": "SCOTLAND",
+            "home_recent_n": 8,
+            "away_recent_n": 8,
+            "home_btts_rate": 0.6,
+            "away_btts_rate": 0.5,
+            "data_quality": {"score_pct": 82},
+        }
+        prediction = {
+            "home": "Hibs",
+            "away": "Hearts",
+            "probabilities": {"home": 0.45, "draw": 0.28, "away": 0.27},
+            "probabilities_pct": {"home": 45.0, "draw": 28.0, "away": 27.0},
+            "expected_goals_home": 1.4,
+            "expected_goals_away": 1.1,
+            "btts_probability": 0.55,
+            "over25_probability_pct": 52.0,
+            "data_quality": {"score_pct": 82},
+        }
+        card = build_structured_insight(fixture, prediction)
+        assert card["match"] == "Hibs vs Hearts"
+        assert card["pick"]
+        assert len(card.get("rationale") or []) >= 1
+        assert card["mode"] == "prediction"
+
+        thin = dict(fixture)
+        thin["league"] = "DENMARK_SL"
+        thin["data_quality"] = {"score_pct": 50}
+        assert should_use_odds_only(thin, prediction)
+        odds_card = build_structured_insight(
+            thin,
+            {**prediction, "bookmaker_odds": {"home": 2.1, "draw": 3.4, "away": 3.2}},
+        )
+        assert odds_card["mode"] == "odds_only"
+        print("  ✓ Structured insight OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Structured insight test failed: {e}")
+        return False
+
+
+def test_assistant_recommendations():
+    """Acca / singles builder respects data-quality gate on synthetic packets."""
+    print("\nTesting assistant recommendations...")
+    try:
+        from hibs_predictor.assistant_recommendations import (
+            build_assistant_recommendations,
+            is_analyzable,
+        )
+
+        good = {
+            "id": 1,
+            "home": "Hibs",
+            "away": "Hearts",
+            "kickoff_time": "15:00",
+            "data_quality_pct": 88.0,
+            "home_recent_n": 5,
+            "away_recent_n": 5,
+            "structured_insight": {
+                "mode": "prediction",
+                "match": "Hibs vs Hearts",
+                "pick": "Over 2.5",
+                "pick_key": "over_25",
+            },
+            "pick_menu": [
+                {"key": "btts_yes", "label": "BTTS Yes", "model_pct": 62.0, "odds": 1.72, "is_value": True, "edge_pct": 4.2},
+                {"key": "over_25", "label": "Over 2.5", "model_pct": 61.0, "odds": 1.85, "recommended": True},
+                {"key": "over_15", "label": "Over 1.5", "model_pct": 78.0, "odds": 1.28},
+                {"key": "home_win", "label": "Home Win", "model_pct": 48.0, "odds": 2.1},
+            ],
+            "value_bets_display": [
+                {"outcome": "btts_yes", "market_label": "BTTS Yes", "odds": 1.72, "edge_pct": 4.2, "roi_percent": 5.1}
+            ],
+            "has_value_bet": True,
+        }
+        thin = {
+            "id": 2,
+            "home": "A",
+            "away": "B",
+            "data_quality_pct": 40.0,
+            "structured_insight": {"mode": "odds_only"},
+        }
+        assert is_analyzable(good)
+        assert not is_analyzable(thin)
+        rec = build_assistant_recommendations([good, thin])
+        assert rec["deep_dive_summary"]["fixtures_scanned"] == 2
+        assert rec["deep_dive_summary"]["fixtures_eligible"] == 1
+        assert len(rec["best_singles"]) >= 1
+        btts = [a for a in rec["acca_suggestions"] if a["type"] == "btts"]
+        assert btts == [], "one leg cannot form 3-leg acca"
+        print("  ✓ Assistant recommendations OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Assistant recommendations test failed: {e}")
+        return False
+
+
+def test_dashboard_days_grouping():
+    """Main dashboard: fixtures grouped by UK local day, then league (SPL first)."""
+    print("\nTesting dashboard day/league grouping...")
+    try:
+        from hibs_predictor.display_tz import attach_kickoff_display
+        from hibs_predictor.web import _dashboard_days_groups, _finalize_fixture_bundle, DASHBOARD_LEAGUE_ORDER
+
+        raw = [
+            attach_kickoff_display(
+                {
+                    "id": 1,
+                    "home": "Hibs",
+                    "away": "Celts",
+                    "date": "2026-05-15T11:30:00+00:00",
+                    "league": "SCOTLAND",
+                    "prediction": {"pick_menu": [{"key": "home_win", "label": "Home Win"}]},
+                }
+            ),
+            attach_kickoff_display(
+                {
+                    "id": 2,
+                    "home": "Arsenal",
+                    "away": "Chelsea",
+                    "date": "2026-05-15T19:00:00+00:00",
+                    "league": "EPL",
+                    "prediction": {"pick_menu": [{"key": "draw", "label": "Draw"}]},
+                }
+            ),
+            attach_kickoff_display(
+                {
+                    "id": 3,
+                    "home": "Rangers",
+                    "away": "Aberdeen",
+                    "date": "2026-05-16T14:00:00+00:00",
+                    "league": "SCOTLAND",
+                    "prediction": {},
+                }
+            ),
+        ]
+        days = _dashboard_days_groups(raw)
+        assert len(days) == 2
+        assert days[0]["date_iso"] == "2026-05-15"
+        assert [lg["code"] for lg in days[0]["leagues"]] == ["SCOTLAND", "EPL"]
+        assert days[0]["leagues"][0]["code"] == DASHBOARD_LEAGUE_ORDER[0] or days[0]["leagues"][0]["code"] == "SCOTLAND"
+        assert sum(len(lg["fixtures"]) for lg in days[0]["leagues"]) == 2
+
+        bundle = _finalize_fixture_bundle(list(raw))
+        assert bundle["total"] == 3
+        assert len(bundle["dashboard_days"]) == 2
+        assert bundle["sidebar_upcoming"]
+        assert bundle["all"][0]["kickoff_time"] == "12:30"
+        assert bundle["all"][0]["prediction"].get("pick_menu")
+        print("  ✓ Dashboard day/league grouping OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Dashboard grouping test failed: {e}")
+        return False
+
+
+def test_kickoff_display_tz():
+    """Kick-off shown in Europe/London (BST: UTC+1)."""
+    print("\nTesting kick-off timezone display...")
+    try:
+        from hibs_predictor.display_tz import attach_kickoff_display, day_heading_for_local_date
+        from datetime import date
+
+        f = attach_kickoff_display({"date": "2026-05-15T11:30:00+00:00", "home": "Hibs", "away": "Celts"})
+        assert f["kickoff_time"] == "12:30", f"expected 12:30 BST, got {f['kickoff_time']}"
+        assert f["kickoff_day_local"] == "2026-05-15"
+        h = day_heading_for_local_date("2026-05-15", 3, date(2026, 5, 15))
+        assert "Today" in h and "3 fixtures" in h
+        print("  ✓ Kick-off local time (UK) correct")
+        return True
+    except Exception as e:
+        print(f"  ✗ Kick-off TZ test failed: {e}")
+        return False
+
+
 def test_templates():
     """Test template loading."""
     print("\nTesting templates...")
@@ -225,6 +479,12 @@ def main():
         test_main_cli_help,
         test_flask_routes,
         test_api_health_prediction_quality,
+        test_structured_insight,
+        test_value_edge_fields,
+        test_pick_menu,
+        test_dashboard_days_grouping,
+        test_kickoff_display_tz,
+        test_assistant_recommendations,
         test_templates,
     ]
     

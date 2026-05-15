@@ -1,5 +1,48 @@
-    <div class="expand-panel">
+    <div class="expand-panel" data-fixture-id="{{ fixture.id }}">
         {% set show_pred = p and not (p.prediction_unavailable | default(false)) %}
+        {% set si = p.structured_insight if p and p.structured_insight is defined else none %}
+        {% set tab_gid = 'fx-' ~ (fixture.id|string if fixture.id is not none else (fixture.home ~ '-' ~ fixture.away))|replace(' ','') %}
+        {% set ps = p.probability_scores if p and p.probability_scores is defined else none %}
+
+        <div class="sub-tabs-row" role="tablist">
+            <button type="button" class="sub-tab active" data-tab-group="{{ tab_gid }}" onclick="switchTab(event,'{{ tab_gid }}-ov','{{ tab_gid }}')">Overview</button>
+            <button type="button" class="sub-tab" data-tab-group="{{ tab_gid }}" onclick="switchTab(event,'{{ tab_gid }}-form','{{ tab_gid }}')">Form &amp; xG</button>
+            <button type="button" class="sub-tab" data-tab-group="{{ tab_gid }}" onclick="switchTab(event,'{{ tab_gid }}-mk','{{ tab_gid }}')">Value &amp; Markets</button>
+        </div>
+
+        <div id="{{ tab_gid }}-ov" class="tab-panel active" data-group="{{ tab_gid }}">
+        {% if si %}
+        <div class="insight-card" style="margin-bottom:14px;padding:14px 16px;border-radius:12px;border:1px solid rgba(0,255,136,0.25);background:rgba(0,40,28,0.35);">
+            <div class="section-title" style="margin-bottom:10px;">📋 Match analysis</div>
+            <p style="margin:0 0 6px;font-size:0.85em;color:var(--muted);"><strong style="color:var(--text);">Match:</strong> {{ si.match }}</p>
+            <p style="margin:0 0 8px;font-size:0.95em;"><strong style="color:var(--neon);">Pick:</strong> {{ si.pick }}</p>
+            {% if si.rationale %}
+            <p style="margin:0 0 4px;font-size:0.78em;color:var(--muted);font-weight:600;">Rationale</p>
+            <ul class="insight-rationale" style="margin:0 0 10px 18px;padding:0;font-size:0.8em;line-height:1.45;color:var(--text);">
+                {% for bullet in si.rationale %}<li>{{ bullet }}</li>{% endfor %}
+            </ul>
+            {% endif %}
+            {% if si.confidence_pct is not none %}
+            <p style="margin:0 0 6px;font-size:0.85em;"><strong>Confidence:</strong> {{ si.confidence_pct }}%</p>
+            {% endif %}
+            {% if si.predicted_scoreline %}
+            <p style="margin:0;font-size:0.85em;"><strong>Predicted scoreline:</strong> {{ si.predicted_scoreline }}</p>
+            {% endif %}
+            {% if si.disclaimer %}
+            <p style="margin:10px 0 0;font-size:0.68em;color:var(--muted);">{{ si.disclaimer }}</p>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if show_pred and p.probabilities_pct is defined and p.probabilities_pct %}
+        <div class="outcome-bar-wrap" style="margin-bottom:12px;">
+            <div class="outcome-bar" role="img" aria-label="Home draw away probabilities">
+                <span class="ob-seg ob-h" style="width:{{ p.probabilities_pct.home }}%;">{{ p.probabilities_pct.home }}% H</span>
+                <span class="ob-seg ob-d" style="width:{{ p.probabilities_pct.draw }}%;">{{ p.probabilities_pct.draw }}% D</span>
+                <span class="ob-seg ob-a" style="width:{{ p.probabilities_pct.away }}%;">{{ p.probabilities_pct.away }}% A</span>
+            </div>
+        </div>
+        {% endif %}
 
         {% if show_pred %}
         <!-- CONFIDENCE BAR -->
@@ -34,39 +77,24 @@
         </div>
         {% endif %}
 
-        {% if p.line_odds %}
-        <div class="section-title" style="margin-top:4px;">📗 Book side markets</div>
-        <div class="market-pills" style="margin-bottom:12px;">
-            {% set lo2 = p.line_odds %}
-            {% if lo2.get('btts_yes') %}<span class="mpill">BTTS Y <strong>{{ "%.2f"|format(lo2.btts_yes) }}</strong></span>{% endif %}
-            {% if lo2.get('btts_no') %}<span class="mpill">BTTS N <strong>{{ "%.2f"|format(lo2.btts_no) }}</strong></span>{% endif %}
-            {% if lo2.get('over15') %}<span class="mpill">O1.5 <strong>{{ "%.2f"|format(lo2.over15) }}</strong></span>{% endif %}
-            {% if lo2.get('under15') %}<span class="mpill">U1.5 <strong>{{ "%.2f"|format(lo2.under15) }}</strong></span>{% endif %}
-            {% if lo2.get('over25') %}<span class="mpill">O2.5 <strong>{{ "%.2f"|format(lo2.over25) }}</strong></span>{% endif %}
-            {% if lo2.get('under25') %}<span class="mpill">U2.5 <strong>{{ "%.2f"|format(lo2.under25) }}</strong></span>{% endif %}
-            {% if lo2.get('over35') %}<span class="mpill">O3.5 <strong>{{ "%.2f"|format(lo2.over35) }}</strong></span>{% endif %}
-            {% if lo2.get('under35') %}<span class="mpill">U3.5 <strong>{{ "%.2f"|format(lo2.under35) }}</strong></span>{% endif %}
-        </div>
-        {% endif %}
 
-        <!-- VALUE BET DETAIL -->
-        {% if best and vb[best] %}
-        {% set bv = vb[best] %}{% set kelly = bv.kelly %}
-        <div class="value-bet-panel" style="margin-bottom:14px;">
-            <div class="value-bet-title">⚡ TOP VALUE — {{ bv.market_label }} @ {{ "%.2f"|format(bv.odds) }}</div>
-            <div class="vb-row">
-                <span>Our prob: <strong class="green">{{ bv.model_probability_pct }}%</strong></span>
-                <span>Bookie: {{ bv.implied_probability_pct }}%</span>
-                <span>Edge: <strong class="green">+{{ bv.edge_pct }}%</strong></span>
-                <span>ROI: <strong class="gold">+{{ bv.roi_percent }}%</strong></span>
-            </div>
-            <div class="vb-row" style="margin-top:6px;">
-                <span class="kelly-label kelly-{{ kelly.confidence_label|lower }}">{{ kelly.confidence_label }}</span>
-                <span style="color:var(--muted);font-size:0.76em;">{{ kelly.explanation }}</span>
+        {% if ps and show_pred %}
+        <div class="prob-score-grid" style="margin-bottom:14px;">
+            <div class="section-title" style="margin-bottom:8px;">Win &amp; goals probability</div>
+            <div class="market-pills">
+                <span class="mpill">H <strong>{{ ps.home_win_pct }}%</strong></span>
+                <span class="mpill">D <strong>{{ ps.draw_pct }}%</strong></span>
+                <span class="mpill">A <strong>{{ ps.away_win_pct }}%</strong></span>
+                <span class="mpill">BTTS <strong>{{ ps.btts_pct }}%</strong></span>
+                <span class="mpill">O2.5 <strong>{{ ps.over25_pct }}%</strong></span>
+                <span class="mpill">xG <strong>{{ ps.xg_home }}–{{ ps.xg_away }}</strong></span>
+                <span class="mpill">Conf <strong>{{ ps.confidence_pct }}%</strong></span>
             </div>
         </div>
         {% endif %}
+        </div>
 
+        <div id="{{ tab_gid }}-form" class="tab-panel" data-group="{{ tab_gid }}">
         <!-- LEAGUE TABLE -->
         {% if (hp and hp.position) or (ap and ap.position) %}
         <div class="section-title">📊 League Table Position</div>
@@ -239,6 +267,48 @@
             </div>
         </div>
 
+
+        </div>
+
+        <div id="{{ tab_gid }}-mk" class="tab-panel" data-group="{{ tab_gid }}">
+        {% if show_pred and p.value_bets_gated_by_data %}
+        <p style="margin:0 0 12px;padding:8px 10px;border-radius:8px;border:1px solid rgba(148,163,184,0.35);background:rgba(30,41,59,0.35);font-size:0.78em;color:var(--muted);">Value alerts suppressed — data coverage below configured minimum. Model probabilities still shown.</p>
+        {% endif %}
+        {% if p and p.line_odds %}
+        <div class="section-title" style="margin-top:4px;">📗 Book side markets</div>
+        <div class="market-pills" style="margin-bottom:12px;">
+            {% set lo2 = p.line_odds %}
+            {% if lo2.get('btts_yes') %}<span class="mpill">BTTS Y <strong>{{ "%.2f"|format(lo2.btts_yes) }}</strong></span>{% endif %}
+            {% if lo2.get('btts_no') %}<span class="mpill">BTTS N <strong>{{ "%.2f"|format(lo2.btts_no) }}</strong></span>{% endif %}
+            {% if lo2.get('over15') %}<span class="mpill">O1.5 <strong>{{ "%.2f"|format(lo2.over15) }}</strong></span>{% endif %}
+            {% if lo2.get('under15') %}<span class="mpill">U1.5 <strong>{{ "%.2f"|format(lo2.under15) }}</strong></span>{% endif %}
+            {% if lo2.get('over25') %}<span class="mpill">O2.5 <strong>{{ "%.2f"|format(lo2.over25) }}</strong></span>{% endif %}
+            {% if lo2.get('under25') %}<span class="mpill">U2.5 <strong>{{ "%.2f"|format(lo2.under25) }}</strong></span>{% endif %}
+            {% if lo2.get('over35') %}<span class="mpill">O3.5 <strong>{{ "%.2f"|format(lo2.over35) }}</strong></span>{% endif %}
+            {% if lo2.get('under35') %}<span class="mpill">U3.5 <strong>{{ "%.2f"|format(lo2.under35) }}</strong></span>{% endif %}
+        </div>
+        {% endif %}
+
+        <p class="betting-guide-note" style="margin:0 0 12px;"><a href="#betting-guide" onclick="document.getElementById('betting-guide')&&document.getElementById('betting-guide').open()">Value, edge &amp; Kelly</a> — explained in the collapsible guide on the dashboard. Edge = our probability minus the book’s implied chance; Kelly = suggested stake % from that edge (conservative).</p>
+
+        <!-- VALUE BET DETAIL -->
+        {% if best and vb[best] %}
+        {% set bv = vb[best] %}{% set kelly = bv.kelly %}
+        <div class="value-bet-panel" style="margin-bottom:14px;">
+            <div class="value-bet-title">⚡ TOP VALUE — {{ bv.market_label }} @ {{ "%.2f"|format(bv.odds) }}</div>
+            <div class="vb-row">
+                <span>Our prob: <strong class="green">{{ bv.model_probability_pct }}%</strong></span>
+                <span>Bookie: {{ bv.implied_probability_pct }}%</span>
+                <span>Edge: <strong class="green">+{{ bv.edge_pct }}%</strong></span>
+                <span>ROI: <strong class="gold">+{{ bv.roi_percent }}%</strong></span>
+            </div>
+            <div class="vb-row" style="margin-top:6px;">
+                <span class="kelly-label kelly-{{ kelly.confidence_label|lower }}">{{ kelly.confidence_label }}</span>
+                <span style="color:var(--muted);font-size:0.76em;">{{ kelly.explanation }}</span>
+            </div>
+        </div>
+        {% endif %}
+
         <!-- MARKET FORM STATS -->
         {% if hl10 or al10 %}
         <div class="section-title" style="margin-top:14px;">📊 Market Probabilities</div>
@@ -270,7 +340,7 @@
         </table>
         {% endif %}
 
-        {% if show_pred and p.value_highlights is defined and p.value_highlights %}
+        {% if fixture.has_value_bet and p.value_highlights is defined and p.value_highlights %}
         <div class="section-title" style="margin-top:10px;">✨ Value by market</div>
         <div class="value-highlight-strip">
             {% for h in p.value_highlights %}
@@ -280,7 +350,7 @@
         {% endif %}
 
         <!-- ALL VALUE BETS (display list keeps ROI sort when present) -->
-        {% if show_pred and p.value_bets_display is defined and p.value_bets_display %}
+        {% if fixture.has_value_bet and p.value_bets_display is defined and p.value_bets_display %}
         <div class="section-title">⚡ All Value Bets</div>
         {% for bdata in p.value_bets_display %}
         <div style="background:rgba(255,215,0,0.04);border:1px solid rgba(255,215,0,0.14);border-radius:8px;padding:10px;margin-bottom:8px;">
@@ -330,4 +400,6 @@
         </table>
         {% endif %}
 
-    </div><!-- end expand-panel -->
+
+        </div>
+    </div>

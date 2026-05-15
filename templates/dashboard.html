@@ -24,29 +24,26 @@
                 <button type="button" class="ot ot-active" data-odds="dec">Dec</button>
                 <button type="button" class="ot" data-odds="frac">Frac</button>
             </div>
+            <button type="button" class="btn-betslip" data-betslip-open>Betslip</button>
             <button type="button" class="btn-refresh" id="btn-refresh">Refresh</button>
         </div>
     </header>
 
-    <div class="ref-cols">
-        <div class="ref-primary">
-            <div class="hero-strip">
-                <h1 class="hero-title"><span class="hero-brand">hibs-bet</span> {{ fetch_days }}-Day Fixtures</h1>
-                <p class="hero-meta"><strong>{{ total }}</strong> fixtures <span class="live-pill"><span class="live-dot"></span> LIVE DATA</span></p>
-                <p class="hero-sub">Edinburgh betting intelligence · same crest &amp; pitch mood as classic view · tap any row for last 10 (scores, BTTS, xG when API ships it) plus full markets</p>
-            </div>
+    {% if not has_api_clients %}
+    <div class="api-missing-banner" role="alert">
+        <strong>No fixture API keys loaded.</strong> Add a real key (not the <code>your_*_here</code> placeholders) to <code>.env</code> in the project root: <code>API_SPORTS_FOOTBALL_KEY</code> and/or <code>FOOTBALL_DATA_ORG_KEY</code>. Restart after saving.
+    </div>
+    {% endif %}
 
-            {% if not has_api_clients %}
-            <div class="api-missing-banner" role="alert">
-                <strong>No fixture API keys loaded.</strong> Add a real key (not the <code>your_*_here</code> placeholders) to <code>.env</code> in the project root: <code>API_SPORTS_FOOTBALL_KEY</code> and/or <code>FOOTBALL_DATA_ORG_KEY</code> (aliases <code>API_SPORTS_KEY</code>, <code>FOOTBALL_DATA_KEY</code> also work). Restart the server after saving.
-            </div>
-            {% endif %}
+    <div class="dash-layout">
+        <aside class="dash-sidebar" aria-label="Filters and upcoming fixtures">
+            <p class="dash-side-hd">Coming up</p>
+            <p class="dash-side-sub">Kick-offs in <strong>{{ display_tz_label }}</strong> time · click to jump</p>
 
-            <div class="search-chips">
+            <div class="search-chips dash-sidebar-filters">
                 <input type="search" id="dash-search" class="dash-search" placeholder="Search teams…" autocomplete="off" aria-label="Search fixtures">
-                <label class="chk-inline"><input type="checkbox" id="flt-value"> Value bets only</label>
-                <label class="chk-inline" title="Only matches meeting data coverage threshold (see expand panel)."><input type="checkbox" id="flt-data-full"> Full data (≥{{ data_quality_ui_min }}%)</label>
-                <p class="chip-hint">League chips: competitions with at least <strong>{{ min_league_chip_fixtures }}</strong> upcoming fixture(s) in this window (default 1 so more comps stay visible). <strong>All</strong> still lists every match we fetch — value can appear in any league.</p>
+                <label class="chk-inline"><input type="checkbox" id="flt-value"> Value only</label>
+                <label class="chk-inline" title="Only matches meeting data coverage threshold."><input type="checkbox" id="flt-data-full"> Full data (≥{{ data_quality_ui_min }}%)</label>
                 <div class="chip-row" id="chip-row">
                     <button type="button" class="chip chip-lg active" data-league="">All</button>
                     {% for code, name in leagues_for_filter %}
@@ -55,14 +52,43 @@
                 </div>
             </div>
 
+            <nav class="dash-upcoming" id="dash-upcoming">
+                {% if sidebar_upcoming %}
+                {% set last_day = namespace(val='') %}
+                {% for item in sidebar_upcoming %}
+                {% if item.kickoff_day_local and item.kickoff_day_local != last_day.val %}
+                {% set last_day.val = item.kickoff_day_local %}
+                <div class="du-day">{{ item.kickoff_day_local[8:10] }}/{{ item.kickoff_day_local[5:7] }}</div>
+                {% endif %}
+                <a href="#fix-{{ item.id }}" class="du-row" data-league="{{ item.league }}" data-fid="{{ item.id }}">
+                    <span class="du-ko">{{ item.kickoff_time }}</span>
+                    <span class="du-teams">{{ item.home }} <span class="du-vs">v</span> {{ item.away }}</span>
+                </a>
+                {% endfor %}
+                {% else %}
+                <p class="du-empty">No upcoming fixtures loaded.</p>
+                {% endif %}
+            </nav>
+            <p class="chip-hint du-hint"><a href="/status">API status →</a></p>
+        </aside>
+
+        <div class="dash-main">
+            <div class="hero-strip">
+                <h1 class="hero-title"><span class="hero-brand">hibs-bet</span> {{ fetch_days }}-Day Fixtures</h1>
+                <p class="hero-meta"><strong>{{ total }}</strong> fixtures <span class="live-pill"><span class="live-dot"></span> LIVE DATA</span> · times shown in <strong>{{ display_tz_label }}</strong></p>
+                <p class="hero-sub">Full fixture list by day and league — SPL first, then EPL, Scotland, England, Europe, internationals, UEFA. Tap any row for form, xG, markets and value picks.</p>
+            </div>
+
+            {% include '_betting_guide.html' %}
+
             <details class="acca-week-card">
                 <summary class="acca-week-sum">
                     <span class="acca-week-ico">🏆</span>
                     <span class="acca-week-txt">Best Acca of the Week</span>
                     <span class="ai-pill">AI PICKS</span>
-                    <span class="acca-week-sub">Up to 5 legs · ranked by edge &amp; Kelly · <a href="/acca">Acca Builder</a></span>
+                    <span class="acca-week-sub">Up to 5 legs · <a href="/acca">Acca Builder</a></span>
                 </summary>
-                <p class="muted small" style="padding:0 14px 12px;">Open Acca Builder to combine value lines. Legs are sorted by model ROI where book odds exist.</p>
+                <p class="muted small" style="padding:0 14px 12px;">Open Acca Builder to combine value lines ranked by model ROI.</p>
             </details>
 
             {% if value_bets and value_bets|length > 0 %}
@@ -77,7 +103,6 @@
                     <div class="vsc-pick">{{ top.market_label }}</div>
                     <div class="vsc-odds">{{ "%.2f"|format(top.odds) }}</div>
                     <div class="vsc-edge">+{{ "%.1f"|format(top.edge_pct) }}% edge</div>
-                    <div class="vsc-kelly">{{ top.kelly.suggested_percent }}% Kelly</div>
                     {% else %}
                     <div class="vsc-pick">Value</div>
                     <div class="vsc-odds">—</div>
@@ -87,10 +112,10 @@
             </div>
             {% endif %}
 
-            <div id="dash-fixture-root" data-dq-min="{{ data_quality_ui_min }}">
+            <div id="dash-fixture-root" class="fixtures-full-list" data-dq-min="{{ data_quality_ui_min }}">
                 {% if total == 0 %}
                 <div class="empty-state"><div class="icon">📡</div>
-                    <p>No fixtures in the next {{ fetch_days }} days.</p>
+                    <p>No fixtures in the next {{ fetch_days }} days. Check API keys and <a href="/status">status</a>, then Refresh.</p>
                 </div>
                 {% else %}
                 {% for day in dashboard_days %}
@@ -98,7 +123,7 @@
                     <h2 class="day-heading">{{ day.heading }}</h2>
                     {% for lg in day.leagues %}
                     <div class="lg-block" data-league-section="{{ lg.code }}">
-                        <h3 class="lg-heading">{{ lg.name|upper }}</h3>
+                        <h3 class="lg-heading">{{ lg.name|upper }} <span class="lg-count">({{ lg.fixtures|length }})</span></h3>
                         <div class="ft-scroll-wrap">
                         <div class="ft-head" aria-hidden="true">
                             <span>KO</span><span class="ft-h-match">MATCH</span><span>1</span><span>X</span><span>2</span><span>BTTS</span><span>O1.5</span><span>O2.5</span><span>U2.5</span><span>O3.5</span><span>U3.5</span><span class="ft-h-chev"></span>
@@ -114,31 +139,14 @@
                 {% endif %}
             </div>
         </div>
-
-        <aside class="acca-rail" aria-label="Acca slip">
-            <div class="acca-rail-card">
-                <div class="acca-rail-hd">Your Acca</div>
-                <div class="acca-rail-st">Selections: <strong>0</strong></div>
-                <div class="acca-rail-st">Total Odds: <strong>1.00</strong></div>
-                <div class="acca-rail-empty">🏆<br>Add selections from fixtures below</div>
-                <label class="acca-rail-lbl" for="stake-ph">Stake (£)</label>
-                <input id="stake-ph" class="acca-rail-input" type="text" placeholder="0.00" disabled>
-                <a href="/acca" class="acca-rail-btn">Save Acca</a>
-                <button type="button" class="acca-rail-sec" disabled>⚡ Bankroll Simulator</button>
-                <div class="acca-rail-books">
-                    <span class="book-pill">William Hill</span>
-                    <span class="book-pill">Ladbrokes</span>
-                </div>
-            </div>
-            <div class="rail-status-link">
-                <a href="/status" class="nav-btn" style="display:block;text-align:center;width:100%;box-sizing:border-box;">API &amp; scraper status →</a>
-                <p class="chip-hint" style="margin-top:8px;margin-bottom:0;">Full latency checks, errors, and scraper drift on the status page.</p>
-            </div>
-        </aside>
     </div>
 </div>
+{% include '_assistant_widget.html' %}
 {% endblock %}
 {% block extra_js %}
+<script type="application/json" id="hibs-assistant-data">{{ {"packets": assistant_packets, "recommendations": assistant_recommendations or none}|tojson }}</script>
+<script>window.HIBS_ASSISTANT = JSON.parse(document.getElementById('hibs-assistant-data').textContent);</script>
+<script src="{{ url_for('static', filename='hibs_assistant.js') }}"></script>
 <script>
 (function () {
     var activeLeague = '';
@@ -177,6 +185,18 @@
             });
             day.style.display = v ? '' : 'none';
         });
+        document.querySelectorAll('#dash-upcoming .du-row').forEach(function (row) {
+            var lg = activeLeague;
+            var okL = !lg || row.getAttribute('data-league') === lg;
+            var fid = row.getAttribute('data-fid');
+            var card = fid ? document.getElementById('fix-' + fid) : null;
+            var okV = !valOnly || (card && card.getAttribute('data-has-value') === '1');
+            var okS = !searchQ || (card && (card.getAttribute('data-search') || '').indexOf(searchQ) !== -1);
+            var dq = card ? parseFloat(card.getAttribute('data-data-q') || '0') : 0;
+            if (isNaN(dq)) dq = 0;
+            var okD = !fullDataOnly || dq >= dqMin;
+            row.style.display = (okL && okV && okS && okD) ? '' : 'none';
+        });
     }
 
     function wireChips() {
@@ -198,6 +218,22 @@
         inp.addEventListener('input', function () {
             searchQ = (inp.value || '').trim().toLowerCase();
             applyDashFilters();
+        });
+    }
+
+    function wireUpcomingNav() {
+        document.querySelectorAll('#dash-upcoming .du-row').forEach(function (row) {
+            row.addEventListener('click', function (e) {
+                var href = row.getAttribute('href');
+                if (!href || href.charAt(0) !== '#') return;
+                var el = document.querySelector(href);
+                if (!el) return;
+                e.preventDefault();
+                el.open = true;
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.classList.add('fixture-highlight');
+                setTimeout(function () { el.classList.remove('fixture-highlight'); }, 2200);
+            });
         });
     }
 
@@ -227,12 +263,46 @@
         });
     }
 
+    function mapPickToOutcome(key) {
+        var m = { home_win: 'home', away_win: 'away', draw: 'draw' };
+        return m[key] || key;
+    }
+
+    function wireSlipButtons() {
+        document.querySelectorAll('.fr-add-slip').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var card = btn.closest('.fixture-card');
+                var sel = card && card.querySelector('.fr-pick-menu');
+                if (!sel || !window.HibsBetslip) return;
+                var opt = sel.options[sel.selectedIndex];
+                var odds = parseFloat(opt.getAttribute('data-odds'));
+                if (!odds || odds <= 1) {
+                    alert('No book price on this pick — choose a market with odds.');
+                    return;
+                }
+                HibsBetslip.addSelection({
+                    fid: card.getAttribute('data-fid'),
+                    home: card.getAttribute('data-home'),
+                    away: card.getAttribute('data-away'),
+                    league: sel.getAttribute('data-league') || card.getAttribute('data-league'),
+                    outcome: mapPickToOutcome(opt.value),
+                    odds: odds,
+                    label: opt.getAttribute('data-label') || opt.textContent
+                });
+                HibsBetslip.openDrawer();
+            });
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
         wireChips();
         wireSearch();
         wireVal();
         wireRefresh();
         wireOddsToggle();
+        wireUpcomingNav();
+        wireSlipButtons();
         applyDashFilters();
     });
 })();
