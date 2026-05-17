@@ -344,9 +344,9 @@ def build_pick_menu(fixture: Dict[str, Any], prediction: Dict[str, Any]) -> List
     menu.append(_item("home_win", "Home Win", ph, book.get("home")))
     menu.append(_item("draw", "Draw", pd, book.get("draw")))
     menu.append(_item("away_win", "Away Win", pa, book.get("away")))
-    menu.append(_item("home_or_draw", "Home or Draw", ph + pd, None))
-    menu.append(_item("away_or_draw", "Away or Draw", pa + pd, None))
-    menu.append(_item("home_or_away", "Home or Away", ph + pa, None))
+    menu.append(_item("home_or_draw", "Home or Draw", ph + pd, lo.get("home_or_draw")))
+    menu.append(_item("away_or_draw", "Away or Draw", pa + pd, lo.get("away_or_draw")))
+    menu.append(_item("home_or_away", "Home or Away", ph + pa, lo.get("home_or_away")))
     btts = prediction.get("btts_probability_pct")
     if btts is not None:
         menu.append(_item("btts_yes", "BTTS Yes", float(btts), lo.get("btts_yes")))
@@ -395,6 +395,49 @@ def build_probability_scores(prediction: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _compact_result_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for r in (rows or [])[:10]:
+        out.append(
+            {
+                "result": r.get("result"),
+                "score": r.get("score"),
+                "opponent": r.get("opponent"),
+                "home_away": r.get("home_away"),
+                "date": r.get("date"),
+                "gf": r.get("gf"),
+                "ga": r.get("ga"),
+                "xg_for": r.get("xg_for"),
+            }
+        )
+    return out
+
+
+def _form_summary(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    summary = {"played": 0, "wins": 0, "draws": 0, "losses": 0, "gf": 0, "ga": 0, "btts": 0, "over25": 0}
+    for r in rows or []:
+        summary["played"] += 1
+        res = str(r.get("result") or "").upper()
+        if res == "W":
+            summary["wins"] += 1
+        elif res == "D":
+            summary["draws"] += 1
+        elif res == "L":
+            summary["losses"] += 1
+        try:
+            gf = int(r.get("gf") if r.get("gf") is not None else str(r.get("score") or "0-0").split("-")[0])
+            ga = int(r.get("ga") if r.get("ga") is not None else str(r.get("score") or "0-0").split("-")[1])
+        except Exception:
+            gf = ga = 0
+        summary["gf"] += gf
+        summary["ga"] += ga
+        if gf > 0 and ga > 0:
+            summary["btts"] += 1
+        if gf + ga > 2:
+            summary["over25"] += 1
+    return summary
+
+
 def build_assistant_packet(fixture_row: Dict[str, Any]) -> Dict[str, Any]:
     """Single fixture payload for Betting Assistant + API."""
     p = fixture_row.get("prediction") or {}
@@ -420,6 +463,14 @@ def build_assistant_packet(fixture_row: Dict[str, Any]) -> Dict[str, Any]:
         "league_name": fixture_row.get("league_name"),
         "home_recent_n": len(fixture_row.get("home_last10") or []),
         "away_recent_n": len(fixture_row.get("away_last10") or []),
+        "home_form": _compact_result_rows(fixture_row.get("home_last10") or []),
+        "away_form": _compact_result_rows(fixture_row.get("away_last10") or []),
+        "home_form_summary": _form_summary(fixture_row.get("home_last10") or []),
+        "away_form_summary": _form_summary(fixture_row.get("away_last10") or []),
+        "home_position": fixture_row.get("home_position") or {},
+        "away_position": fixture_row.get("away_position") or {},
+        "fixture_injuries": fixture_row.get("fixture_injuries") or [],
+        "xg_source": fixture_row.get("xg_source"),
         "structured_insight": p.get("structured_insight"),
         "pick_menu": p.get("pick_menu"),
         "probability_scores": p.get("probability_scores"),

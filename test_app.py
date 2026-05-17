@@ -116,7 +116,9 @@ def test_flask_routes():
             "/api/assistant/chat",
             "/api/audit/summary",
             "/api/cache/clear",
+            "/api/insights",
             "/acca",
+            "/insights",
             "/status",
         }
         missing = sorted(required - routes)
@@ -271,6 +273,58 @@ def test_value_edge_fields():
         return False
 
 
+def test_bottom_top_underdog_not_home_value():
+    """Bottom-vs-top longshot should not be surfaced as home value."""
+    print("\nTesting bottom/top underdog value guardrail...")
+    try:
+        from hibs_predictor.betting_engine import BettingEngine, OddsAnalyzer
+
+        raw_value = OddsAnalyzer.identify_value_bets(
+            {"home": 0.18, "draw": 0.20, "away": 0.62},
+            {"home": 8.5, "draw": 5.5, "away": 1.33},
+            margin=0.04,
+        )
+        assert "home" in raw_value, "sanity check: raw edge alone would flag the longshot"
+
+        fixture = {
+            "home": {"id": 1, "name": "Burnley"},
+            "away": {"id": 2, "name": "Arsenal"},
+            "league": "EPL",
+            "odds_available": True,
+            "odds_home": 8.5,
+            "odds_draw": 5.5,
+            "odds_away": 1.33,
+            "home_stats": {"played": 15, "goals_for": 12, "goals_against": 32, "expected_goals": 11, "expected_goals_against": 31},
+            "away_stats": {"played": 15, "goals_for": 34, "goals_against": 10, "expected_goals": 33, "expected_goals_against": 12},
+            "home_form": 0.12,
+            "away_form": 0.84,
+            "home_home_factor": 0.82,
+            "away_away_factor": 1.28,
+            "xg_home": 0.95,
+            "xg_away": 1.95,
+            "xg_source": "stats_api_xg",
+            "home_recent_n": 8,
+            "away_recent_n": 8,
+            "home_position": {"position": 20},
+            "away_position": {"position": 1},
+            "data_quality": {"score_pct": 92, "full_scope": True},
+        }
+        prediction = BettingEngine({}).predict_with_confidence(fixture)
+
+        assert prediction["probabilities"]["home"] < 0.24, prediction["probabilities"]
+        assert "home" not in (prediction.get("value_bets") or {})
+        assert prediction.get("best_bet") != "home"
+        assert "home" in (prediction.get("value_bets_rejected") or {})
+        menu = prediction.get("pick_menu") or []
+        home_rows = [m for m in menu if m.get("key") == "home_win"]
+        assert home_rows and home_rows[0].get("is_value") is False
+        print("  ✓ Bottom/top underdog home value suppressed")
+        return True
+    except Exception as e:
+        print(f"  ✗ Bottom/top guardrail test failed: {e}")
+        return False
+
+
 def test_pick_menu():
     """Per-fixture pick menu for summary dropdowns."""
     print("\nTesting pick menu...")
@@ -386,10 +440,23 @@ def test_assistant_chat():
                 {"key": "btts_yes", "label": "BTTS Yes", "model_pct": 62.0, "odds": 1.72},
             ],
             "probability_scores": {"over25_pct": 61, "btts_pct": 62},
+            "home_position": {"position": 4, "points": 48, "played": 31, "goal_diff": 10},
+            "away_position": {"position": 7, "points": 42, "played": 31, "goal_diff": 2},
+            "home_form_summary": {"played": 5, "wins": 3, "draws": 1, "losses": 1, "gf": 8, "ga": 5, "btts": 3, "over25": 3},
+            "away_form_summary": {"played": 5, "wins": 2, "draws": 1, "losses": 2, "gf": 6, "ga": 6, "btts": 4, "over25": 2},
         }
         r = handle_chat("stats for Hibs v Hearts", [pkt])
         assert r["intent"] == "stats"
         assert any(b.get("type") == "stats" for b in r["blocks"])
+        table = handle_chat("why does the table matter?", [pkt], fixture_id=1)
+        assert table["intent"] == "table"
+        assert any("Table context" in " ".join(b.get("lines", [])) for b in table["blocks"])
+        generic_table = handle_chat("why does the league table matter?", [pkt])
+        assert any("Table context matters" in " ".join(b.get("lines", [])) for b in generic_table["blocks"])
+        dive = handle_chat("deep dive this game", [pkt], fixture_id=1)
+        assert dive["intent"] == "deep_dive"
+        dive_lines = " ".join(line for b in dive["blocks"] for line in b.get("lines", []))
+        assert "Team news" in dive_lines and "last 5" in dive_lines
         h = handle_chat("help", [pkt])
         assert h["intent"] == "help"
         print("  ✓ Assistant chat OK")
@@ -452,6 +519,75 @@ def test_assistant_recommendations():
         return True
     except Exception as e:
         print(f"  ✗ Assistant recommendations test failed: {e}")
+        return False
+
+
+def test_insights_and_bet_builders():
+    """Insights page payload and same-game builders use available markets only."""
+    print("\nTesting insights and bet builders...")
+    try:
+        from hibs_predictor.assistant_recommendations import build_bet_builder_suggestions
+        from hibs_predictor.insights import build_insights
+
+        pkt = {
+            "id": 10,
+            "home": "Hibs",
+            "away": "Hearts",
+            "league": "SCOTLAND",
+            "league_name": "Scottish Premiership",
+            "kickoff_time": "15:00",
+            "data_quality_pct": 90.0,
+            "data_quality": {"score_pct": 90, "blocks": []},
+            "home_recent_n": 5,
+            "away_recent_n": 5,
+            "structured_insight": {"mode": "prediction", "match": "Hibs vs Hearts", "pick": "BTTS Yes"},
+            "pick_menu": [
+                {"key": "btts_yes", "label": "BTTS Yes", "model_pct": 64.0, "odds": 1.8},
+                {"key": "over_25", "label": "Over 2.5", "model_pct": 61.0, "odds": 1.95},
+                {"key": "over_15", "label": "Over 1.5", "model_pct": 74.0, "odds": 1.35},
+                {"key": "home_or_draw", "label": "Home or Draw", "model_pct": 68.0, "odds": 1.42},
+            ],
+            "probability_scores": {"xg_home": 1.6, "xg_away": 1.2},
+            "home_position": {"position": 4},
+            "away_position": {"position": 7},
+            "home_form_summary": {"played": 5, "wins": 3, "draws": 1, "losses": 1},
+            "away_form_summary": {"played": 5, "wins": 2, "draws": 1, "losses": 2},
+        }
+        builders = build_bet_builder_suggestions([pkt])
+        titles = [b["title"] for b in builders]
+        assert "BTTS + Over 2.5" in titles
+        assert "Home or Draw + Over 1.5" in titles
+
+        fixture = {
+            "id": 10,
+            "home": "Hibs",
+            "away": "Hearts",
+            "league": "SCOTLAND",
+            "league_name": "Scottish Premiership",
+            "kickoff_time": "15:00",
+            "home_last10": [{"result": "W", "gf": 2, "ga": 1} for _ in range(5)],
+            "away_last10": [{"result": "L", "gf": 1, "ga": 2} for _ in range(5)],
+            "home_position": {"position": 4},
+            "away_position": {"position": 7},
+            "data_quality": {"score_pct": 90, "blocks": []},
+            "xg_source": "api_fixture_xg",
+            "has_value_bet": True,
+            "prediction": {
+                "structured_insight": {"mode": "prediction", "match": "Hibs vs Hearts", "pick": "BTTS Yes"},
+                "pick_menu": pkt["pick_menu"],
+                "probability_scores": pkt["probability_scores"],
+                "value_bets_display": [{"market_label": "BTTS Yes", "odds": 1.8, "edge_pct": 4.0, "roi_percent": 5.0}],
+            },
+        }
+        ins = build_insights([fixture])
+        assert ins["top_probabilities"]
+        assert ins["value_opportunities"]
+        assert ins["bet_builders"]
+        assert ins["coverage"]["no_player_props"] is True
+        print("  ✓ Insights and bet builders OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Insights/bet-builder test failed: {e}")
         return False
 
 
@@ -670,7 +806,7 @@ def test_templates():
         from jinja2 import Environment, FileSystemLoader
         template_dir = os.path.join(os.path.dirname(__file__), 'templates')
         env = Environment(loader=FileSystemLoader(template_dir))
-        templates = ["base.html", "dashboard.html", "acca_builder.html", "api_status.html"]
+        templates = ["base.html", "dashboard.html", "acca_builder.html", "api_status.html", "insights.html"]
         for template in templates:
             env.get_template(template)
             print(f"  ✓ Template loaded: {template}")
@@ -697,12 +833,14 @@ def main():
         test_api_cache_clear,
         test_structured_insight,
         test_value_edge_fields,
+        test_bottom_top_underdog_not_home_value,
         test_pick_menu,
         test_dashboard_days_grouping,
         test_kickoff_display_tz,
         test_scottish_fbref_xg,
         test_scraped_xg_resolution,
         test_assistant_recommendations,
+        test_insights_and_bet_builders,
         test_assistant_chat,
         test_templates,
     ]

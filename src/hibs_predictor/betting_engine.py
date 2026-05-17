@@ -365,6 +365,195 @@ class OddsAnalyzer:
 class BettingEngine:
 
     @staticmethod
+    def _safe_float(value: Any, default: Optional[float] = None) -> Optional[float]:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _safe_int(value: Any, default: Optional[int] = None) -> Optional[int]:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    @classmethod
+    def _position_number(cls, pos: Any) -> Optional[int]:
+        if isinstance(pos, dict):
+            return cls._safe_int(pos.get("position"))
+        return cls._safe_int(pos)
+
+    @classmethod
+    def _matchup_context(
+        cls,
+        fixture: Dict[str, Any],
+        metadata: Dict[str, Any],
+        xg_home: float,
+        xg_away: float,
+    ) -> Dict[str, Any]:
+        home_pos = cls._position_number(fixture.get("home_position"))
+        away_pos = cls._position_number(fixture.get("away_position"))
+        home_form = float(metadata.get("home_form") or fixture.get("home_form") or 0.5)
+        away_form = float(metadata.get("away_form") or fixture.get("away_form") or 0.5)
+        home_strength = float(metadata.get("home_strength") or 0.5)
+        away_strength = float(metadata.get("away_strength") or 0.5)
+        return {
+            "home_pos": home_pos,
+            "away_pos": away_pos,
+            "table_gap_home_worse": (
+                home_pos - away_pos if home_pos is not None and away_pos is not None else None
+            ),
+            "form_gap_home_minus_away": home_form - away_form,
+            "strength_gap_home_minus_away": home_strength - away_strength,
+            "xg_gap_home_minus_away": float(xg_home) - float(xg_away),
+        }
+
+    @classmethod
+    def _apply_mismatch_calibration(
+        cls,
+        probs: Dict[str, float],
+        context: Dict[str, Any],
+    ) -> Tuple[Dict[str, float], Optional[Dict[str, Any]]]:
+        """Dampen a 1X2 side when table, form, strength and xG all point the other way."""
+        out = dict(probs)
+        gap = context.get("table_gap_home_worse")
+        if gap is None:
+            return out, None
+
+        def _transfer_mass(side: str, factor: float, target: str) -> None:
+            removed = out[side] * factor
+            out[side] = max(1e-6, out[side] - removed)
+            out[target] = out.get(target, 0.0) + removed * 0.68
+            out["draw"] = out.get("draw", 0.0) + removed * 0.32
+
+        calibration: Optional[Dict[str, Any]] = None
+        home_xg_gap = float(context.get("xg_gap_home_minus_away") or 0.0)
+        home_form_gap = float(context.get("form_gap_home_minus_away") or 0.0)
+        home_strength_gap = float(context.get("strength_gap_home_minus_away") or 0.0)
+        if gap >= 8 and home_xg_gap <= -0.35 and (home_form_gap <= -0.12 or home_strength_gap <= -0.10):
+            factor = min(0.36, 0.10 + min(18, gap) * 0.009 + min(1.5, abs(home_xg_gap)) * 0.055)
+            _transfer_mass("home", factor, "away")
+            calibration = {"side_damped": "home", "factor": round(factor, 3), "table_gap": gap}
+        elif gap <= -8 and home_xg_gap >= 0.35 and (home_form_gap >= 0.12 or home_strength_gap >= 0.10):
+            factor = min(0.36, 0.10 + min(18, abs(gap)) * 0.009 + min(1.5, abs(home_xg_gap)) * 0.055)
+            _transfer_mass("away", factor, "home")
+            calibration = {"side_damped": "away", "factor": round(factor, 3), "table_gap": gap}
+
+        total = sum(out.values())
+        if total > 0:
+            out = {k: max(1e-6, v / total) for k, v in out.items()}
+        return out, calibration
+
+    @staticmethod
+    def _min_probability_for_value(outcome: str) -> float:
+        thresholds = {
+            "home": 0.24,
+            "away": 0.24,
+            "draw": 0.27,
+            "btts_yes": 0.53,
+            "btts_no": 0.53,
+            "over15": 0.68,
+            "under15": 0.55,
+            "over25": 0.54,
+            "under25": 0.54,
+            "over35": 0.36,
+            "under35": 0.58,
+            "home_and_btts": 0.16,
+            "draw_and_btts": 0.12,
+            "away_and_btts": 0.16,
+        }
+        return thresholds.get(outcome, 0.30)
+
+    @classmethod
+    def _evidence_against_1x2(cls, outcome: str, context: Dict[str, Any]) -> Tuple[int, bool]:
+        gap = context.get("table_gap_home_worse")
+        xg_gap = float(context.get("xg_gap_home_minus_away") or 0.0)
+        form_gap = float(context.get("form_gap_home_minus_away") or 0.0)
+        strength_gap = float(context.get("strength_gap_home_minus_away") or 0.0)
+        if outcome == "home":
+            flags = [
+                gap is not None and gap >= 8,
+                xg_gap <= -0.35,
+                form_gap <= -0.12,
+                strength_gap <= -0.10,
+            ]
+        elif outcome == "away":
+            flags = [
+                gap is not None and gap <= -8,
+                xg_gap >= 0.35,
+                form_gap >= 0.12,
+                strength_gap >= 0.10,
+            ]
+        else:
+            return 0, False
+        count = sum(1 for x in flags if x)
+        return count, bool(flags[0] and count >= 2)
+
+    @classmethod
+    def _filter_value_bets(
+        cls,
+        value_bets: Dict[str, Any],
+        fixture: Dict[str, Any],
+        merged_model: Dict[str, float],
+        context: Dict[str, Any],
+        margin: float,
+        dq_pct: float,
+        dq_known: bool,
+    ) -> Tuple[Dict[str, Any], Dict[str, str]]:
+        filtered: Dict[str, Any] = {}
+        rejected: Dict[str, str] = {}
+        if dq_known and dq_pct < 65.0:
+            return {}, {k: "data_quality_below_value_floor" for k in value_bets}
+
+        for outcome, row in value_bets.items():
+            model_prob = float(merged_model.get(outcome, row.get("model_probability") or 0.0))
+            odds = cls._safe_float(row.get("odds"), 0.0) or 0.0
+            edge = cls._safe_float(row.get("edge"), 0.0) or 0.0
+            min_prob = cls._min_probability_for_value(outcome)
+            if model_prob < min_prob:
+                rejected[outcome] = "model_probability_below_value_floor"
+                continue
+
+            required_edge = max(margin, 0.05 if outcome in ("home", "draw", "away") else margin)
+            if model_prob < 0.35:
+                required_edge += (0.35 - model_prob) * 0.18
+            if odds > 5.0:
+                required_edge += min(0.06, (odds - 5.0) * 0.012)
+            if dq_known and dq_pct < 80.0:
+                required_edge += (80.0 - dq_pct) * 0.001
+            if edge < required_edge:
+                rejected[outcome] = "edge_below_scaled_threshold"
+                continue
+
+            if outcome in ("home", "draw", "away"):
+                if dq_known and dq_pct < 74.0:
+                    rejected[outcome] = "data_quality_below_1x2_value_floor"
+                    continue
+                if outcome == "draw":
+                    if odds > 5.5 or model_prob < 0.29:
+                        rejected[outcome] = "draw_longshot_floor"
+                        continue
+                else:
+                    against_count, strong_against = cls._evidence_against_1x2(outcome, context)
+                    if odds > 7.0:
+                        rejected[outcome] = "1x2_longshot_odds_cap"
+                        continue
+                    if odds > 5.5 and (dq_known and dq_pct < 85.0):
+                        rejected[outcome] = "longshot_requires_strong_data"
+                        continue
+                    if strong_against:
+                        if not (model_prob >= 0.34 and edge >= 0.12 and dq_known and dq_pct >= 88.0 and odds <= 5.5):
+                            rejected[outcome] = "table_form_xg_disagree"
+                            continue
+                    elif against_count >= 2 and model_prob < 0.31:
+                        rejected[outcome] = "weak_context_for_underdog_value"
+                        continue
+
+            filtered[outcome] = row
+        return filtered, rejected
+
+    @staticmethod
     def _blend_1x2_toward_implied(
         probs: Dict[str, float],
         book: Dict[str, float],
@@ -670,6 +859,8 @@ class BettingEngine:
             total = sum(ensemble_probs.values())
             if total > 0:
                 ensemble_probs = {k: v / total for k, v in ensemble_probs.items()}
+        matchup_context = self._matchup_context(fixture, metadata, xg_home, xg_away)
+        ensemble_probs, mismatch_calibration = self._apply_mismatch_calibration(ensemble_probs, matchup_context)
         oh_raw, od_raw, oa_raw = fixture.get("odds_home"), fixture.get("odds_draw"), fixture.get("odds_away")
         has_book = bool(
             fixture.get("odds_available")
@@ -786,9 +977,21 @@ class BettingEngine:
             margin *= 1.0 + min(0.35, (dq_min_boost - dq_pct) / 100.0)
         margin = min(0.14, margin)
         value_bets = OddsAnalyzer.identify_value_bets(merged_model, merged_book, margin=margin) if merged_book else {}
+        dq_known = bool(dq_bundle and dq_bundle.get("score_pct") is not None)
+        filtered_value_bets, rejected_value_bets = self._filter_value_bets(
+            value_bets,
+            fixture,
+            merged_model,
+            matchup_context,
+            margin,
+            dq_pct,
+            dq_known,
+        )
+        value_bets = filtered_value_bets
         gated_values = dq_val_req > 0 and dq_pct < dq_val_req
         if gated_values:
             value_bets = {}
+            rejected_value_bets = {k: "data_quality_env_gate" for k in filtered_value_bets}
         confidence = max(ensemble_probs.values())
         predicted_outcome = max(ensemble_probs, key=ensemble_probs.get)
         best_bet = max(value_bets, key=lambda x: value_bets[x].get("roi_percent", 0)) if value_bets else None
@@ -872,6 +1075,7 @@ class BettingEngine:
             "data_quality": dq_bundle if dq_bundle else None,
             "xg_source": fixture.get("xg_source"),
             "value_bets_gated_by_data": gated_values,
+            "value_bets_rejected": rejected_value_bets,
             "value_edge_margin_used": round(margin, 4),
             "score_and_btts_pct": {
                 "home_win_and_btts": round(j_home_btts * 100, 1),
@@ -911,6 +1115,7 @@ class BettingEngine:
             "lambda_side_home": round(lam_h_side, 3),
             "lambda_side_away": round(lam_a_side, 3),
             "lambda_calibration": cal_dbg,
+            "matchup_calibration": mismatch_calibration,
             "blend_weights_1x2": blend_w,
             "poisson_probs_calibrated_pct": (
                 {k: round(v * 100, 1) for k, v in poisson_probs_cal.items()} if poisson_probs_cal else None

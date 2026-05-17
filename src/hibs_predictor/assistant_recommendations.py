@@ -292,6 +292,212 @@ def build_mixed_market_acca(packets: List[Dict[str, Any]]) -> Optional[Dict[str,
     )
 
 
+def _menu_item_by_key(packet: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    return {str(item.get("key") or ""): item for item in (packet.get("pick_menu") or [])}
+
+
+def _builder_component(packet: Dict[str, Any], item: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not item or item.get("odds") is None:
+        return None
+    mp = item.get("model_pct")
+    if mp is None:
+        return None
+    leg = _leg_from_menu_item(packet, item)
+    leg["score"] = _leg_score(leg)
+    return leg
+
+
+def _build_same_game_builder(
+    packet: Dict[str, Any],
+    title: str,
+    builder_type: str,
+    keys: Tuple[str, ...],
+    rationale: List[str],
+    combo_key: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    menu = _menu_item_by_key(packet)
+    legs: List[Dict[str, Any]] = []
+    for key in keys:
+        leg = _builder_component(packet, menu.get(key))
+        if not leg:
+            return None
+        legs.append(leg)
+    if len(legs) < 2:
+        return None
+    combo_item = menu.get(combo_key or "")
+    combo_model_pct = combo_item.get("model_pct") if combo_item else None
+    return {
+        "title": title,
+        "type": builder_type,
+        "fixture_id": packet.get("id"),
+        "match": _match_label(packet),
+        "home": packet.get("home"),
+        "away": packet.get("away"),
+        "league": packet.get("league"),
+        "league_name": packet.get("league_name"),
+        "kickoff_time": _kickoff_display(packet),
+        "legs": legs,
+        "leg_count": len(legs),
+        "estimated_independent_odds": _combined_decimal_odds(legs),
+        "joint_confidence_pct": combo_model_pct or _joint_confidence_pct(legs),
+        "bookmaker_quote_required": True,
+        "rationale": rationale,
+        "disclaimer": (
+            "Same-game builders are correlated, so the bookmaker quote will differ from "
+            "multiplying the leg odds. Use the listed markets only as components."
+        ),
+    }
+
+
+def build_bet_builder_suggestions(
+    packets: List[Dict[str, Any]],
+    fixture_id: Optional[Any] = None,
+    limit: int = 6,
+) -> List[Dict[str, Any]]:
+    """Same-game builder ideas from available markets only; no synthetic player props."""
+    out: List[Dict[str, Any]] = []
+    for pkt in packets:
+        if fixture_id is not None and str(pkt.get("id")) != str(fixture_id):
+            continue
+        if not is_analyzable(pkt):
+            continue
+        menu = _menu_item_by_key(pkt)
+
+        def pct(key: str) -> float:
+            try:
+                return float((menu.get(key) or {}).get("model_pct") or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        def add(builder: Optional[Dict[str, Any]]) -> None:
+            if builder:
+                builder["score"] = sum(float(l.get("score") or 0) for l in builder.get("legs") or [])
+                out.append(builder)
+
+        if pct("btts_yes") >= 58 and pct("over_25") >= 58:
+            add(
+                _build_same_game_builder(
+                    pkt,
+                    "BTTS + Over 2.5",
+                    "btts_over25",
+                    ("btts_yes", "over_25"),
+                    [
+                        "Positive correlation: both teams scoring supports a higher total-goals line.",
+                        "Only suggested where both component markets have model support and book prices.",
+                    ],
+                )
+            )
+        if pct("btts_yes") >= 60 and pct("over_15") >= 68:
+            add(
+                _build_same_game_builder(
+                    pkt,
+                    "BTTS + Over 1.5",
+                    "btts_over15",
+                    ("btts_yes", "over_15"),
+                    [
+                        "Lower total than O2.5; still aligned with the BTTS game script.",
+                        "Useful when BTTS is strong but the third goal is less certain.",
+                    ],
+                )
+            )
+        if pct("home_win") >= 50 and pct("over_15") >= 62:
+            add(
+                _build_same_game_builder(
+                    pkt,
+                    "Home result + Over 1.5",
+                    "home_over15",
+                    ("home_win", "over_15"),
+                    [
+                        "Favourite-led game script: home edge with enough goals profile for O1.5.",
+                        "Standings/form context should still be checked before staking.",
+                    ],
+                )
+            )
+        if pct("away_win") >= 50 and pct("over_15") >= 62:
+            add(
+                _build_same_game_builder(
+                    pkt,
+                    "Away result + Over 1.5",
+                    "away_over15",
+                    ("away_win", "over_15"),
+                    [
+                        "Away side has a win edge and the match profile clears the O1.5 bar.",
+                        "Use smaller stakes if travel/form inputs are thin.",
+                    ],
+                )
+            )
+        if pct("home_or_draw") >= 62 and pct("over_15") >= 62:
+            add(
+                _build_same_game_builder(
+                    pkt,
+                    "Home or Draw + Over 1.5",
+                    "home_or_draw_over15",
+                    ("home_or_draw", "over_15"),
+                    [
+                        "Safer result anchor: home avoids defeat while the goals profile supports O1.5.",
+                        "Only appears when both double-chance and goals components have real book prices.",
+                    ],
+                )
+            )
+        if pct("away_or_draw") >= 62 and pct("over_15") >= 62:
+            add(
+                _build_same_game_builder(
+                    pkt,
+                    "Away or Draw + Over 1.5",
+                    "away_or_draw_over15",
+                    ("away_or_draw", "over_15"),
+                    [
+                        "Safer away-side result anchor paired with a modest goals line.",
+                        "Only appears when both double-chance and goals components have real book prices.",
+                    ],
+                )
+            )
+        if pct("home_or_away") >= 70 and pct("over_15") >= 62:
+            add(
+                _build_same_game_builder(
+                    pkt,
+                    "No Draw + Over 1.5",
+                    "home_or_away_over15",
+                    ("home_or_away", "over_15"),
+                    [
+                        "Draw risk rates low enough to pair no-draw with the O1.5 game script.",
+                        "Requires a priced no-draw/double-chance market from the available odds feed.",
+                    ],
+                )
+            )
+        if pct("home_win") >= 45 and pct("btts_yes") >= 58:
+            add(
+                _build_same_game_builder(
+                    pkt,
+                    "Home result + BTTS",
+                    "home_btts",
+                    ("home_win", "btts_yes"),
+                    [
+                        "Correlated if the home side can win without fully suppressing the away attack.",
+                        "Prefer when xG/form points to chances for both teams.",
+                    ],
+                    combo_key="home_and_btts",
+                )
+            )
+        if pct("away_win") >= 45 and pct("btts_yes") >= 58:
+            add(
+                _build_same_game_builder(
+                    pkt,
+                    "Away result + BTTS",
+                    "away_btts",
+                    ("away_win", "btts_yes"),
+                    [
+                        "Correlated if the away side has enough win probability and both attacks rate well.",
+                        "No player props are included unless a real player-prop feed is wired.",
+                    ],
+                    combo_key="away_and_btts",
+                )
+            )
+
+    out.sort(key=lambda x: -float(x.get("score") or 0))
+    return out[:limit]
+
+
 def _rank_all_legs(packets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     all_legs: List[Dict[str, Any]] = []
     seen_fixture_market: set = set()
@@ -426,6 +632,7 @@ def build_assistant_recommendations(packets: List[Dict[str, Any]]) -> Dict[str, 
     win_legs = _legs_for_acca_type(packets, "win")
     value_legs = _legs_for_acca_type(packets, "value")
     mixed_legs_acca = build_mixed_market_acca(packets)
+    bet_builders = build_bet_builder_suggestions(packets)
 
     acca_suggestions: List[Dict[str, Any]] = []
     acca_defs: List[Tuple[str, str, List[Dict[str, Any]], List[str]]] = [
@@ -506,6 +713,7 @@ def build_assistant_recommendations(packets: List[Dict[str, Any]]) -> Dict[str, 
         },
         "best_singles": best_singles[:8],
         "acca_suggestions": acca_suggestions,
+        "bet_builder_suggestions": bet_builders,
         "market_highlights": _market_highlights(packets),
         "disclaimer": _DISCLAIMER,
     }

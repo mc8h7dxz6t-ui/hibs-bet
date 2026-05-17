@@ -304,9 +304,9 @@
         .ft-scroll-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -2px;padding:0 2px 4px;}
         .ft-head,.fr-sum{
             display:grid;
-            grid-template-columns:52px minmax(120px,1.35fr) repeat(9, minmax(32px, 0.48fr)) 28px;
+            grid-template-columns:54px minmax(260px,1fr) repeat(9,56px) 26px;
             gap:4px;align-items:center;
-            min-width:min(1080px, 100%);
+            min-width:920px;
         }
         .ft-head{
             font-size:0.58em;font-weight:700;color:var(--muted);text-transform:uppercase;padding:4px 8px;border-bottom:1px solid rgba(255,255,255,0.06);
@@ -352,7 +352,7 @@
         .fr-pred-home{color:#86efac;}
         .fr-pred-draw{color:#fdba74;}
         .fr-pred-away{color:#93c5fd;}
-        .fr-od{text-align:center;font-variant-numeric:tabular-nums;font-weight:700;color:var(--text);}
+        .fr-od{display:block;min-width:0;text-align:center;font-variant-numeric:tabular-nums;font-weight:700;color:var(--text);padding:3px 2px;border-radius:5px;}
         .fr-chev{text-align:center;color:var(--muted);font-size:0.9em;}
         .fr-val-tag{
             position:absolute;top:6px;right:28px;z-index:2;

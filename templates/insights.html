@@ -1,0 +1,397 @@
+{% extends "base.html" %}
+{% block title %}hibs-bet — Insights{% endblock %}
+{% block container_class %} dash-outer{% endblock %}
+{% block extra_css %}
+<style>
+.insights-page{max-width:1720px;margin:0 auto;}
+.insights-hero{border:1px solid var(--border);border-radius:16px;padding:18px;background:linear-gradient(145deg,rgba(15,23,42,0.96),rgba(2,6,23,0.9));margin-bottom:14px;}
+.insights-title{font-family:'Orbitron',monospace;font-size:1.35em;color:var(--hibs-neon);letter-spacing:0.06em;margin:0 0 6px;}
+.insights-sub{font-size:0.82em;color:var(--muted);line-height:1.5;max-width:760px;}
+.insights-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+@media(max-width:980px){.insights-grid{grid-template-columns:1fr;}}
+.insight-card{border:1px solid var(--border);border-radius:14px;background:rgba(15,23,42,0.88);padding:14px;min-width:0;}
+.insight-card-wide{grid-column:1 / -1;}
+.insight-card h2{font-size:0.78em;color:var(--hibs-neon);text-transform:uppercase;letter-spacing:0.12em;margin:0 0 10px;}
+.insight-row{border-top:1px solid rgba(148,163,184,0.12);padding:9px 0;font-size:0.78em;line-height:1.45;}
+.insight-row:first-of-type{border-top:none;padding-top:0;}
+.ir-meta{font-size:0.82em;color:var(--muted);margin-bottom:2px;}
+.ir-main{font-weight:800;color:var(--text);}
+.ir-main a{color:var(--text);text-decoration:none;}
+.ir-main a:hover{color:var(--hibs-neon);}
+.ir-pill{display:inline-flex;gap:4px;align-items:center;margin:4px 4px 0 0;padding:2px 7px;border-radius:999px;border:1px solid var(--border);font-size:0.82em;color:var(--muted);}
+.ir-good{color:var(--neon-value);border-color:rgba(57,255,20,0.32);background:rgba(57,255,20,0.08);}
+.ir-gold{color:var(--gold);border-color:rgba(255,215,0,0.34);background:rgba(255,215,0,0.08);}
+.ir-warn{color:#fde68a;border-color:rgba(251,191,36,0.28);background:rgba(251,191,36,0.07);}
+.insight-list{margin:6px 0 0 18px;color:var(--muted);}
+.insight-list li{margin-bottom:4px;}
+.coverage-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
+@media(max-width:720px){.coverage-grid{grid-template-columns:1fr;}}
+.coverage-season{border:1px solid rgba(148,163,184,0.12);border-radius:10px;padding:10px;background:rgba(2,6,23,0.35);}
+.coverage-season h3{font-size:0.86em;margin:0 0 6px;color:var(--text);}
+.source-counts{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
+.empty-mini{font-size:0.78em;color:var(--muted);padding:12px;border:1px dashed rgba(148,163,184,0.18);border-radius:10px;}
+</style>
+{% endblock %}
+{% block content %}
+<div class="insights-page">
+    <header class="site-top">
+        <div class="site-top-left">
+            <img src="{{ url_for('static', filename='badge_harp_shield.png') }}" alt="Hibernian FC" class="site-crest" width="38" height="38">
+            <span class="site-wordmark">hibs-bet</span>
+            <nav class="site-links" aria-label="Primary">
+                <a href="/" class="site-link">Dashboard</a>
+                <a href="/acca" class="site-link">Acca Builder</a>
+                <span class="site-link site-link-active">Insights</span>
+                <a href="/status" class="site-link">API status</a>
+            </nav>
+        </div>
+        <div class="site-top-right">
+            <span class="pill-soft">{{ total }} fixtures</span>
+            <span class="pill-soft">{{ fetch_days }}-day window</span>
+            <span class="pill-soft">Times: {{ display_tz_label }}</span>
+        </div>
+    </header>
+
+    <section class="insights-hero">
+        <h1 class="insights-title">Personal Handicapper</h1>
+        <p class="insights-sub">A focused read of the current fixture packets: strongest model probabilities first, value as a secondary filter, data-quality warnings, form/table/xG angles, and bet-builder ideas using only priced markets already available to the app.</p>
+        {% set s = insights.summary %}
+        <div class="source-counts">
+            <span class="ir-pill ir-good">{{ s.fixtures_eligible | default(0) }} eligible</span>
+            <span class="ir-pill ir-warn">{{ s.fixtures_excluded | default(0) }} data-gated</span>
+            <span class="ir-pill ir-gold">{{ value_bet_count }} value flagged</span>
+            <span class="ir-pill">Full data bar {{ data_quality_ui_min }}%</span>
+        </div>
+    </section>
+
+    <div class="insights-grid">
+        <section class="insight-card">
+            <h2>Top Model Probabilities</h2>
+            {% for row in insights.top_probabilities %}
+            <div class="insight-row">
+                <div class="ir-meta">{{ row.league }}{% if row.kickoff_time %} · {{ row.kickoff_time }}{% endif %}</div>
+                <div class="ir-main"><a href="/#fix-{{ row.fixture_id }}">{{ row.match }}</a> — {{ row.market_label }}</div>
+                <span class="ir-pill ir-good">Model {{ row.model_pct }}%</span>
+                {% if row.odds %}<span class="ir-pill">Odds {{ "%.2f"|format(row.odds) }}</span>{% endif %}
+                {% if row.data_quality_pct is not none %}<span class="ir-pill">Data {{ row.data_quality_pct }}%</span>{% endif %}
+            </div>
+            {% else %}
+            <div class="empty-mini">No model probability rows with usable market data in this window.</div>
+            {% endfor %}
+        </section>
+
+        <section class="insight-card">
+            <h2>Value Opportunities</h2>
+            {% for row in insights.value_opportunities %}
+            <div class="insight-row">
+                <div class="ir-meta">{{ row.league }}{% if row.kickoff_time %} · {{ row.kickoff_time }}{% endif %}</div>
+                <div class="ir-main"><a href="/#fix-{{ row.fixture_id }}">{{ row.match }}</a> — {{ row.market_label }}</div>
+                {% if row.odds %}<span class="ir-pill">Odds {{ "%.2f"|format(row.odds) }}</span>{% endif %}
+                {% if row.edge_pct is not none %}<span class="ir-pill ir-gold">+{{ "%.1f"|format(row.edge_pct) }}% edge</span>{% endif %}
+                {% if row.roi_percent is not none %}<span class="ir-pill">ROI {{ "%.1f"|format(row.roi_percent) }}%</span>{% endif %}
+            </div>
+            {% else %}
+            <div class="empty-mini">No value flags clear the current model/data bar.</div>
+            {% endfor %}
+        </section>
+
+        <section class="insight-card">
+            <h2>Form / xG / Table Angles</h2>
+            {% for row in insights.angles %}
+            <div class="insight-row">
+                <div class="ir-meta">{{ row.league }}{% if row.kickoff_time %} · {{ row.kickoff_time }}{% endif %}</div>
+                <div class="ir-main"><a href="/#fix-{{ row.fixture_id }}">{{ row.match }}</a></div>
+                <ul class="insight-list">
+                    {% for b in row.bullets %}<li>{{ b }}</li>{% endfor %}
+                </ul>
+            </div>
+            {% else %}
+            <div class="empty-mini">No form/xG/table angles loaded yet. Refresh data or check API status.</div>
+            {% endfor %}
+        </section>
+
+        <section class="insight-card">
+            <h2>Pro Bet Builders</h2>
+            {% for row in insights.bet_builders %}
+            <div class="insight-row">
+                <div class="ir-meta">{{ row.league_name or row.league }}{% if row.kickoff_time %} · {{ row.kickoff_time }}{% endif %}</div>
+                <div class="ir-main"><a href="/#fix-{{ row.fixture_id }}">{{ row.match }}</a> — {{ row.title }}</div>
+                {% for leg in row.legs %}
+                <span class="ir-pill">{{ leg.market_label }}{% if leg.odds %} {{ "%.2f"|format(leg.odds) }}{% endif %}</span>
+                {% endfor %}
+                {% if row.joint_confidence_pct is not none %}<span class="ir-pill ir-good">Model {{ row.joint_confidence_pct }}%</span>{% endif %}
+            </div>
+            {% else %}
+            <div class="empty-mini">No same-game builder clears both model support and priced component markets. Player props are not suggested because no player-prop feed is wired.</div>
+            {% endfor %}
+        </section>
+
+        <section class="insight-card">
+            <h2>Data Quality Alerts</h2>
+            {% for row in insights.data_quality_alerts %}
+            <div class="insight-row">
+                <div class="ir-meta">{{ row.league }} · xG source {{ row.xg_source }}</div>
+                <div class="ir-main"><a href="/#fix-{{ row.fixture_id }}">{{ row.match }}</a></div>
+                <span class="ir-pill {% if row.analyzable %}ir-good{% else %}ir-warn{% endif %}">Data {{ row.data_quality_pct if row.data_quality_pct is not none else 'n/a' }}%</span>
+                {% if row.missing %}
+                <span class="ir-pill ir-warn">Missing: {{ row.missing|join(', ') }}</span>
+                {% endif %}
+            </div>
+            {% else %}
+            <div class="empty-mini">No material coverage alerts in the current packet set.</div>
+            {% endfor %}
+        </section>
+
+        <section class="insight-card">
+            <h2>2025/26 and 2026/27 Coverage</h2>
+            <div class="coverage-grid">
+                {% for season in insights.coverage.seasons %}
+                <div class="coverage-season">
+                    <h3>{{ season.season }} · {{ season.status }}</h3>
+                    <p class="ir-meta">{{ season.summary }}</p>
+                    <ul class="insight-list">
+                        {% for b in season.strengths[:2] %}<li>{{ b }}</li>{% endfor %}
+                        {% for b in season.shortcomings[:2] %}<li>{{ b }}</li>{% endfor %}
+                    </ul>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="source-counts">
+                <span class="ir-pill ir-good">{{ insights.coverage.counts.wired }} wired sources</span>
+                <span class="ir-pill ir-warn">{{ insights.coverage.counts.experimental }} experimental</span>
+                <span class="ir-pill">{{ insights.coverage.counts.planned }} planned</span>
+            </div>
+            <p class="ir-meta" style="margin-top:10px;">{{ insights.coverage.player_prop_note }}</p>
+        </section>
+    </div>
+</div>
+{% include '_assistant_widget.html' %}
+{% endblock %}
+{% block extra_js %}
+<script type="application/json" id="hibs-assistant-data">{{ {"packets": assistant_packets, "recommendations": assistant_recommendations or none}|tojson }}</script>
+<script>window.HIBS_ASSISTANT = JSON.parse(document.getElementById('hibs-assistant-data').textContent);</script>
+<script src="{{ url_for('static', filename='hibs_assistant.js') }}"></script>
+{% endblock %}
+{% extends "base.html" %}
+{% block title %}hibs-bet - Insights{% endblock %}
+{% block content %}
+<div class="ref-page insights-page">
+    <header class="site-top">
+        <div class="site-top-left">
+            <img src="{{ url_for('static', filename='badge_harp_shield.png') }}" alt="Hibernian FC" class="site-crest" width="38" height="38">
+            <span class="site-wordmark">hibs-bet</span>
+            <nav class="site-links" aria-label="Primary">
+                <a href="/" class="site-link">Dashboard</a>
+                <a href="/acca" class="site-link">Acca Builder</a>
+                <span class="site-link site-link-active">Insights</span>
+                <a href="/status" class="site-link">API status</a>
+            </nav>
+        </div>
+        <div class="site-top-right">
+            <span class="pill-soft">{{ total }} fixtures</span>
+            <span class="pill-soft">{{ fetch_days }} day window</span>
+            <button type="button" class="btn-betslip" data-betslip-open>Betslip</button>
+        </div>
+    </header>
+
+    <section class="ins-hero">
+        <p class="eyebrow">Personal handicapper</p>
+        <h1>Actionable model, market and data angles</h1>
+        <p>Built from the same fixture packets as the dashboard: model probabilities first, value as a secondary filter, and visible warnings where source coverage is thin.</p>
+        <div class="ins-kpis">
+            <div><strong>{{ insights.summary.fixtures_scanned or 0 }}</strong><span>scanned</span></div>
+            <div><strong>{{ insights.summary.fixtures_eligible or 0 }}</strong><span>model-ready</span></div>
+            <div><strong>{{ value_bet_count }}</strong><span>value flags</span></div>
+            <div><strong>{{ insights.coverage.counts.wired }}</strong><span>wired sources</span></div>
+        </div>
+    </section>
+
+    <div class="ins-grid">
+        <section class="ins-card ins-card-wide">
+            <div class="ins-hd">
+                <h2>Top Model Probabilities</h2>
+                <p>Highest supported outcomes with a model percentage and, where available, book price.</p>
+            </div>
+            {% if insights.top_probabilities %}
+            <div class="ins-list">
+                {% for row in insights.top_probabilities %}
+                <article class="ins-row">
+                    <div>
+                        <strong>{{ row.market_label }}</strong>
+                        <span>{{ row.match }}{% if row.kickoff_time %} · {{ row.kickoff_time }}{% endif %}</span>
+                    </div>
+                    <div class="ins-metrics">
+                        <b>{{ "%.1f"|format(row.model_pct) }}%</b>
+                        {% if row.odds %}<span>@ {{ "%.2f"|format(row.odds) }}</span>{% endif %}
+                        {% if row.is_value %}<em>value</em>{% endif %}
+                    </div>
+                </article>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="ins-empty">No priced model probabilities loaded yet. Refresh fixtures or check API status.</p>
+            {% endif %}
+        </section>
+
+        <section class="ins-card">
+            <div class="ins-hd">
+                <h2>Value Opportunities</h2>
+                <p>Secondary screen: only after the model and data checks have context.</p>
+            </div>
+            {% if insights.value_opportunities %}
+            <div class="ins-list compact">
+                {% for row in insights.value_opportunities %}
+                <article class="ins-row">
+                    <div><strong>{{ row.market_label }}</strong><span>{{ row.match }}</span></div>
+                    <div class="ins-metrics"><b>+{{ "%.1f"|format(row.edge_pct or 0) }}%</b>{% if row.odds %}<span>@ {{ "%.2f"|format(row.odds) }}</span>{% endif %}</div>
+                </article>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="ins-empty">No current value rows clear the pricing screen.</p>
+            {% endif %}
+        </section>
+
+        <section class="ins-card">
+            <div class="ins-hd">
+                <h2>Pro Bet Builders</h2>
+                <p>Correlated same-game ideas from available 1X2, BTTS, totals and priced double-chance markets only.</p>
+            </div>
+            {% if insights.bet_builders %}
+            <div class="ins-builder-list">
+                {% for b in insights.bet_builders %}
+                <article class="ins-builder">
+                    <strong>{{ b.title }}</strong>
+                    <span>{{ b.match }}{% if b.kickoff_time %} · {{ b.kickoff_time }}{% endif %}</span>
+                    <ul>
+                        {% for leg in b.legs %}
+                        <li>{{ leg.market_label }}{% if leg.odds %} @ {{ "%.2f"|format(leg.odds) }}{% endif %}{% if leg.model_pct is not none %} ({{ "%.1f"|format(leg.model_pct) }}%){% endif %}</li>
+                        {% endfor %}
+                    </ul>
+                </article>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="ins-empty">No same-game builders clear the current data, probability and price bars.</p>
+            {% endif %}
+            <p class="ins-note">{{ insights.coverage.player_prop_note }}</p>
+        </section>
+
+        <section class="ins-card ins-card-wide">
+            <div class="ins-hd">
+                <h2>Form, xG and Table Angles</h2>
+                <p>Fixture rationale that explains why a line deserves attention.</p>
+            </div>
+            {% if insights.angles %}
+            <div class="ins-angle-grid">
+                {% for row in insights.angles %}
+                <article class="ins-angle">
+                    <strong>{{ row.match }}</strong>
+                    <span>{{ row.league }}{% if row.kickoff_time %} · {{ row.kickoff_time }}{% endif %}</span>
+                    <ul>
+                        {% for b in row.bullets %}
+                        <li>{{ b }}</li>
+                        {% endfor %}
+                    </ul>
+                </article>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="ins-empty">No form/xG/table angles loaded yet.</p>
+            {% endif %}
+        </section>
+
+        <section class="ins-card">
+            <div class="ins-hd">
+                <h2>Data Quality Alerts</h2>
+                <p>What to treat cautiously before previewing or staking.</p>
+            </div>
+            {% if insights.data_quality_alerts %}
+            <div class="ins-list compact">
+                {% for row in insights.data_quality_alerts %}
+                <article class="ins-row warn">
+                    <div>
+                        <strong>{{ row.match }}</strong>
+                        <span>{{ row.league }} · xG source {{ row.xg_source }}</span>
+                        {% if row.missing %}<small>Missing: {{ row.missing|join(", ") }}</small>{% endif %}
+                    </div>
+                    <div class="ins-metrics"><b>{{ row.data_quality_pct if row.data_quality_pct is not none else "?" }}%</b></div>
+                </article>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="ins-empty">No obvious coverage alerts in this window.</p>
+            {% endif %}
+        </section>
+
+        <section class="ins-card">
+            <div class="ins-hd">
+                <h2>2025/26 and 2026/27 Coverage</h2>
+                <p>Source audit and known shortfalls.</p>
+            </div>
+            {% for season in insights.coverage.seasons %}
+            <article class="coverage-season">
+                <strong>{{ season.season }} · {{ season.status }}</strong>
+                <p>{{ season.summary }}</p>
+                <small>Shortfalls: {{ season.shortcomings|join(" ") }}</small>
+            </article>
+            {% endfor %}
+            <details class="coverage-sources">
+                <summary>Source catalog ({{ insights.coverage.sources|length }})</summary>
+                {% for src in insights.coverage.sources %}
+                <p><strong>{{ src.label }}</strong> · {{ src.status }}<br><span>{{ src.focus }} {{ src.notes }}</span></p>
+                {% endfor %}
+            </details>
+        </section>
+    </div>
+</div>
+{% include '_assistant_widget.html' %}
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.insights-page{max-width:1720px;margin:0 auto;}
+.ins-hero{border:1px solid var(--border);border-radius:16px;padding:18px;margin:12px 0;background:linear-gradient(135deg,rgba(57,255,20,0.08),rgba(15,23,42,0.86));}
+.ins-hero .eyebrow{font-size:0.68em;font-weight:900;letter-spacing:0.14em;text-transform:uppercase;color:var(--neon-value);margin-bottom:8px;}
+.ins-hero h1{font-family:'Orbitron',monospace;font-size:clamp(1.25rem,2.4vw,1.9rem);margin:0 0 8px;}
+.ins-hero p{max-width:70rem;color:var(--muted);font-size:0.82em;line-height:1.5;}
+.ins-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:14px;}
+@media(max-width:760px){.ins-kpis{grid-template-columns:repeat(2,minmax(0,1fr));}.ins-grid{grid-template-columns:1fr!important;}}
+.ins-kpis div{border:1px solid var(--border);border-radius:10px;padding:10px;background:rgba(2,6,23,0.45);}
+.ins-kpis strong{display:block;color:var(--neon-value);font-size:1.35em;}
+.ins-kpis span{font-size:0.68em;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;}
+.ins-grid{display:grid;grid-template-columns:1.15fr 0.85fr;gap:12px;align-items:start;}
+.ins-card{border:1px solid var(--border);border-radius:14px;padding:14px;background:rgba(15,23,42,0.88);}
+.ins-card-wide{grid-column:span 1;}
+.ins-hd{margin-bottom:10px;}
+.ins-hd h2{font-size:0.82em;text-transform:uppercase;letter-spacing:0.12em;color:var(--hibs-neon);margin:0 0 4px;}
+.ins-hd p,.ins-note,.ins-empty{font-size:0.72em;color:var(--muted);line-height:1.45;margin:0;}
+.ins-list{display:flex;flex-direction:column;gap:7px;}
+.ins-list.compact{gap:6px;}
+.ins-row{display:flex;justify-content:space-between;gap:12px;border:1px solid rgba(148,163,184,0.12);border-radius:10px;padding:9px 10px;background:rgba(2,6,23,0.38);}
+.ins-row.warn{border-color:rgba(251,191,36,0.22);background:rgba(251,191,36,0.05);}
+.ins-row strong,.ins-builder strong,.ins-angle strong,.coverage-season strong{display:block;font-size:0.82em;}
+.ins-row span,.ins-builder span,.ins-angle span{display:block;color:var(--muted);font-size:0.68em;margin-top:2px;}
+.ins-row small{display:block;color:#fde68a;font-size:0.66em;margin-top:4px;}
+.ins-metrics{text-align:right;min-width:76px;font-variant-numeric:tabular-nums;}
+.ins-metrics b{display:block;color:var(--neon-value);font-size:0.95em;}
+.ins-metrics span{font-size:0.68em;color:var(--gold);}
+.ins-metrics em{display:inline-block;font-style:normal;font-size:0.62em;color:#1c1917;background:var(--gold);border-radius:999px;padding:1px 6px;margin-top:3px;}
+.ins-builder-list,.ins-angle-grid{display:grid;grid-template-columns:1fr;gap:8px;}
+.ins-builder,.ins-angle,.coverage-season{border:1px solid rgba(148,163,184,0.12);border-radius:10px;padding:10px;background:rgba(2,6,23,0.35);}
+.ins-builder ul,.ins-angle ul{margin:7px 0 0 18px;padding:0;color:var(--text);font-size:0.72em;line-height:1.45;}
+.coverage-season{margin-bottom:8px;}
+.coverage-season p{font-size:0.74em;color:var(--text);line-height:1.45;margin:5px 0;}
+.coverage-season small{display:block;color:var(--muted);font-size:0.68em;line-height:1.4;}
+.coverage-sources{border:1px solid var(--border);border-radius:10px;padding:8px 10px;background:rgba(2,6,23,0.35);font-size:0.72em;}
+.coverage-sources summary{cursor:pointer;color:var(--neon-value);font-weight:800;}
+.coverage-sources p{margin:8px 0;color:var(--text);line-height:1.4;}
+.coverage-sources span{color:var(--muted);}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script type="application/json" id="hibs-assistant-data">{{ {"packets": assistant_packets, "recommendations": assistant_recommendations or none}|tojson }}</script>
+<script>window.HIBS_ASSISTANT = JSON.parse(document.getElementById('hibs-assistant-data').textContent);</script>
+<script src="{{ url_for('static', filename='hibs_assistant.js') }}"></script>
+{% endblock %}

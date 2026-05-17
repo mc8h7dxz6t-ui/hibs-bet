@@ -12,6 +12,7 @@ from hibs_predictor.assistant_recommendations import (
     _kickoff_display,
     _match_label,
     build_assistant_recommendations,
+    build_bet_builder_suggestions,
     build_mixed_market_acca,
     is_analyzable,
 )
@@ -22,9 +23,10 @@ _HELP_LINES = [
     "• “best bets” or “top singles by stats”",
     "• “BTTS acca” / “over 2.5 acca” / “win acca” / “over 1.5” / “over 3.5”",
     "• “mixed acca” or “multi market acca” (strongest leg per match, any market)",
+    "• “bet builder for this game” for correlated same-game market ideas",
     "• “value bets” / “deep dive all fixtures”",
     "• “stats for Hibs v Hearts” or “analyze Rangers” (pick a fixture in the dropdown to focus)",
-    "• “why low data” / “xg and form” on the selected match",
+    "• “table”, “standings”, “why league position matters”, “xg and form” on the selected match",
 ]
 
 
@@ -99,6 +101,109 @@ def _stats_reply(pkt: Dict[str, Any]) -> Dict[str, Any]:
     return {"lines": lines, "packet": pkt}
 
 
+def _position_summary(pos: Dict[str, Any], team: str) -> str:
+    if not pos or not pos.get("position"):
+        return f"{team}: table data unavailable."
+    parts = [
+        f"{team}: **{pos.get('position')}**",
+        f"{pos.get('points', '—')} pts",
+    ]
+    if pos.get("played") is not None:
+        parts.append(f"P{pos.get('played')}")
+    if pos.get("goal_diff") is not None:
+        gd = pos.get("goal_diff")
+        gd_s = f"+{gd}" if isinstance(gd, (int, float)) and gd > 0 else str(gd)
+        parts.append(f"GD {gd_s}")
+    if pos.get("form"):
+        parts.append(f"form {pos.get('form')}")
+    src = pos.get("source")
+    if src:
+        parts.append(f"source {src}")
+    return " · ".join(parts)
+
+
+def _adjacent_summary(pos: Dict[str, Any], team: str) -> List[str]:
+    lines: List[str] = []
+    for key, label in (("above", "one above"), ("below", "one below")):
+        row = pos.get(key) if isinstance(pos, dict) else None
+        if isinstance(row, dict) and row.get("team"):
+            pts = row.get("points", "—")
+            gd = row.get("goal_diff", "—")
+            lines.append(f"{team} {label}: {row.get('team')} ({pts} pts, GD {gd}).")
+    return lines
+
+
+def _table_reply(pkt: Dict[str, Any]) -> Dict[str, Any]:
+    hp = pkt.get("home_position") or {}
+    ap = pkt.get("away_position") or {}
+    home = pkt.get("home") or "Home"
+    away = pkt.get("away") or "Away"
+    lines = [
+        f"**Table context: {_match_label(pkt)}**",
+        _position_summary(hp, home),
+        _position_summary(ap, away),
+    ]
+    if hp.get("position") and ap.get("position"):
+        try:
+            pos_gap = int(ap.get("position")) - int(hp.get("position"))
+            pts_gap = int(hp.get("points") or 0) - int(ap.get("points") or 0)
+            gd_gap = int(hp.get("goal_diff") or 0) - int(ap.get("goal_diff") or 0)
+            if pos_gap > 0:
+                lines.append(f"{home} sit {abs(pos_gap)} places above {away}; points gap {pts_gap}, GD gap {gd_gap}.")
+            elif pos_gap < 0:
+                lines.append(f"{away} sit {abs(pos_gap)} places above {home}; points gap {-pts_gap}, GD gap {-gd_gap}.")
+            else:
+                lines.append(f"They are level on table position context; points gap {pts_gap}, GD gap {gd_gap}.")
+        except (TypeError, ValueError):
+            pass
+    lines.extend(_adjacent_summary(hp, home))
+    lines.extend(_adjacent_summary(ap, away))
+    if len(lines) == 3 and "unavailable" in " ".join(lines).lower():
+        lines.append("One-above/one-below snapshots are not loaded for this league yet; the assistant will use current team rows when available.")
+    else:
+        lines.append("Why it matters: standings anchor baseline strength, pressure, goal difference, and whether recent form is over- or under-performing league rank.")
+    return {"lines": lines, "packet": pkt}
+
+
+def _form_reply(pkt: Dict[str, Any]) -> List[str]:
+    lines: List[str] = []
+    for side, label in (("home", pkt.get("home") or "Home"), ("away", pkt.get("away") or "Away")):
+        fs = pkt.get(f"{side}_form_summary") or {}
+        if not fs.get("played"):
+            lines.append(f"{label}: recent form unavailable.")
+            continue
+        lines.append(
+            f"{label} last {fs.get('played')}: W{fs.get('wins')} D{fs.get('draws')} L{fs.get('losses')}, "
+            f"GF {fs.get('gf')} GA {fs.get('ga')}, BTTS {fs.get('btts')}, O2.5 {fs.get('over25')}."
+        )
+    return lines
+
+
+def _team_news_reply(pkt: Dict[str, Any]) -> List[str]:
+    injuries = pkt.get("fixture_injuries") or []
+    if not injuries:
+        return ["Team news: no confirmed injury/absence feed loaded for this fixture."]
+    lines = [f"Team news: {len(injuries)} absence rows loaded."]
+    for inj in injuries[:4]:
+        player = (inj.get("player") or {}).get("name") if isinstance(inj, dict) else None
+        team = (inj.get("team") or {}).get("name") if isinstance(inj, dict) else None
+        reason = inj.get("reason") if isinstance(inj, dict) else None
+        lines.append(f"{player or 'Player'} ({team or 'team'}): {reason or 'listed absence'}.")
+    return lines
+
+
+def _selected_deep_dive_blocks(pkt: Dict[str, Any]) -> List[Dict[str, Any]]:
+    st = _stats_reply(pkt)
+    table = _table_reply(pkt)
+    lines = st["lines"] + [""] + table["lines"] + [""] + _form_reply(pkt) + [""] + _team_news_reply(pkt)
+    builders = build_bet_builder_suggestions([pkt], fixture_id=pkt.get("id"), limit=4)
+    blocks: List[Dict[str, Any]] = [{"type": "stats", "lines": lines, "packet": pkt}]
+    if builders:
+        blocks.append({"type": "builders", "items": builders})
+    blocks.append({"type": "fixture", "packet": pkt, "compact": False})
+    return blocks
+
+
 def parse_intent(question: str) -> Tuple[str, Dict[str, Any]]:
     q = _norm(question)
     if not q:
@@ -107,6 +212,10 @@ def parse_intent(question: str) -> Tuple[str, Dict[str, Any]]:
         return "help", {}
     if any(x in q for x in ("deep dive", "deep-dive", "scan all", "all fixtures", "full scan")):
         return "deep_dive", {}
+    if any(x in q for x in ("bet builder", "builder", "same game", "sgm", "game line", "game-line")):
+        return "bet_builder", {}
+    if any(x in q for x in ("table", "standings", "league position", "league table", "points", "goal difference", "gd", "one above", "one below")):
+        return "table", {}
     if any(x in q for x in ("mixed acca", "multi market", "multi-market", "several markets", "same bet")):
         return "mixed_acca", {}
     if "btts" in q and "acca" in q:
@@ -125,7 +234,7 @@ def parse_intent(question: str) -> Tuple[str, Dict[str, Any]]:
         return "best_singles", {}
     if "acca" in q or "accumulator" in q or "parlay" in q:
         return "mixed_acca", {}
-    if any(x in q for x in ("stats", "xg", "form", "data quality", "coverage", "probability", "model")):
+    if any(x in q for x in ("stats", "xg", "form", "data quality", "coverage", "probability", "model", "team news", "injuries")):
         return "stats", {}
     if any(x in q for x in ("analyze", "analysis", "breakdown", "tell me about", " v ", " vs ")):
         return "analyze", {}
@@ -153,9 +262,14 @@ def handle_chat(
         return out
 
     if intent == "deep_dive":
+        selected = _find_packets(packets, question, fixture_id)
+        if selected and not any(x in _norm(question) for x in ("all fixtures", "scan all", "full scan")):
+            out["blocks"] = _selected_deep_dive_blocks(selected[0])
+            return out
         out["blocks"] = [
             {"type": "summary", "data": rec.get("deep_dive_summary")},
             {"type": "accas", "items": rec.get("acca_suggestions") or []},
+            {"type": "builders", "items": rec.get("bet_builder_suggestions") or []},
             {"type": "highlights", "data": rec.get("market_highlights") or {}},
         ]
         return out
@@ -210,6 +324,27 @@ def handle_chat(
             out["blocks"] = [{"type": "accas", "items": mixed}]
         return out
 
+    if intent == "bet_builder":
+        matches = _find_packets(packets, question, fixture_id)
+        builders = build_bet_builder_suggestions(
+            packets if not matches else matches,
+            fixture_id=matches[0].get("id") if matches else fixture_id,
+            limit=6,
+        )
+        if not builders:
+            out["blocks"] = [
+                {
+                    "type": "text",
+                    "lines": [
+                        "No same-game bet builder clears the current probability/data/price bar.",
+                        "I will not invent player props; those need a real player-prop/team-news feed.",
+                    ],
+                }
+            ]
+        else:
+            out["blocks"] = [{"type": "builders", "items": builders}]
+        return out
+
     if intent == "value":
         hits = [p for p in packets if p.get("has_value_bet") and is_analyzable(p)]
         if not hits:
@@ -218,11 +353,23 @@ def handle_chat(
             out["blocks"] = [{"type": "fixtures", "items": hits[:10], "compact": True}]
         return out
 
-    if intent in ("stats", "analyze", "general"):
+    if intent in ("stats", "analyze", "general", "table"):
         matches = _find_packets(packets, question, fixture_id)
         if not matches and fixture_id:
             matches = _find_packets(packets, "", fixture_id)
         if not matches:
+            if intent == "table":
+                out["blocks"] = [
+                    {
+                        "type": "text",
+                        "lines": [
+                            "Table context matters because league position, points gap and goal difference anchor baseline team strength before recent form and xG adjust the view.",
+                            "For a fixture-specific table read, select a match in the dropdown or ask “table for Team A v Team B”.",
+                            "When standings are missing, I will say so instead of pretending one-above/one-below context exists.",
+                        ],
+                    }
+                ]
+                return out
             if intent == "general":
                 out["blocks"] = [
                     {"type": "text", "lines": _HELP_LINES[:2] + ["Could not match a team or fixture — select one in the dropdown or name both sides."]}
@@ -233,7 +380,7 @@ def handle_chat(
         blocks: List[Dict[str, Any]] = []
         for pkt in matches:
             reason = _exclusion_reason(pkt)
-            if reason:
+            if reason and intent not in ("stats", "analyze", "general", "table"):
                 blocks.append(
                     {
                         "type": "text",
@@ -243,10 +390,22 @@ def handle_chat(
                     }
                 )
                 continue
-            st = _stats_reply(pkt)
-            blocks.append({"type": "stats", "lines": st["lines"], "packet": pkt})
-            if intent == "analyze":
-                blocks.append({"type": "fixture", "packet": pkt, "compact": False})
+            if reason:
+                blocks.append({"type": "text", "lines": [f"{_match_label(pkt)} is thin for betting ({reason.replace('_', ' ')}), but I can still explain the available data."]})
+            if intent == "table":
+                tb = _table_reply(pkt)
+                blocks.append({"type": "stats", "lines": tb["lines"], "packet": pkt})
+            elif intent == "analyze":
+                blocks.extend(_selected_deep_dive_blocks(pkt))
+            else:
+                st = _stats_reply(pkt)
+                extra = []
+                qn = _norm(question)
+                if "form" in qn:
+                    extra.extend(_form_reply(pkt))
+                if any(x in qn for x in ("team news", "injuries", "absence")):
+                    extra.extend(_team_news_reply(pkt))
+                blocks.append({"type": "stats", "lines": st["lines"] + extra, "packet": pkt})
         if intent == "general" and len(blocks) == 1 and blocks[0].get("type") == "stats":
             blocks.append(
                 {

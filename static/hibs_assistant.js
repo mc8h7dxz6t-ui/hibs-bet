@@ -148,6 +148,12 @@
             (block.items || []).forEach(function (a) { appendBot(accaCardHtml(a)); });
             return;
         }
+        if (t === 'builders') {
+            var builders = block.items || [];
+            if (builders.length) appendBot('<p class="ac-line"><strong>Pro bet builders</strong></p>');
+            builders.forEach(function (b) { appendBot(builderCardHtml(b)); });
+            return;
+        }
         if (t === 'highlights') {
             appendBot('<p class="ac-line"><strong>Market highlights</strong></p>');
             var mh = block.data || {};
@@ -229,6 +235,37 @@
             html += '</ul>';
         }
         html += '<p class="ac-line" style="margin-top:8px;"><button type="button" class="hibs-assistant-send hibs-acca-slip" data-acca-slip="1">Add legs to betslip</button></p>';
+        html += '</div>';
+        return html;
+    }
+
+    function builderCardHtml(builder) {
+        var html = '<div class="hibs-assistant-card hibs-builder-card">';
+        html += '<p class="ac-line"><strong>' + esc(builder.title || 'Bet builder') + '</strong>';
+        if (builder.match) html += ' · ' + esc(builder.match);
+        if (builder.kickoff_time) html += ' · ' + esc(builder.kickoff_time);
+        html += '</p>';
+        html += '<ol class="hibs-acca-legs">';
+        (builder.legs || []).forEach(function (leg) {
+            html += '<li>' + legHtml(leg) + '</li>';
+        });
+        html += '</ol>';
+        if (builder.estimated_independent_odds) {
+            html += '<p class="ac-line" style="font-size:0.86em;color:var(--muted);">Component odds multiply to ~' + builder.estimated_independent_odds + ', but same-game markets are correlated so get a live bookmaker quote.</p>';
+        }
+        if (builder.joint_confidence_pct != null) {
+            html += '<p class="ac-line">Model builder confidence: <strong>' + builder.joint_confidence_pct + '%</strong></p>';
+        }
+        if (builder.rationale && builder.rationale.length) {
+            html += '<ul style="margin-top:6px;">';
+            builder.rationale.forEach(function (b) {
+                html += '<li style="font-size:0.88em;color:var(--muted);">' + esc(b) + '</li>';
+            });
+            html += '</ul>';
+        }
+        if (builder.disclaimer) {
+            html += '<p class="ac-line" style="font-size:0.78em;color:var(--muted);">' + esc(builder.disclaimer) + '</p>';
+        }
         html += '</div>';
         return html;
     }

@@ -737,6 +737,36 @@ def api_value_bets():
     return jsonify({"value_bets": data["value_bets"], "count": data["value_bet_count"]})
 
 
+@app.route("/api/insights")
+def api_insights():
+    """Handicapper-style insight digest for the current fixture window."""
+    from hibs_predictor.insights import build_insights
+
+    data = fetch_all_fixtures()
+    return jsonify(build_insights(data["all"]))
+
+
+@app.route("/insights")
+def insights_page():
+    """Actionable model/data/market insights built from the current fixture packets."""
+    from hibs_predictor.insights import build_insights
+
+    data = fetch_all_fixtures()
+    insights = build_insights(data["all"])
+    assistant_bundle = _assistant_bundle(data["all"])
+    return render_template(
+        "insights.html",
+        insights=insights,
+        total=data["total"],
+        fetch_days=data.get("fetch_days", _fetch_window_days()),
+        value_bet_count=data["value_bet_count"],
+        data_quality_ui_min=_ui_data_quality_min_pct(),
+        assistant_packets=assistant_bundle["packets"],
+        assistant_recommendations=assistant_bundle.get("recommendations"),
+        display_tz_label=display_tz_label(),
+    )
+
+
 @app.route("/acca")
 def acca_builder():
     data = fetch_all_fixtures()
