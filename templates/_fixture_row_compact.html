@@ -72,15 +72,21 @@
             <button type="button" class="fr-add-slip" title="Add selected pick to betslip">+ Slip</button>
             {% endif %}
             <select class="fr-league-snap" title="League table snapshot" onclick="event.stopPropagation();" onmousedown="event.stopPropagation();">
-                {% if (hp and hp.position) or (ap and ap.position) %}
-                {% if hp and hp.position %}
-                <optgroup label="{{ fixture.home }}">
-                    <option selected>Pos {{ hp.position }} · P {{ hp.played }} W {{ hp.won }} D {{ hp.drawn }} L {{ hp.lost }} · GF {{ hp.goals_for }} GA {{ hp.goals_against }} GD {% if hp.goal_diff > 0 %}+{% endif %}{{ hp.goal_diff }} · {{ hp.points }} pts</option>
+                {% set home_snap = fixture.home_table_snapshot if fixture.home_table_snapshot is defined else [] %}
+                {% set away_snap = fixture.away_table_snapshot if fixture.away_table_snapshot is defined else [] %}
+                {% if home_snap or away_snap %}
+                {% if home_snap %}
+                <optgroup label="{{ fixture.home }} table">
+                    {% for row in home_snap %}
+                    <option {% if row.is_focus %}selected{% endif %}>{% if row.is_focus %}* {% endif %}{{ row.position }} {{ row.team }} · P {{ row.played }} W {{ row.won }} D {{ row.drawn }} L {{ row.lost }} · GD {% if row.goal_diff > 0 %}+{% endif %}{{ row.goal_diff }} · {{ row.points }} pts</option>
+                    {% endfor %}
                 </optgroup>
                 {% endif %}
-                {% if ap and ap.position %}
-                <optgroup label="{{ fixture.away }}">
-                    <option>Pos {{ ap.position }} · P {{ ap.played }} W {{ ap.won }} D {{ ap.drawn }} L {{ ap.lost }} · GF {{ ap.goals_for }} GA {{ ap.goals_against }} GD {% if ap.goal_diff > 0 %}+{% endif %}{{ ap.goal_diff }} · {{ ap.points }} pts</option>
+                {% if away_snap %}
+                <optgroup label="{{ fixture.away }} table">
+                    {% for row in away_snap %}
+                    <option>{{ row.position }} {{ row.team }} · P {{ row.played }} W {{ row.won }} D {{ row.drawn }} L {{ row.lost }} · GD {% if row.goal_diff > 0 %}+{% endif %}{{ row.goal_diff }} · {{ row.points }} pts{% if row.is_focus %} *{% endif %}</option>
+                    {% endfor %}
                 </optgroup>
                 {% endif %}
                 {% else %}

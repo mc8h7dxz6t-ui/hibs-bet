@@ -439,12 +439,207 @@ def _ensure_fixture_pick_menus(all_fixtures: List[Dict[str, Any]]) -> None:
             print(f"[Pick menu] {f.get('home')} v {f.get('away')}: {exc!r}")
 
 
+def _safe_int_value(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _team_key(name: Any) -> str:
+    import re
+
+    text = re.sub(r"[^a-z0-9]+", " ", str(name or "").lower()).strip()
+    for suffix in (" fc", " afc", " cf", " sc"):
+        if text.endswith(suffix):
+            text = text[: -len(suffix)].strip()
+    return text
+
+
+def _table_row_from_position(team: str, position: Dict[str, Any], source: str = "fixture") -> Optional[Dict[str, Any]]:
+    if not isinstance(position, dict):
+        return None
+    rank = position.get("position", position.get("rank"))
+    if rank in (None, "", "?"):
+        return None
+    row = {
+        "position": _safe_int_value(rank, 999),
+        "team": team or position.get("team") or "Unknown",
+        "played": _safe_int_value(position.get("played")),
+        "won": _safe_int_value(position.get("won")),
+        "drawn": _safe_int_value(position.get("drawn")),
+        "lost": _safe_int_value(position.get("lost")),
+        "goals_for": _safe_int_value(position.get("goals_for")),
+        "goals_against": _safe_int_value(position.get("goals_against")),
+        "goal_diff": _safe_int_value(position.get("goal_diff")),
+        "points": _safe_int_value(position.get("points")),
+        "form": position.get("form") or "",
+        "source": position.get("source") or source,
+    }
+    if row["position"] == 999:
+        return None
+    return row
+
+
+def _table_row_from_api_entry(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    team = ((entry.get("team") or {}).get("name")) or entry.get("team_name") or entry.get("team")
+    all_stats = entry.get("all") or {}
+    goals = all_stats.get("goals") or {}
+    return _table_row_from_position(
+        str(team or ""),
+        {
+            "position": entry.get("rank"),
+            "played": all_stats.get("played"),
+            "won": all_stats.get("win"),
+            "drawn": all_stats.get("draw"),
+            "lost": all_stats.get("lose"),
+            "goals_for": goals.get("for"),
+            "goals_against": goals.get("against"),
+            "goal_diff": entry.get("goalsDiff"),
+            "points": entry.get("points"),
+            "form": entry.get("form"),
+            "source": "api_sports",
+        },
+    )
+
+
+def _fetch_full_table_rows(league_code: str) -> List[Dict[str, Any]]:
+    """Best-effort full standings for the tables page; callers fall back to fixture rows.
+
+    By default this reads existing cache only so /tables stays responsive. Set
+    HIBS_TABLES_LIVE_FETCH=1 locally to force a fresh standings fetch.
+    """
+    league = LEAGUES.get(league_code) or {}
+    league_api_id = league.get("api_sports_id")
+    now = datetime.now(timezone.utc)
+    live_fetch = _env_truthy("HIBS_TABLES_LIVE_FETCH")
+    if league_api_id and "api_sports" in aggregator.clients and not _env_truthy("HIBS_SKIP_API_STANDINGS"):
+        for season in (_api_football_season_year(now), _api_football_season_year(now) - 1):
+            try:
+                params = {"league": int(league_api_id), "season": int(season)}
+                groups_payload = aggregator.clients["api_sports"].cache.get(
+                    f"api_sports_standings_{str(params)}", ttl_hours=4
+                )
+                if groups_payload:
+                    response = groups_payload.get("response", []) if isinstance(groups_payload, dict) else []
+                    groups = response[0].get("league", {}).get("standings", [[]]) if response else [[]]
+                elif live_fetch:
+                    groups = aggregator.clients["api_sports"].fetch_standings(int(league_api_id), int(season))
+                else:
+                    groups = []
+                rows = [
+                    row
+                    for group in (groups or [])
+                    for entry in (group or [])
+                    for row in [_table_row_from_api_entry(entry)]
+                    if row
+                ]
+                if rows:
+                    return rows
+            except Exception as exc:
+                print(f"[Tables api_sports] {league_code}: {exc!r}")
+                continue
+    try:
+        from hibs_predictor.scrapers import wikipedia_standings as wiki_standings
+
+        sk = wiki_standings._season_wiki_title_part()
+        cached = aggregator.cache.get(f"wiki_stand_{league_code}_{sk}", ttl_hours=12)
+        if cached is None and live_fetch:
+            cached = aggregator._cached_wikipedia_league_table(league_code)
+        rows = [
+            _table_row_from_position(str(r.get("team") or ""), wiki_standings.row_to_position_shape(r), "wikipedia")
+            for r in (cached or [])
+        ]
+        return [r for r in rows if r]
+    except Exception as exc:
+        print(f"[Tables wikipedia] {league_code}: {exc!r}")
+    return []
+
+
+def _fixture_position_rows(fixtures: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    by_league: Dict[str, List[Dict[str, Any]]] = {}
+    for fixture in fixtures:
+        league_code = fixture.get("league") or ""
+        if not league_code:
+            continue
+        for team_key, pos_key in (("home", "home_position"), ("away", "away_position")):
+            row = _table_row_from_position(str(fixture.get(team_key) or ""), fixture.get(pos_key) or {})
+            if row:
+                by_league.setdefault(league_code, []).append(row)
+    return by_league
+
+
+def _dedupe_table_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    by_team: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        key = _team_key(row.get("team"))
+        if not key:
+            continue
+        existing = by_team.get(key)
+        if existing is None or (
+            existing.get("source") == "fixture" and row.get("source") != "fixture"
+        ):
+            by_team[key] = row
+    return sorted(by_team.values(), key=lambda r: (_safe_int_value(r.get("position"), 999), str(r.get("team") or "")))
+
+
+def _build_league_tables(fixtures: List[Dict[str, Any]], *, include_live: bool = False) -> List[Dict[str, Any]]:
+    fixture_rows = _fixture_position_rows(fixtures)
+    league_codes = set(fixture_rows)
+    league_codes.update(str(f.get("league") or "") for f in fixtures if f.get("league"))
+    order_index = {c: i for i, c in enumerate(DASHBOARD_LEAGUE_ORDER)}
+    tables: List[Dict[str, Any]] = []
+    for league_code in sorted(league_codes, key=lambda c: (order_index.get(c, 999), c)):
+        rows: List[Dict[str, Any]] = []
+        if include_live:
+            rows.extend(_fetch_full_table_rows(league_code))
+        rows.extend(fixture_rows.get(league_code, []))
+        rows = _dedupe_table_rows(rows)
+        tables.append(
+            {
+                "code": league_code,
+                "name": LEAGUES.get(league_code, {}).get("name", league_code),
+                "rows": rows,
+                "source": rows[0].get("source") if rows else "",
+                "is_partial": len(rows) < 8,
+            }
+        )
+    return tables
+
+
+def _snapshot_for_team(rows: List[Dict[str, Any]], team: str) -> List[Dict[str, Any]]:
+    key = _team_key(team)
+    if not key:
+        return []
+    idx = next((i for i, row in enumerate(rows) if _team_key(row.get("team")) == key), None)
+    if idx is None:
+        return []
+    start = max(0, idx - 1)
+    end = min(len(rows), idx + 2)
+    snapshot = []
+    for i, row in enumerate(rows[start:end], start=start):
+        out = dict(row)
+        out["is_focus"] = i == idx
+        snapshot.append(out)
+    return snapshot
+
+
+def _attach_table_snapshots(fixtures: List[Dict[str, Any]], tables: List[Dict[str, Any]]) -> None:
+    by_code = {t["code"]: t.get("rows") or [] for t in tables}
+    for fixture in fixtures:
+        rows = by_code.get(fixture.get("league") or "", [])
+        fixture["home_table_snapshot"] = _snapshot_for_team(rows, str(fixture.get("home") or ""))
+        fixture["away_table_snapshot"] = _snapshot_for_team(rows, str(fixture.get("away") or ""))
+
+
 def _finalize_fixture_bundle(all_fixtures: List[Dict[str, Any]]) -> Dict[str, Any]:
     from hibs_predictor.display_tz import enrich_fixtures_kickoff
 
     all_fixtures = enrich_fixtures_kickoff(all_fixtures)
     _ensure_fixture_pick_menus(all_fixtures)
     all_fixtures.sort(key=lambda x: x.get("kickoff_sort") or x.get("date") or "")
+    league_tables = _build_league_tables(all_fixtures, include_live=False)
+    _attach_table_snapshots(all_fixtures, league_tables)
     value_bets_only = [f for f in all_fixtures if f.get("has_value_bet")]
     value_bets_only.sort(key=lambda x: -(x.get("prediction", {}).get("best_bet_roi") or 0))
     fixtures_by_league: Dict[str, List] = {c: [] for c in DASHBOARD_LEAGUE_ORDER}
@@ -470,6 +665,7 @@ def _finalize_fixture_bundle(all_fixtures: List[Dict[str, Any]]) -> Dict[str, An
         "fetch_days": _fetch_window_days(),
         "has_api_clients": ("api_sports" in aggregator.clients or "football_data_org" in aggregator.clients),
         "sidebar_upcoming": _sidebar_upcoming(all_fixtures),
+        "league_tables": league_tables,
     }
 
 
@@ -765,6 +961,26 @@ def insights_page():
         assistant_recommendations=assistant_bundle.get("recommendations"),
         display_tz_label=display_tz_label(),
     )
+
+
+@app.route("/tables")
+def tables_page():
+    """League tables from available standings feeds, with fixture-row fallback."""
+    data = fetch_all_fixtures()
+    tables = _build_league_tables(data["all"], include_live=True)
+    return render_template(
+        "tables.html",
+        tables=tables,
+        total=data["total"],
+        fetch_days=data.get("fetch_days", _fetch_window_days()),
+        display_tz_label=display_tz_label(),
+    )
+
+
+@app.route("/guide")
+def guide_page():
+    """Standalone betting guide so the nav has no dead Guide item."""
+    return render_template("guide.html")
 
 
 @app.route("/acca")

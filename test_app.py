@@ -119,6 +119,8 @@ def test_flask_routes():
             "/api/insights",
             "/acca",
             "/insights",
+            "/tables",
+            "/guide",
             "/status",
         }
         missing = sorted(required - routes)
@@ -130,6 +132,126 @@ def test_flask_routes():
         return True
     except Exception as e:
         print(f"  ✗ Flask test failed: {e}")
+        return False
+
+
+def _sample_table_fixture_bundle():
+    from hibs_predictor.display_tz import attach_kickoff_display
+    from hibs_predictor.web import _finalize_fixture_bundle
+
+    fixtures = [
+        attach_kickoff_display(
+            {
+                "id": 101,
+                "home": "Hibs",
+                "away": "Hearts",
+                "date": "2026-05-15T14:00:00+00:00",
+                "league": "SCOTLAND",
+                "league_name": "Scottish Premiership",
+                "league_flag": "",
+                "home_position": {
+                    "position": 4,
+                    "played": 30,
+                    "won": 14,
+                    "drawn": 8,
+                    "lost": 8,
+                    "goals_for": 44,
+                    "goals_against": 33,
+                    "goal_diff": 11,
+                    "points": 50,
+                },
+                "away_position": {
+                    "position": 6,
+                    "played": 30,
+                    "won": 12,
+                    "drawn": 8,
+                    "lost": 10,
+                    "goals_for": 40,
+                    "goals_against": 38,
+                    "goal_diff": 2,
+                    "points": 44,
+                },
+                "data_quality": {"score_pct": 90, "blocks": []},
+                "xg_source": "api_fixture_xg",
+                "has_value_bet": False,
+                "home_last10": [],
+                "away_last10": [],
+                "prediction": {
+                    "prediction_unavailable": True,
+                    "prediction_quality_hint": {"summary": "Prediction unavailable"},
+                    "bookmaker_odds": {"home": None, "draw": None, "away": None},
+                    "value_bets": {},
+                    "line_odds": {},
+                    "pick_menu": [],
+                },
+            }
+        ),
+        attach_kickoff_display(
+            {
+                "id": 102,
+                "home": "Aberdeen",
+                "away": "Dundee",
+                "date": "2026-05-15T15:00:00+00:00",
+                "league": "SCOTLAND",
+                "league_name": "Scottish Premiership",
+                "league_flag": "",
+                "home_position": {"position": 3, "played": 30, "won": 15, "drawn": 7, "lost": 8, "goals_for": 45, "goals_against": 31, "goal_diff": 14, "points": 52},
+                "away_position": {"position": 5, "played": 30, "won": 13, "drawn": 7, "lost": 10, "goals_for": 39, "goals_against": 34, "goal_diff": 5, "points": 46},
+                "data_quality": {"score_pct": 86, "blocks": []},
+                "xg_source": "api_fixture_xg",
+                "has_value_bet": False,
+                "home_last10": [],
+                "away_last10": [],
+                "prediction": {
+                    "prediction_unavailable": True,
+                    "prediction_quality_hint": {"summary": "Prediction unavailable"},
+                    "bookmaker_odds": {"home": None, "draw": None, "away": None},
+                    "value_bets": {},
+                    "line_odds": {},
+                    "pick_menu": [],
+                },
+            }
+        ),
+    ]
+    return _finalize_fixture_bundle(fixtures)
+
+
+def test_insights_tables_routes_and_snapshots():
+    """Insights, tables, and compact table snapshots render with fixture-row fallback."""
+    print("\nTesting insights/tables routes and table snapshots...")
+    try:
+        from unittest.mock import patch
+        from hibs_predictor.web import app
+
+        bundle = _sample_table_fixture_bundle()
+        full_rows = [
+            {"position": 3, "team": "Aberdeen", "played": 30, "won": 15, "drawn": 7, "lost": 8, "goals_for": 45, "goals_against": 31, "goal_diff": 14, "points": 52, "source": "test"},
+            {"position": 4, "team": "Hibs", "played": 30, "won": 14, "drawn": 8, "lost": 8, "goals_for": 44, "goals_against": 33, "goal_diff": 11, "points": 50, "source": "test"},
+            {"position": 5, "team": "Dundee", "played": 30, "won": 13, "drawn": 7, "lost": 10, "goals_for": 39, "goals_against": 34, "goal_diff": 5, "points": 46, "source": "test"},
+            {"position": 6, "team": "Hearts", "played": 30, "won": 12, "drawn": 8, "lost": 10, "goals_for": 40, "goals_against": 38, "goal_diff": 2, "points": 44, "source": "test"},
+        ]
+        with patch("hibs_predictor.web.fetch_all_fixtures", return_value=bundle), patch(
+            "hibs_predictor.web._fetch_full_table_rows", return_value=full_rows
+        ):
+            client = app.test_client()
+            insights = client.get("/insights")
+            tables = client.get("/tables")
+            guide = client.get("/guide")
+            dashboard = client.get("/")
+
+        assert insights.status_code == 200, insights.get_data(as_text=True)[:200]
+        assert tables.status_code == 200, tables.get_data(as_text=True)[:200]
+        assert guide.status_code == 200, guide.get_data(as_text=True)[:200]
+        assert b"League Tables" in tables.data
+        assert b"Betting Guide" in guide.data
+        assert dashboard.status_code == 200, dashboard.get_data(as_text=True)[:200]
+        body = dashboard.get_data(as_text=True)
+        assert "Aberdeen" in body and "Hibs" in body and "Dundee" in body
+        assert "Table N/A" not in body
+        print("  ✓ /insights, /tables, and one-above/one-below snapshots render")
+        return True
+    except Exception as e:
+        print(f"  ✗ Insights/tables route test failed: {e}")
         return False
 
 
@@ -806,7 +928,7 @@ def test_templates():
         from jinja2 import Environment, FileSystemLoader
         template_dir = os.path.join(os.path.dirname(__file__), 'templates')
         env = Environment(loader=FileSystemLoader(template_dir))
-        templates = ["base.html", "dashboard.html", "acca_builder.html", "api_status.html", "insights.html"]
+        templates = ["base.html", "dashboard.html", "acca_builder.html", "api_status.html", "insights.html", "tables.html", "guide.html"]
         for template in templates:
             env.get_template(template)
             print(f"  ✓ Template loaded: {template}")
@@ -829,6 +951,7 @@ def main():
         test_data_policy,
         test_main_cli_help,
         test_flask_routes,
+        test_insights_tables_routes_and_snapshots,
         test_api_health_prediction_quality,
         test_api_cache_clear,
         test_structured_insight,
