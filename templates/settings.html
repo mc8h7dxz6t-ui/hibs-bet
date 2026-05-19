@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}hibs-bet - Settings{% endblock %}
+{% block container_class %} dash-outer{% endblock %}
+{% block content %}
+<div class="settings-page">
+    <header class="site-top">
+        <div class="site-top-left">
+            <img src="{{ url_for('static', filename='badge_harp_shield.png') }}" alt="Hibernian FC" class="site-crest" width="38" height="38">
+            <span class="site-wordmark">hibs-bet</span>
+            <nav class="site-links" aria-label="Primary">
+                <a href="/" class="site-link">Dashboard</a>
+                <a href="/acca" class="site-link">Acca Builder</a>
+                <a href="/insights" class="site-link">Insights</a>
+                <a href="/tables" class="site-link">Tables</a>
+                <a href="/guide" class="site-link">Guide</a>
+                <a href="/status" class="site-link">API status</a>
+                <span class="site-link site-link-active">Settings</span>
+            </nav>
+        </div>
+        <div class="site-top-right">
+            <span class="pill-soft" data-hibs-settings-summary>Balanced profile</span>
+            <div class="odds-toggle" role="group" aria-label="Odds format">
+                <button type="button" class="ot ot-active" data-odds="dec" aria-pressed="true">Dec</button>
+                <button type="button" class="ot" data-odds="frac" aria-pressed="false">Frac</button>
+            </div>
+        </div>
+    </header>
+
+    <section class="settings-hero">
+        <h1 class="settings-title">Settings</h1>
+        <p class="settings-sub">Preferences are saved in this browser and applied when pages load. The bet-engine profile is a front-end viewing preference only; it labels your preferred style, but it does not change the server-side prediction model.</p>
+    </section>
+
+    <div class="settings-grid">
+        <section class="settings-card">
+            <h2>Betting View</h2>
+            <div class="setting-row">
+                <label for="setting-profile">Bet engine profile</label>
+                <select id="setting-profile" data-hibs-setting="profile">
+                    <option value="balanced">Balanced - probabilities and value together</option>
+                    <option value="conservative">Conservative - probability-first</option>
+                    <option value="value">Value-aware - edge-seeking</option>
+                </select>
+                <p>Changes labels and local UI defaults only. Server probabilities, rankings and model calculations are unchanged.</p>
+            </div>
+            <div class="setting-row">
+                <label>Odds format</label>
+                <div class="odds-toggle" role="group" aria-label="Odds format">
+                    <button type="button" class="ot ot-active" data-odds="dec" aria-pressed="true">Decimal</button>
+                    <button type="button" class="ot" data-odds="frac" aria-pressed="false">Fractional</button>
+                </div>
+                <p>Uses the same saved odds preference as the dashboard and insights pages.</p>
+            </div>
+        </section>
+
+        <section class="settings-card">
+            <h2>Display</h2>
+            <div class="setting-row">
+                <label for="setting-theme">Theme</label>
+                <select id="setting-theme" data-hibs-setting="theme">
+                    <option value="default">Hibs dark</option>
+                    <option value="pastel">Pastel glow</option>
+                    <option value="low-glow">Low glow</option>
+                </select>
+            </div>
+            <div class="setting-row">
+                <label for="setting-density">Display density</label>
+                <select id="setting-density" data-hibs-setting="density">
+                    <option value="comfortable">Comfortable</option>
+                    <option value="compact">Compact</option>
+                    <option value="spacious">Spacious</option>
+                </select>
+            </div>
+            <div class="setting-row">
+                <label for="setting-font">Text style</label>
+                <select id="setting-font" data-hibs-setting="font">
+                    <option value="standard">Inter</option>
+                    <option value="system">System font</option>
+                    <option value="large">Larger text</option>
+                </select>
+            </div>
+        </section>
+
+        <section class="settings-card">
+            <h2>Data Quality</h2>
+            <div class="setting-row">
+                <label class="setting-check">
+                    <input type="checkbox" data-hibs-setting-check="fullDataDefault">
+                    Start dashboard with Full data filter on
+                </label>
+                <p>Useful when you want the fixture list to start with higher-coverage matches only.</p>
+            </div>
+            <div class="setting-row">
+                <label for="setting-data-quality">Full data threshold</label>
+                <select id="setting-data-quality" data-hibs-setting="dataQualityMin">
+                    <option value="">App default ({{ data_quality_ui_min }}%)</option>
+                    <option value="70">70% - broader list</option>
+                    <option value="85">85% - standard</option>
+                    <option value="90">90% - stricter</option>
+                </select>
+                <p>This changes the local dashboard filter threshold. It does not alter collection, enrichment or predictions.</p>
+            </div>
+        </section>
+
+        <section class="settings-card">
+            <h2>Reset</h2>
+            <p class="settings-save-note">All settings are stored in localStorage on this device. They are safe front-end preferences and are not sent to the prediction engine.</p>
+            <div class="settings-actions">
+                <button type="button" class="status-btn" data-hibs-settings-reset>Reset preferences</button>
+                <a href="/" class="nav-btn" style="text-decoration:none;display:inline-flex;align-items:center;">Back to dashboard</a>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}

@@ -116,7 +116,7 @@ def _ui_data_quality_min_pct() -> int:
 
 
 def _all_fixtures_cache_key() -> str:
-    return f"all_fixtures_{_fetch_window_days()}d_v14"
+    return f"all_fixtures_{_fetch_window_days()}d_v16"
 
 
 def _cache_ttl_hours(default: float = 1.0) -> float:
@@ -273,13 +273,40 @@ def _normalize_fdo(match: Dict, league_code: str) -> Optional[Dict]:
     }
 
 
+def _normalize_fotmob(match: Dict, league_code: str) -> Optional[Dict]:
+    """Normalize a FotMob public daily-match row into the app fixture shape."""
+    if not match:
+        return None
+    home = match.get("home") or {}
+    away = match.get("away") or {}
+    home_name = home.get("name") if isinstance(home, dict) else None
+    away_name = away.get("name") if isinstance(away, dict) else None
+    date_s = match.get("utcTime") or match.get("time") or match.get("date")
+    mid = match.get("id") or match.get("matchId")
+    if not home_name or not away_name or not date_s:
+        return None
+    return {
+        "fixture": {"id": f"fotmob_{mid}" if mid else None, "date": date_s, "status": {"short": match.get("status", {}).get("short") if isinstance(match.get("status"), dict) else match.get("status")}},
+        "teams": {
+            "home": {"id": home.get("id", 0) if isinstance(home, dict) else 0, "name": home_name},
+            "away": {"id": away.get("id", 0) if isinstance(away, dict) else 0, "name": away_name},
+        },
+        "home": {"id": home.get("id", 0) if isinstance(home, dict) else 0, "name": home_name},
+        "away": {"id": away.get("id", 0) if isinstance(away, dict) else 0, "name": away_name},
+        "date": date_s,
+        "league": league_code,
+        "league_name": LEAGUES.get(league_code, {}).get("name", ""),
+        "source": "fotmob_public",
+    }
+
+
 def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     days = _fetch_window_days()
     cache = Cache()
     prefer_fdo = _env_truthy("HIBS_PREFER_FOOTBALL_DATA_FIXTURES")
     skip_as_fx = _env_truthy("HIBS_SKIP_API_SPORTS_FIXTURES")
     ttl = _cache_ttl_hours(1.0)
-    cache_key = f"fixtures_{days}d_{league_code}_v14_{int(prefer_fdo)}{int(skip_as_fx)}"
+    cache_key = f"fixtures_{days}d_{league_code}_v16_{int(prefer_fdo)}{int(skip_as_fx)}"
     cached = cache.get(cache_key, ttl_hours=ttl)
     if cached:
         return cached
@@ -367,6 +394,27 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
                 print(f"[Football-Data.org] {league_code} {comp} season={season}: {ex!r}")
                 continue
 
+    def try_fotmob() -> None:
+        if os.getenv("HIBS_ENABLE_FOTMOB_FIXTURES", "1").strip().lower() in ("0", "false", "no", "off"):
+            return
+        try:
+            from hibs_predictor.scrapers import fotmob_client
+
+            raw = fotmob_client.fixtures_for_league(league_code, now.date(), cutoff.date(), cache=cache)
+            for m in raw or []:
+                norm = _normalize_fotmob(m, league_code)
+                if not norm:
+                    continue
+                try:
+                    fd = datetime.fromisoformat(str(norm["date"]).replace("Z", "+00:00"))
+                    if now <= fd <= cutoff:
+                        norm["date"] = fd.isoformat()
+                        add(norm)
+                except Exception:
+                    continue
+        except Exception as ex:
+            print(f"[FotMob] {league_code}: {ex!r}")
+
     if prefer_fdo:
         try_football_data()
         if not fetched:
@@ -375,6 +423,8 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
         try_api_sports()
         if not fetched:
             try_football_data()
+    if not fetched:
+        try_fotmob()
 
     fixtures = []
     for fixture in fetched.values():
@@ -394,33 +444,71 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
             print(f"[Fixture last10] {league_code} {_fixture_key(fixture)}: {e!r}")
             home_last10, away_last10 = [], []
 
-        fixtures.append(
-            {
-                "id": fixture.get("fixture", {}).get("id"),
-                "home": fixture.get("home", {}).get("name", "?"),
-                "away": fixture.get("away", {}).get("name", "?"),
-                "home_id": home_id,
-                "away_id": away_id,
-                "date": fixture.get("date"),
-                "league": league_code,
-                "league_name": LEAGUES.get(league_code, {}).get("name", ""),
-                "league_flag": LEAGUES.get(league_code, {}).get("flag", ""),
-                "prediction": prediction,
-                "home_last10": home_last10,
-                "away_last10": away_last10,
-                "home_position": enriched.get("home_position", {}),
-                "away_position": enriched.get("away_position", {}),
-                "all_bookmaker_odds": enriched.get("all_bookmaker_odds", []),
-                "fixture_injuries": enriched.get("fixture_injuries", []),
-                "data_quality": enriched.get("data_quality", {}),
-                "xg_source": enriched.get("xg_source", "unknown"),
-                "has_value_bet": bool(prediction.get("has_any_value", prediction.get("value_bets"))),
-            }
-        )
+        row = {
+            "id": fixture.get("fixture", {}).get("id"),
+            "home": fixture.get("home", {}).get("name", "?"),
+            "away": fixture.get("away", {}).get("name", "?"),
+            "home_id": home_id,
+            "away_id": away_id,
+            "date": fixture.get("date"),
+            "league": league_code,
+            "league_name": LEAGUES.get(league_code, {}).get("name", ""),
+            "league_flag": LEAGUES.get(league_code, {}).get("flag", ""),
+            "prediction": prediction,
+            "home_last10": home_last10,
+            "away_last10": away_last10,
+            "home_position": enriched.get("home_position", {}),
+            "away_position": enriched.get("away_position", {}),
+            "home_stats": enriched.get("home_stats"),
+            "away_stats": enriched.get("away_stats"),
+            "all_bookmaker_odds": enriched.get("all_bookmaker_odds", []),
+            "fixture_injuries": enriched.get("fixture_injuries", []),
+            "market_odds": enriched.get("market_odds", {}),
+            "supplemental": enriched.get("supplemental", {}),
+            "xg_source": enriched.get("xg_source", "unknown"),
+            "has_value_bet": bool(prediction.get("has_any_value", prediction.get("value_bets"))),
+        }
+        row["data_quality"] = _data_quality_for_enriched(enriched, prediction)
+        fixtures.append(row)
 
     fixtures.sort(key=lambda x: x.get("date") or "")
     cache.set(cache_key, fixtures, ttl_hours=ttl)
     return fixtures
+
+
+def _data_quality_for_enriched(enriched: Dict[str, Any], prediction: Dict[str, Any]) -> Dict[str, Any]:
+    """Score coverage after prediction so line_odds and book prices count toward the bar."""
+    from hibs_predictor.data_quality import compute_fixture_data_quality
+
+    scoring = dict(enriched)
+    scoring["prediction"] = prediction
+    lo = prediction.get("line_odds") or {}
+    if lo:
+        scoring["line_odds"] = lo
+    bo = prediction.get("bookmaker_odds") or {}
+    if bo and not scoring.get("odds_available"):
+        try:
+            scoring["odds_available"] = all(float(bo.get(k) or 0) > 1.0 for k in ("home", "draw", "away"))
+        except (TypeError, ValueError):
+            pass
+        scoring.setdefault("odds_home", bo.get("home"))
+        scoring.setdefault("odds_draw", bo.get("draw"))
+        scoring.setdefault("odds_away", bo.get("away"))
+    return compute_fixture_data_quality(scoring)
+
+
+def _ensure_fixture_data_quality(all_fixtures: List[Dict[str, Any]]) -> None:
+    """Re-score slim cached rows so xG/form/line-odds fallbacks apply without full re-enrich."""
+    from hibs_predictor.data_quality import compute_fixture_data_quality_from_row
+
+    for f in all_fixtures:
+        try:
+            new_dq = compute_fixture_data_quality_from_row(f)
+            old_pct = float((f.get("data_quality") or {}).get("score_pct") or 0)
+            if float(new_dq.get("score_pct") or 0) >= old_pct:
+                f["data_quality"] = new_dq
+        except Exception as exc:
+            print(f"[Data quality] {f.get('home')} v {f.get('away')}: {exc!r}")
 
 
 def _ensure_fixture_pick_menus(all_fixtures: List[Dict[str, Any]]) -> None:
@@ -503,27 +591,61 @@ def _table_row_from_api_entry(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]
     )
 
 
-def _fetch_full_table_rows(league_code: str) -> List[Dict[str, Any]]:
+def _table_row_from_fdo_entry(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    team = ((entry.get("team") or {}).get("name")) or entry.get("team_name") or entry.get("team")
+    return _table_row_from_position(
+        str(team or ""),
+        {
+            "position": entry.get("position"),
+            "played": entry.get("playedGames"),
+            "won": entry.get("won"),
+            "drawn": entry.get("draw"),
+            "lost": entry.get("lost"),
+            "goals_for": entry.get("goalsFor"),
+            "goals_against": entry.get("goalsAgainst"),
+            "goal_diff": entry.get("goalDifference"),
+            "points": entry.get("points"),
+            "form": entry.get("form"),
+            "source": "football_data_org",
+        },
+    )
+
+
+def _season_status_for_rows(rows: List[Dict[str, Any]], season: int, primary_season: int) -> List[Dict[str, Any]]:
+    if season == primary_season:
+        return rows
+    out = []
+    for row in rows:
+        r = dict(row)
+        r.setdefault("season_status", "last_completed")
+        out.append(r)
+    return out
+
+
+def _fetch_full_table_rows(league_code: str, *, live_fetch: Optional[bool] = None) -> List[Dict[str, Any]]:
     """Best-effort full standings for the tables page; callers fall back to fixture rows.
 
-    By default this reads existing cache only so /tables stays responsive. Set
-    HIBS_TABLES_LIVE_FETCH=1 locally to force a fresh standings fetch.
+    Dashboard snapshots read existing cache only; /tables can live-fetch from
+    configured documented API clients and falls back to previous season rows
+    when the current/ended competition has no table in the active season id.
     """
     league = LEAGUES.get(league_code) or {}
     league_api_id = league.get("api_sports_id")
+    fdo_comp = league.get("football_data_org_id")
     now = datetime.now(timezone.utc)
-    live_fetch = _env_truthy("HIBS_TABLES_LIVE_FETCH")
+    primary_season = _api_football_season_year(now)
+    allow_live = _env_truthy("HIBS_TABLES_LIVE_FETCH") if live_fetch is None else (bool(live_fetch) or _env_truthy("HIBS_TABLES_LIVE_FETCH"))
     if league_api_id and "api_sports" in aggregator.clients and not _env_truthy("HIBS_SKIP_API_STANDINGS"):
-        for season in (_api_football_season_year(now), _api_football_season_year(now) - 1):
+        for season in (primary_season, primary_season - 1):
             try:
                 params = {"league": int(league_api_id), "season": int(season)}
                 groups_payload = aggregator.clients["api_sports"].cache.get(
-                    f"api_sports_standings_{str(params)}", ttl_hours=4
+                    f"api_sports_standings_{str(params)}", ttl_hours=24
                 )
                 if groups_payload:
                     response = groups_payload.get("response", []) if isinstance(groups_payload, dict) else []
                     groups = response[0].get("league", {}).get("standings", [[]]) if response else [[]]
-                elif live_fetch:
+                elif allow_live:
                     groups = aggregator.clients["api_sports"].fetch_standings(int(league_api_id), int(season))
                 else:
                     groups = []
@@ -535,16 +657,42 @@ def _fetch_full_table_rows(league_code: str) -> List[Dict[str, Any]]:
                     if row
                 ]
                 if rows:
-                    return rows
+                    return _season_status_for_rows(rows, season, primary_season)
             except Exception as exc:
                 print(f"[Tables api_sports] {league_code}: {exc!r}")
+                continue
+    if fdo_comp and "football_data_org" in aggregator.clients:
+        for season in (primary_season, primary_season - 1):
+            try:
+                params = {"season": int(season)}
+                payload = aggregator.clients["football_data_org"].cache.get(
+                    f"football_data_org_competitions/{fdo_comp}/standings_{str(params)}", ttl_hours=24
+                )
+                if isinstance(payload, dict):
+                    groups = payload.get("standings", []) or []
+                elif allow_live:
+                    groups = aggregator.clients["football_data_org"].fetch_standings(str(fdo_comp), int(season))
+                else:
+                    groups = []
+                rows = [
+                    row
+                    for group in (groups or [])
+                    if str(group.get("type") or "").upper() in ("TOTAL", "")
+                    for entry in (group.get("table") or [])
+                    for row in [_table_row_from_fdo_entry(entry)]
+                    if row
+                ]
+                if rows:
+                    return _season_status_for_rows(rows, season, primary_season)
+            except Exception as exc:
+                print(f"[Tables football_data] {league_code}: {exc!r}")
                 continue
     try:
         from hibs_predictor.scrapers import wikipedia_standings as wiki_standings
 
         sk = wiki_standings._season_wiki_title_part()
         cached = aggregator.cache.get(f"wiki_stand_{league_code}_{sk}", ttl_hours=12)
-        if cached is None and live_fetch:
+        if cached is None and allow_live:
             cached = aggregator._cached_wikipedia_league_table(league_code)
         rows = [
             _table_row_from_position(str(r.get("team") or ""), wiki_standings.row_to_position_shape(r), "wikipedia")
@@ -587,14 +735,17 @@ def _build_league_tables(fixtures: List[Dict[str, Any]], *, include_live: bool =
     fixture_rows = _fixture_position_rows(fixtures)
     league_codes = set(fixture_rows)
     league_codes.update(str(f.get("league") or "") for f in fixtures if f.get("league"))
+    if include_live:
+        league_codes.update(DASHBOARD_LEAGUE_ORDER)
     order_index = {c: i for i, c in enumerate(DASHBOARD_LEAGUE_ORDER)}
     tables: List[Dict[str, Any]] = []
     for league_code in sorted(league_codes, key=lambda c: (order_index.get(c, 999), c)):
         rows: List[Dict[str, Any]] = []
-        if include_live:
-            rows.extend(_fetch_full_table_rows(league_code))
+        full_rows = _fetch_full_table_rows(league_code, live_fetch=include_live)
+        rows.extend(full_rows)
         rows.extend(fixture_rows.get(league_code, []))
         rows = _dedupe_table_rows(rows)
+        used_last_completed = any(row.get("season_status") == "last_completed" for row in rows)
         tables.append(
             {
                 "code": league_code,
@@ -602,6 +753,12 @@ def _build_league_tables(fixtures: List[Dict[str, Any]], *, include_live: bool =
                 "rows": rows,
                 "source": rows[0].get("source") if rows else "",
                 "is_partial": len(rows) < 8,
+                "season_status": "last_completed" if used_last_completed else "current",
+                "status_note": (
+                    "Latest completed-season standings used because current fixtures/tables are thin."
+                    if used_last_completed
+                    else ""
+                ),
             }
         )
     return tables
@@ -636,6 +793,7 @@ def _finalize_fixture_bundle(all_fixtures: List[Dict[str, Any]]) -> Dict[str, An
     from hibs_predictor.display_tz import enrich_fixtures_kickoff
 
     all_fixtures = enrich_fixtures_kickoff(all_fixtures)
+    _ensure_fixture_data_quality(all_fixtures)
     _ensure_fixture_pick_menus(all_fixtures)
     all_fixtures.sort(key=lambda x: x.get("kickoff_sort") or x.get("date") or "")
     league_tables = _build_league_tables(all_fixtures, include_live=False)
@@ -654,6 +812,7 @@ def _finalize_fixture_bundle(all_fixtures: List[Dict[str, Any]]) -> Dict[str, An
         for region, codes in LEAGUE_REGIONS.items():
             if f.get("league") in codes:
                 by_region[region].append(f)
+    coverage_summary = _fixture_coverage_summary(fixtures_by_league, len(all_fixtures))
     return {
         "all": all_fixtures,
         "by_region": by_region,
@@ -666,6 +825,69 @@ def _finalize_fixture_bundle(all_fixtures: List[Dict[str, Any]]) -> Dict[str, An
         "has_api_clients": ("api_sports" in aggregator.clients or "football_data_org" in aggregator.clients),
         "sidebar_upcoming": _sidebar_upcoming(all_fixtures),
         "league_tables": league_tables,
+        "fixture_coverage": coverage_summary,
+    }
+
+
+def _fixture_coverage_summary(by_league: Dict[str, List], total: int) -> Dict[str, Any]:
+    """User-facing note explaining why filter chips only show leagues with returned fixtures."""
+    loaded: List[Dict[str, Any]] = []
+    empty: List[Dict[str, Any]] = []
+    for code in DASHBOARD_LEAGUE_ORDER:
+        if code not in LEAGUES:
+            continue
+        league = LEAGUES[code]
+        count = len(by_league.get(code) or [])
+        row = {
+            "code": code,
+            "name": league.get("name", code),
+            "count": count,
+            "api_sports_id": league.get("api_sports_id"),
+            "football_data_org_id": league.get("football_data_org_id"),
+        }
+        if count:
+            loaded.append(row)
+        else:
+            empty.append(row)
+    days = _fetch_window_days()
+    return {
+        "total_configured": len(loaded) + len(empty),
+        "loaded": loaded,
+        "empty": empty,
+        "loaded_count": len(loaded),
+        "empty_count": len(empty),
+        "empty_sample": empty[:8],
+        "window_days": days,
+        "summary": (
+            f"{len(loaded)} of {len(loaded) + len(empty)} configured leagues returned fixtures "
+            f"in the next {days} days."
+        ),
+        "reason": (
+            "Filter chips are built only from leagues with fixtures in the current window. "
+            "Empty leagues usually have no published matches in this date range, are outside the active season/cup window, "
+            "have completed their season, or depend on a provider/plan that did not return fixtures."
+        ),
+        "detail": (
+            "Football-Data.org and API-Football/API-Sports standings can still populate table snapshots and the Tables page "
+            "when upcoming fixtures are thin. Scrapers enrich fixtures after they exist, but they are not fixture calendars."
+        ),
+        "has_any_fixtures": total > 0,
+    }
+
+
+def _dashboard_info_box(fixture_coverage: Dict[str, Any], total: int) -> Dict[str, Any]:
+    """Small user-facing dashboard summary; feed/provider detail belongs on /status."""
+    loaded = fixture_coverage.get("loaded") or []
+    loaded_names = [str(row.get("name") or row.get("code")) for row in loaded if row]
+    return {
+        "loaded_count": len(loaded_names),
+        "loaded_names": loaded_names,
+        "loaded_names_text": ", ".join(loaded_names),
+        "total_fixtures": total,
+        "description": (
+            "hibs-bet turns upcoming fixtures into probability-led match reads: form, odds, table context, "
+            "data quality and value signals are combined to help compare bets and spot stronger angles."
+        ),
     }
 
 
@@ -812,6 +1034,7 @@ def index():
     data = fetch_all_fixtures()
     assistant_bundle = _assistant_bundle(data["all"])
     assistant_packets = assistant_bundle["packets"]
+    fixture_coverage = data.get("fixture_coverage", {})
     return render_template(
         "dashboard.html",
         all_fixtures=data["all"],
@@ -821,6 +1044,8 @@ def index():
         value_bets=data["value_bets"],
         total=data["total"],
         value_bet_count=data["value_bet_count"],
+        fixture_coverage=fixture_coverage,
+        dashboard_info=_dashboard_info_box(fixture_coverage, data["total"]),
         league_regions=LEAGUE_REGIONS,
         leagues_for_filter=_leagues_for_filter(data["by_league"]),
         min_league_chip_fixtures=_min_league_chip_fixtures(),
@@ -981,6 +1206,12 @@ def tables_page():
 def guide_page():
     """Standalone betting guide so the nav has no dead Guide item."""
     return render_template("guide.html")
+
+
+@app.route("/settings")
+def settings_page():
+    """Front-end preferences persisted in localStorage by the settings template."""
+    return render_template("settings.html", data_quality_ui_min=_ui_data_quality_min_pct())
 
 
 @app.route("/acca")

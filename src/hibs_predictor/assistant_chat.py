@@ -25,8 +25,8 @@ _HELP_LINES = [
     "• “mixed acca” or “multi market acca” (strongest leg per match, any market)",
     "• “bet builder for this game” for correlated same-game market ideas",
     "• “value bets” / “deep dive all fixtures”",
-    "• “stats for Hibs v Hearts” or “analyze Rangers” (pick a fixture in the dropdown to focus)",
-    "• “table”, “standings”, “why league position matters”, “xg and form” on the selected match",
+    "• “stats for Hibs v Hearts”, “analyze Rangers”, “why Arsenal value?”, “xG and form for Chelsea”",
+    "• “table”, “standings”, “why league position matters”, “team news”, “what is missing?”",
 ]
 
 
@@ -59,6 +59,24 @@ def _find_packets(packets: List[Dict[str, Any]], query: str, fixture_id: Optiona
     return [p for _, p in hits[:3]]
 
 
+def _is_ambiguous_match(matches: List[Dict[str, Any]], question: str) -> bool:
+    if len(matches) < 2:
+        return False
+    toks = set(_tokens(question))
+    # If the user named both teams, the top scorer is usually enough.
+    top_names = set(_tokens(f"{matches[0].get('home', '')} {matches[0].get('away', '')}"))
+    return len(toks & top_names) < 2
+
+
+def _clarification_lines(matches: List[Dict[str, Any]]) -> List[str]:
+    lines = ["I found more than one possible fixture. Which one do you mean?"]
+    for pkt in matches[:3]:
+        ko = f" · {_kickoff_display(pkt)}" if _kickoff_display(pkt) else ""
+        lines.append(f"• {_match_label(pkt)}{ko}")
+    lines.append("Reply with both teams, e.g. “deep dive Team A v Team B”.")
+    return lines
+
+
 def _ensure_recommendations(
     packets: List[Dict[str, Any]], recommendations: Optional[Dict[str, Any]]
 ) -> Dict[str, Any]:
@@ -80,6 +98,14 @@ def _stats_reply(pkt: Dict[str, Any]) -> Dict[str, Any]:
         f"Structured pick: **{si.get('pick', '—')}**"
         + (f" ({si.get('confidence_pct')}% conf.)" if si.get("confidence_pct") is not None else ""),
     ]
+    if pkt.get("trust_label"):
+        lines.append(f"Trust read: **{pkt.get('trust_label')}**")
+    weak = pkt.get("weak_fields") or []
+    if weak:
+        lines.append("Weakest inputs: " + ", ".join(str(x) for x in weak[:3]) + ".")
+    profile = pkt.get("league_model_profile") or {}
+    if profile.get("label"):
+        lines.append(f"League profile: {profile.get('label')} — {profile.get('description')}")
     if ps.get("home_win_pct") is not None:
         lines.append(
             f"1X2 model: H {ps.get('home_win_pct')}% · D {ps.get('draw_pct')}% · A {ps.get('away_win_pct')}%"
@@ -98,6 +124,13 @@ def _stats_reply(pkt: Dict[str, Any]) -> Dict[str, Any]:
         lines.append(f"Scoreline: {si['predicted_scoreline']}")
     if si.get("rationale"):
         lines.extend(si["rationale"][:3])
+    rejected = pkt.get("value_bets_rejected") or {}
+    if rejected:
+        lines.append(
+            "Value guardrails blocked: "
+            + ", ".join(f"{k} ({v})" for k, v in list(rejected.items())[:3])
+            + "."
+        )
     return {"lines": lines, "packet": pkt}
 
 
@@ -263,6 +296,9 @@ def handle_chat(
 
     if intent == "deep_dive":
         selected = _find_packets(packets, question, fixture_id)
+        if _is_ambiguous_match(selected, question):
+            out["blocks"] = [{"type": "text", "lines": _clarification_lines(selected)}]
+            return out
         if selected and not any(x in _norm(question) for x in ("all fixtures", "scan all", "full scan")):
             out["blocks"] = _selected_deep_dive_blocks(selected[0])
             return out
@@ -326,6 +362,9 @@ def handle_chat(
 
     if intent == "bet_builder":
         matches = _find_packets(packets, question, fixture_id)
+        if _is_ambiguous_match(matches, question):
+            out["blocks"] = [{"type": "text", "lines": _clarification_lines(matches)}]
+            return out
         builders = build_bet_builder_suggestions(
             packets if not matches else matches,
             fixture_id=matches[0].get("id") if matches else fixture_id,
@@ -357,6 +396,9 @@ def handle_chat(
         matches = _find_packets(packets, question, fixture_id)
         if not matches and fixture_id:
             matches = _find_packets(packets, "", fixture_id)
+        if _is_ambiguous_match(matches, question):
+            out["blocks"] = [{"type": "text", "lines": _clarification_lines(matches)}]
+            return out
         if not matches:
             if intent == "table":
                 out["blocks"] = [
@@ -364,7 +406,7 @@ def handle_chat(
                         "type": "text",
                         "lines": [
                             "Table context matters because league position, points gap and goal difference anchor baseline team strength before recent form and xG adjust the view.",
-                            "For a fixture-specific table read, select a match in the dropdown or ask “table for Team A v Team B”.",
+                            "For a fixture-specific table read, ask “table for Team A v Team B”.",
                             "When standings are missing, I will say so instead of pretending one-above/one-below context exists.",
                         ],
                     }
@@ -372,7 +414,7 @@ def handle_chat(
                 return out
             if intent == "general":
                 out["blocks"] = [
-                    {"type": "text", "lines": _HELP_LINES[:2] + ["Could not match a team or fixture — select one in the dropdown or name both sides."]}
+                    {"type": "text", "lines": _HELP_LINES[:2] + ["Could not match a team or fixture — name a team or both sides."]}
                 ]
             else:
                 out["blocks"] = [{"type": "text", "lines": ["No matching fixture — select one above or name both teams (e.g. Hibs v Hearts)."]}]

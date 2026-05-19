@@ -15,14 +15,14 @@
                 <a href="/status" class="site-link">API status</a>
                 <span class="site-link site-link-muted" title="Coming soon">Saved Accas</span>
                 <a href="/guide" class="site-link">Guide</a>
-                <span class="site-link site-link-muted" title="Coming soon">Settings</span>
+                <a href="/settings" class="site-link">Settings</a>
             </nav>
         </div>
         <div class="site-top-right">
-            <span class="pill-soft"><span class="dot dot-pulse" style="width:8px;height:8px;"></span> Balanced</span>
+            <span class="pill-soft"><span class="dot dot-pulse" style="width:8px;height:8px;"></span> <span data-hibs-setting-label="profile">Balanced</span></span>
             <div class="odds-toggle" role="group" aria-label="Odds format">
-                <button type="button" class="ot ot-active" data-odds="dec">Dec</button>
-                <button type="button" class="ot" data-odds="frac">Frac</button>
+                <button type="button" class="ot ot-active" data-odds="dec" aria-pressed="true">Dec</button>
+                <button type="button" class="ot" data-odds="frac" aria-pressed="false">Frac</button>
             </div>
             <button type="button" class="btn-betslip" data-betslip-open>Betslip</button>
             <button type="button" class="btn-refresh" id="btn-refresh">Refresh</button>
@@ -77,6 +77,28 @@
                 <h1 class="hero-title"><span class="hero-brand">hibs-bet</span> {{ fetch_days }}-Day Fixtures</h1>
                 <p class="hero-meta"><strong>{{ total }}</strong> fixtures <span class="live-pill"><span class="live-dot"></span> LIVE DATA</span> · times shown in <strong>{{ display_tz_label }}</strong></p>
                 <p class="hero-sub">Full fixture list by day and league — SPL first, then EPL, Scotland, England, Europe, internationals, UEFA. Tap any row for form, xG, markets and value picks.</p>
+                <section class="dash-info-box" aria-label="Dashboard overview">
+                    <p class="dash-info-title">What this page does</p>
+                    <p class="dash-info-main">{{ dashboard_info.description }}</p>
+                    <p class="dash-info-meta">
+                        <strong>{{ dashboard_info.loaded_count }}</strong> leagues loaded{% if dashboard_info.total_fixtures %} across <strong>{{ dashboard_info.total_fixtures }}</strong> fixtures{% endif %}.
+                        {% if dashboard_info.loaded_names %}
+                        Loaded leagues: {{ dashboard_info.loaded_names_text }}.
+                        {% else %}
+                        No leagues are loaded yet.
+                        {% endif %}
+                    </p>
+                </section>
+                {% if fixture_coverage %}
+                <div class="api-missing-banner" style="margin-top:10px;">
+                    <strong>{{ fixture_coverage.summary }}</strong>
+                    {{ fixture_coverage.reason }}
+                    <br><span style="color:var(--muted);">{{ fixture_coverage.detail }}</span>
+                    {% if fixture_coverage.empty_sample %}
+                    <br><span style="color:var(--muted);">No fixtures returned for: {{ fixture_coverage.empty_sample|map(attribute='name')|join(', ') }}{% if fixture_coverage.empty_count > fixture_coverage.empty_sample|length %}, +{{ fixture_coverage.empty_count - fixture_coverage.empty_sample|length }} more{% endif %}.</span>
+                    {% endif %}
+                </div>
+                {% endif %}
             </div>
 
             {% include '_betting_guide.html' %}
@@ -101,7 +123,7 @@
                     <div class="vsc-meta">{{ vf.home }} <span class="vsc-vs">v</span> {{ vf.away }}</div>
                     {% if top %}
                     <div class="vsc-pick">{{ top.market_label }}</div>
-                    <div class="vsc-odds">{{ "%.2f"|format(top.odds) }}</div>
+                    <div class="vsc-odds" data-odds-dec="{{ top.odds }}">{{ "%.2f"|format(top.odds) }}</div>
                     <div class="vsc-edge">+{{ "%.1f"|format(top.edge_pct) }}% edge</div>
                     {% else %}
                     <div class="vsc-pick">Value</div>
@@ -115,7 +137,7 @@
             <div id="dash-fixture-root" class="fixtures-full-list" data-dq-min="{{ data_quality_ui_min }}">
                 {% if total == 0 %}
                 <div class="empty-state"><div class="icon">📡</div>
-                    <p>No fixtures in the next {{ fetch_days }} days. Check API keys and <a href="/status">status</a>, then Refresh.</p>
+                    <p>No fixtures in the next {{ fetch_days }} days. Check API keys and <a href="/status">status</a>, then Refresh. Scrapers add stats to fixtures after a provider returns them; they do not create league calendars.</p>
                 </div>
                 {% else %}
                 {% for day in dashboard_days %}
@@ -153,12 +175,23 @@
     var searchQ = '';
     var fullDataOnly = false;
 
+    function currentSettings() {
+        return window.HibsSettings && typeof HibsSettings.get === 'function' ? HibsSettings.get() : {};
+    }
+
+    function currentDqMin() {
+        var root = document.getElementById('dash-fixture-root');
+        var fallback = root ? parseFloat(root.getAttribute('data-dq-min') || '85') : 85;
+        var s = currentSettings();
+        var fromSetting = s.dataQualityMin ? parseFloat(s.dataQualityMin) : fallback;
+        var n = isNaN(fromSetting) ? fallback : fromSetting;
+        return isNaN(n) ? 85 : n;
+    }
+
     function applyDashFilters() {
         var valCb = document.getElementById('flt-value');
         var valOnly = valCb ? valCb.checked : false;
-        var root = document.getElementById('dash-fixture-root');
-        var dqMin = root ? parseFloat(root.getAttribute('data-dq-min') || '85') : 85;
-        if (isNaN(dqMin)) dqMin = 85;
+        var dqMin = currentDqMin();
         document.querySelectorAll('#dash-fixture-root .fixture-card').forEach(function (card) {
             var lg = activeLeague;
             var okL = !lg || card.getAttribute('data-league') === lg;
@@ -250,22 +283,30 @@
     }
 
     function wireOddsToggle() {
-        var g = document.querySelector('.odds-toggle');
-        if (!g) return;
-        g.querySelectorAll('.ot').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                g.querySelectorAll('.ot').forEach(function (x) { x.classList.remove('ot-active'); });
-                btn.classList.add('ot-active');
-            });
-        });
+        if (window.HibsOdds && typeof HibsOdds.bindToggles === 'function') {
+            HibsOdds.bindToggles(document);
+        }
     }
 
     function wireVal() {
         var v = document.getElementById('flt-value');
         if (v) v.addEventListener('change', applyDashFilters);
         var fd = document.getElementById('flt-data-full');
+        var s = currentSettings();
+        if (fd && s.fullDataDefault) {
+            fd.checked = true;
+            fullDataOnly = true;
+        }
         if (fd) fd.addEventListener('change', function () {
             fullDataOnly = fd.checked;
+            applyDashFilters();
+        });
+        document.addEventListener('hibs-settings-change', function (evt) {
+            var next = evt.detail || {};
+            if (fd && typeof next.fullDataDefault === 'boolean') {
+                fd.checked = !!next.fullDataDefault;
+                fullDataOnly = fd.checked;
+            }
             applyDashFilters();
         });
     }

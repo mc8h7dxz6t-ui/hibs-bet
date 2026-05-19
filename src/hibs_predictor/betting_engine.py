@@ -8,6 +8,7 @@ from datetime import datetime
 import numpy as np
 
 from hibs_predictor.calibrated_lambdas import calibrated_match_lambdas
+from hibs_predictor.league_profiles import apply_league_probability_profile, value_margin_extra
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
 
@@ -859,6 +860,7 @@ class BettingEngine:
             total = sum(ensemble_probs.values())
             if total > 0:
                 ensemble_probs = {k: v / total for k, v in ensemble_probs.items()}
+        ensemble_probs, league_profile_debug = apply_league_probability_profile(ensemble_probs, league_code)
         matchup_context = self._matchup_context(fixture, metadata, xg_home, xg_away)
         ensemble_probs, mismatch_calibration = self._apply_mismatch_calibration(ensemble_probs, matchup_context)
         oh_raw, od_raw, oa_raw = fixture.get("odds_home"), fixture.get("odds_draw"), fixture.get("odds_away")
@@ -972,6 +974,7 @@ class BettingEngine:
         avg_n = (n_home + n_away) / 2.0
         conf_scale = min(1.0, max(0.4, avg_n / 8.0))
         margin = base_margin + (1.0 - conf_scale) * 0.02
+        margin += value_margin_extra(league_code, dq_pct)
         margin = max(0.03, min(0.09, margin))
         if dq_min_boost > 0 and dq_pct < dq_min_boost:
             margin *= 1.0 + min(0.35, (dq_min_boost - dq_pct) / 100.0)
@@ -1116,6 +1119,7 @@ class BettingEngine:
             "lambda_side_away": round(lam_a_side, 3),
             "lambda_calibration": cal_dbg,
             "matchup_calibration": mismatch_calibration,
+            "league_model_profile": league_profile_debug,
             "blend_weights_1x2": blend_w,
             "poisson_probs_calibrated_pct": (
                 {k: round(v * 100, 1) for k, v in poisson_probs_cal.items()} if poisson_probs_cal else None

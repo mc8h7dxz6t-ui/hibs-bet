@@ -12,10 +12,50 @@
 
         <div id="{{ tab_gid }}-ov" class="tab-panel active" data-group="{{ tab_gid }}">
         {% if si %}
-        <div class="insight-card" style="margin-bottom:14px;padding:14px 16px;border-radius:12px;border:1px solid rgba(0,255,136,0.25);background:rgba(0,40,28,0.35);">
-            <div class="section-title" style="margin-bottom:10px;">📋 Match analysis</div>
+        <div class="insight-card fixture-rationale-card">
+            <div class="section-title" style="margin-bottom:10px;">Match analysis</div>
             <p style="margin:0 0 6px;font-size:0.85em;color:var(--muted);"><strong style="color:var(--text);">Match:</strong> {{ si.match }}</p>
-            <p style="margin:0 0 8px;font-size:0.95em;"><strong style="color:var(--neon);">Pick:</strong> {{ si.pick }}</p>
+            <p style="margin:0 0 10px;font-size:0.95em;"><strong style="color:var(--green);">Probability-first pick:</strong> {{ si.pick }}</p>
+            <div class="rationale-grid">
+                <div class="rationale-tile">
+                    <span class="rt-label">1X2 Model</span>
+                    {% if show_pred and p.probabilities_pct is defined and p.probabilities_pct %}
+                    <strong>H {{ p.probabilities_pct.home }} · D {{ p.probabilities_pct.draw }} · A {{ p.probabilities_pct.away }}%</strong>
+                    {% else %}
+                    <strong>Not available</strong>
+                    {% endif %}
+                    <em>Primary signal before value or odds.</em>
+                </div>
+                <div class="rationale-tile">
+                    <span class="rt-label">xG / Source</span>
+                    {% if show_pred %}
+                    <strong>{{ p.expected_goals_home }}-{{ p.expected_goals_away }}</strong>
+                    {% else %}
+                    <strong>Not available</strong>
+                    {% endif %}
+                    <em>{{ fixture.xg_source or 'source unknown' }}</em>
+                </div>
+                <div class="rationale-tile">
+                    <span class="rt-label">Table Context</span>
+                    {% if hp and hp.position and ap and ap.position %}
+                    <strong>{{ fixture.home }} {{ hp.position }} · {{ fixture.away }} {{ ap.position }}</strong>
+                    <em>{% if hp.source or ap.source %}{{ hp.source or ap.source }} standings{% else %}standings loaded{% endif %}</em>
+                    {% else %}
+                    <strong>Not available</strong>
+                    <em>No table row loaded for one or both teams.</em>
+                    {% endif %}
+                </div>
+                <div class="rationale-tile">
+                    <span class="rt-label">Trust / Caveat</span>
+                    {% if fixture.data_quality is defined and fixture.data_quality %}
+                    <strong>{{ fixture.data_quality.score_pct }}% data</strong>
+                    <em>{% if fixture.data_quality.full_scope %}Strong enough for multi-market reads.{% elif fixture.data_quality.strong_scope %}Usable, with caveats.{% else %}Treat value edges cautiously.{% endif %}</em>
+                    {% else %}
+                    <strong>Data unknown</strong>
+                    <em>Coverage score not loaded.</em>
+                    {% endif %}
+                </div>
+            </div>
             {% if si.rationale %}
             <p style="margin:0 0 4px;font-size:0.78em;color:var(--muted);font-weight:600;">Rationale</p>
             <ul class="insight-rationale" style="margin:0 0 10px 18px;padding:0;font-size:0.8em;line-height:1.45;color:var(--text);">
@@ -278,14 +318,14 @@
         <div class="section-title" style="margin-top:4px;">📗 Book side markets</div>
         <div class="market-pills" style="margin-bottom:12px;">
             {% set lo2 = p.line_odds %}
-            {% if lo2.get('btts_yes') %}<span class="mpill">BTTS Y <strong>{{ "%.2f"|format(lo2.btts_yes) }}</strong></span>{% endif %}
-            {% if lo2.get('btts_no') %}<span class="mpill">BTTS N <strong>{{ "%.2f"|format(lo2.btts_no) }}</strong></span>{% endif %}
-            {% if lo2.get('over15') %}<span class="mpill">O1.5 <strong>{{ "%.2f"|format(lo2.over15) }}</strong></span>{% endif %}
-            {% if lo2.get('under15') %}<span class="mpill">U1.5 <strong>{{ "%.2f"|format(lo2.under15) }}</strong></span>{% endif %}
-            {% if lo2.get('over25') %}<span class="mpill">O2.5 <strong>{{ "%.2f"|format(lo2.over25) }}</strong></span>{% endif %}
-            {% if lo2.get('under25') %}<span class="mpill">U2.5 <strong>{{ "%.2f"|format(lo2.under25) }}</strong></span>{% endif %}
-            {% if lo2.get('over35') %}<span class="mpill">O3.5 <strong>{{ "%.2f"|format(lo2.over35) }}</strong></span>{% endif %}
-            {% if lo2.get('under35') %}<span class="mpill">U3.5 <strong>{{ "%.2f"|format(lo2.under35) }}</strong></span>{% endif %}
+            {% if lo2.get('btts_yes') %}<span class="mpill">BTTS Y <strong data-odds-dec="{{ lo2.btts_yes }}">{{ "%.2f"|format(lo2.btts_yes) }}</strong></span>{% endif %}
+            {% if lo2.get('btts_no') %}<span class="mpill">BTTS N <strong data-odds-dec="{{ lo2.btts_no }}">{{ "%.2f"|format(lo2.btts_no) }}</strong></span>{% endif %}
+            {% if lo2.get('over15') %}<span class="mpill">O1.5 <strong data-odds-dec="{{ lo2.over15 }}">{{ "%.2f"|format(lo2.over15) }}</strong></span>{% endif %}
+            {% if lo2.get('under15') %}<span class="mpill">U1.5 <strong data-odds-dec="{{ lo2.under15 }}">{{ "%.2f"|format(lo2.under15) }}</strong></span>{% endif %}
+            {% if lo2.get('over25') %}<span class="mpill">O2.5 <strong data-odds-dec="{{ lo2.over25 }}">{{ "%.2f"|format(lo2.over25) }}</strong></span>{% endif %}
+            {% if lo2.get('under25') %}<span class="mpill">U2.5 <strong data-odds-dec="{{ lo2.under25 }}">{{ "%.2f"|format(lo2.under25) }}</strong></span>{% endif %}
+            {% if lo2.get('over35') %}<span class="mpill">O3.5 <strong data-odds-dec="{{ lo2.over35 }}">{{ "%.2f"|format(lo2.over35) }}</strong></span>{% endif %}
+            {% if lo2.get('under35') %}<span class="mpill">U3.5 <strong data-odds-dec="{{ lo2.under35 }}">{{ "%.2f"|format(lo2.under35) }}</strong></span>{% endif %}
         </div>
         {% endif %}
 
@@ -295,7 +335,7 @@
         {% if best and vb[best] %}
         {% set bv = vb[best] %}{% set kelly = bv.kelly %}
         <div class="value-bet-panel" style="margin-bottom:14px;">
-            <div class="value-bet-title">⚡ TOP VALUE — {{ bv.market_label }} @ {{ "%.2f"|format(bv.odds) }}</div>
+            <div class="value-bet-title">⚡ TOP VALUE — {{ bv.market_label }} @ <span data-odds-dec="{{ bv.odds }}">{{ "%.2f"|format(bv.odds) }}</span></div>
             <div class="vb-row">
                 <span>Our prob: <strong class="green">{{ bv.model_probability_pct }}%</strong></span>
                 <span>Bookie: {{ bv.implied_probability_pct }}%</span>
@@ -332,9 +372,9 @@
             {% for bm in fixture.all_bookmaker_odds[:8] %}
             <tr>
                 <td style="color:var(--muted);">{{ bm.bookmaker }}</td>
-                <td class="home-row">{{ "%.2f"|format(bm.home) if bm.home else '—' }}</td>
-                <td>{{ "%.2f"|format(bm.draw) if bm.draw else '—' }}</td>
-                <td class="away-row">{{ "%.2f"|format(bm.away) if bm.away else '—' }}</td>
+                <td class="home-row">{% if bm.home %}<span data-odds-dec="{{ bm.home }}">{{ "%.2f"|format(bm.home) }}</span>{% else %}—{% endif %}</td>
+                <td>{% if bm.draw %}<span data-odds-dec="{{ bm.draw }}">{{ "%.2f"|format(bm.draw) }}</span>{% else %}—{% endif %}</td>
+                <td class="away-row">{% if bm.away %}<span data-odds-dec="{{ bm.away }}">{{ "%.2f"|format(bm.away) }}</span>{% else %}—{% endif %}</td>
             </tr>
             {% endfor %}
         </table>
@@ -355,7 +395,7 @@
         {% for bdata in p.value_bets_display %}
         <div style="background:rgba(255,215,0,0.04);border:1px solid rgba(255,215,0,0.14);border-radius:8px;padding:10px;margin-bottom:8px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                <strong style="color:var(--gold);font-size:0.8em;">{{ bdata.market_label }} @ {{ "%.2f"|format(bdata.odds) }}</strong>
+                <strong style="color:var(--gold);font-size:0.8em;">{{ bdata.market_label }} @ <span data-odds-dec="{{ bdata.odds }}">{{ "%.2f"|format(bdata.odds) }}</span></strong>
                 <span class="kelly-label kelly-{{ bdata.kelly.confidence_label|lower }}">{{ bdata.kelly.confidence_label }}</span>
             </div>
             <div class="market-pills" style="margin-bottom:5px;">
@@ -372,7 +412,7 @@
         {% for outcome, bdata in vb.items() %}
         <div style="background:rgba(255,215,0,0.04);border:1px solid rgba(255,215,0,0.14);border-radius:8px;padding:10px;margin-bottom:8px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                <strong style="color:var(--gold);font-size:0.8em;">{{ bdata.market_label }} @ {{ "%.2f"|format(bdata.odds) }}</strong>
+                <strong style="color:var(--gold);font-size:0.8em;">{{ bdata.market_label }} @ <span data-odds-dec="{{ bdata.odds }}">{{ "%.2f"|format(bdata.odds) }}</span></strong>
                 <span class="kelly-label kelly-{{ bdata.kelly.confidence_label|lower }}">{{ bdata.kelly.confidence_label }}</span>
             </div>
             <div class="market-pills" style="margin-bottom:5px;">

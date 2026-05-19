@@ -97,11 +97,16 @@
         </div>
     </div>
     <div class="header-right">
+        <div class="odds-toggle" role="group" aria-label="Odds format">
+            <button type="button" class="ot ot-active" data-odds="dec" aria-pressed="true">Dec</button>
+            <button type="button" class="ot" data-odds="frac" aria-pressed="false">Frac</button>
+        </div>
         <a href="/" class="nav-btn">← Dashboard</a>
         <a href="/insights" class="nav-btn">Insights</a>
         <a href="/tables" class="nav-btn">Tables</a>
         <a href="/guide" class="nav-btn">Guide</a>
         <a href="/status" class="nav-btn">API status</a>
+        <a href="/settings" class="nav-btn">Settings</a>
     </div>
 </header>
 
@@ -186,7 +191,7 @@
                         onclick="toggle('{{ fid }}','{{ fixture.home|e }}','{{ fixture.away|e }}','{{ fixture.league_name|e }}','home',{{ p.bookmaker_odds.home }})">
                     {% if vb and 'home' in vb %}<span class="vpip">⚡</span>{% endif %}
                     <div class="odd-lbl">1 Home</div>
-                    <div class="odd-price">{{ "%.2f"|format(p.bookmaker_odds.home) }}</div>
+                    <div class="odd-price" data-odds-dec="{{ p.bookmaker_odds.home }}">{{ "%.2f"|format(p.bookmaker_odds.home) }}</div>
                     <div class="odd-pct">{{ p.probabilities_pct.home }}%</div>
                 </button>
                 <button class="odd-btn {% if vb and 'draw' in vb %}vbet{% endif %}"
@@ -194,7 +199,7 @@
                         onclick="toggle('{{ fid }}','{{ fixture.home|e }}','{{ fixture.away|e }}','{{ fixture.league_name|e }}','draw',{{ p.bookmaker_odds.draw }})">
                     {% if vb and 'draw' in vb %}<span class="vpip">⚡</span>{% endif %}
                     <div class="odd-lbl">X Draw</div>
-                    <div class="odd-price">{{ "%.2f"|format(p.bookmaker_odds.draw) }}</div>
+                    <div class="odd-price" data-odds-dec="{{ p.bookmaker_odds.draw }}">{{ "%.2f"|format(p.bookmaker_odds.draw) }}</div>
                     <div class="odd-pct">{{ p.probabilities_pct.draw }}%</div>
                 </button>
                 <button class="odd-btn {% if vb and 'away' in vb %}vbet{% endif %}"
@@ -202,7 +207,7 @@
                         onclick="toggle('{{ fid }}','{{ fixture.home|e }}','{{ fixture.away|e }}','{{ fixture.league_name|e }}','away',{{ p.bookmaker_odds.away }})">
                     {% if vb and 'away' in vb %}<span class="vpip">⚡</span>{% endif %}
                     <div class="odd-lbl">2 Away</div>
-                    <div class="odd-price">{{ "%.2f"|format(p.bookmaker_odds.away) }}</div>
+                    <div class="odd-price" data-odds-dec="{{ p.bookmaker_odds.away }}">{{ "%.2f"|format(p.bookmaker_odds.away) }}</div>
                     <div class="odd-pct">{{ p.probabilities_pct.away }}%</div>
                 </button>
             </div>
@@ -237,6 +242,13 @@ function persistSlip() {
     if (window.HibsBetslip && typeof HibsBetslip.saveSlip === 'function') {
         HibsBetslip.saveSlip(slip);
     }
+}
+
+function fmtOdds(odds) {
+    if (window.HibsOdds && typeof HibsOdds.formatOdds === 'function') {
+        return HibsOdds.formatOdds(odds);
+    }
+    return Number(odds).toFixed(2);
 }
 
 function toggle(fid, home, away, league, outcome, odds) {
@@ -276,7 +288,7 @@ function renderSlip() {
             <div class="slip-sel-match">${s.home} vs ${s.away}</div>
             <div class="slip-sel-row">
                 <span class="outcome-pill ${oc}">${ol}</span>
-                <span class="slip-odds">${s.odds.toFixed(2)}</span>
+                <span class="slip-odds" data-odds-dec="${s.odds}">${fmtOdds(s.odds)}</span>
             </div>`;
         body.appendChild(d);
     });
@@ -317,7 +329,7 @@ function recalc() {
     const totalOdds = keys.reduce((a,k)=>a*slip[k].odds,1);
     const ret = stake*totalOdds;
     const profit = ret-stake;
-    document.getElementById('t-odds').textContent=totalOdds.toFixed(2);
+    document.getElementById('t-odds').textContent=fmtOdds(totalOdds);
     document.getElementById('t-return').textContent='£'+ret.toFixed(2);
     const pp = document.getElementById('t-profit');
     pp.textContent=(profit>=0?'+£':'-£')+Math.abs(profit).toFixed(2);
@@ -400,6 +412,7 @@ function doFilter(f, btn){
 }
 
 renderSlip();
+document.addEventListener('hibs-odds-format-change', renderSlip);
 // Default: show value bets
 doFilter('value', document.querySelector('.fbtn.fgold'));
 </script>

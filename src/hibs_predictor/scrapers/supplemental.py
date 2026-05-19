@@ -174,6 +174,17 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
             if ent and ent.get("id"):
                 ev = ss.team_last_xg_summary(int(ent["id"]))
                 out["sofascore_team_events"] = ev[:5]
+            if ss.sofascore_xg_enabled():
+                away_nm = (fixture.get("away", {}) or {}).get("name", "")
+                hp = ss.team_xg_profile_for_name(home)
+                ap = ss.team_xg_profile_for_name(away_nm) if away_nm else None
+                if hp and ap:
+                    out["sofascore_xg"] = {
+                        "home_avg_for": round(float(hp["avg_xg_for"]), 3),
+                        "away_avg_for": round(float(ap["avg_xg_for"]), 3),
+                        "home_n": int(hp.get("n") or 0),
+                        "away_n": int(ap.get("n") or 0),
+                    }
     except Exception as exc:
         out["sofascore_error"] = str(exc)
 

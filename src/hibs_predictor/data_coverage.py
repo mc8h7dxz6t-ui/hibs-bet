@@ -15,16 +15,16 @@ SEASON_COVERAGE: List[Dict[str, Any]] = [
     {
         "season": "2025/26",
         "status": "active",
-        "summary": "Primary coverage comes from API-Football plus Football-Data.org fixture fallbacks, with odds and side markets when bookmaker feeds expose them.",
+        "summary": "Primary coverage comes from API-Football plus Football-Data.org fixture and standings fallbacks; FotMob can fill selected empty fixture calendars experimentally, with odds and side markets when bookmaker feeds expose them.",
         "strengths": [
             "Fixtures, standings, team stats, recent form, injuries and 1X2 odds for API-supported leagues.",
-            "Understat, FBref, Wikipedia and recent-match xG paths fill gaps where the source supports the league.",
-            "Season candidates include the active domestic season and previous season fallback for awkward fixture windows.",
+            "Understat, FBref, Wikipedia, SofaScore, FotMob and recent-match xG paths fill gaps where the source supports the league.",
+            "Season candidates include the active domestic season and previous-season standings fallback for awkward or completed fixture windows.",
         ],
         "shortcomings": [
             "No player-prop feed is wired, so assistants and builders must not suggest player shots/cards/scorers.",
             "xG depth varies by league; lower divisions may fall back to goals proxy or recent-match estimates.",
-            "Cup, international and summer windows can have sparse standings or team-stat context.",
+            "Cup, international and summer windows can have sparse standings or team-stat context; unsupported or unstable public sites remain metadata-only.",
         ],
     },
     {

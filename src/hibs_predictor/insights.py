@@ -11,6 +11,7 @@ from hibs_predictor.assistant_recommendations import (
 )
 from hibs_predictor.data_coverage import data_coverage_status
 from hibs_predictor.match_insight import build_assistant_packet
+from hibs_predictor.prediction_log import report_summary_dict
 
 
 def _num(v: Any, default: float = 0.0) -> float:
@@ -134,6 +135,76 @@ def _form_xg_table_angles(packets: List[Dict[str, Any]], limit: int = 8) -> List
     return rows[:limit]
 
 
+def _trust_digest(packets: List[Dict[str, Any]]) -> Dict[str, Any]:
+    labels: Dict[str, int] = {}
+    weak_counts: Dict[str, int] = {}
+    for pkt in packets:
+        label = pkt.get("trust_label") or "Unknown"
+        labels[label] = labels.get(label, 0) + 1
+        for field in pkt.get("weak_fields") or []:
+            key = str(field)
+            weak_counts[key] = weak_counts.get(key, 0) + 1
+    weak_sorted = sorted(weak_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return {
+        "labels": labels,
+        "weak_fields": [{"label": k, "count": v} for k, v in weak_sorted[:8]],
+        "fixture_count": len(packets),
+    }
+
+
+def _avoid_watchlist(packets: List[Dict[str, Any]], limit: int = 8) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for pkt in packets:
+        si = pkt.get("structured_insight") or {}
+        rejected = pkt.get("value_bets_rejected") or {}
+        weak = pkt.get("weak_fields") or []
+        if si.get("pick_key") != "avoid" and not rejected and _num(pkt.get("data_quality_pct")) >= 70:
+            continue
+        reasons: List[str] = []
+        if si.get("pick_key") == "avoid":
+            reasons.append("model says avoid")
+        if rejected:
+            reasons.append("value guardrails blocked " + ", ".join(list(rejected.keys())[:3]))
+        if weak:
+            reasons.append("thin " + ", ".join(str(x) for x in weak[:2]))
+        rows.append(
+            {
+                "fixture_id": pkt.get("id"),
+                "match": _fmt_match(pkt),
+                "league": pkt.get("league_name") or pkt.get("league"),
+                "kickoff_time": pkt.get("kickoff_time"),
+                "data_quality_pct": pkt.get("data_quality_pct"),
+                "reasons": reasons[:3],
+            }
+        )
+    rows.sort(key=lambda r: (_num(r.get("data_quality_pct")), r.get("match") or ""))
+    return rows[:limit]
+
+
+def _audit_snapshot() -> Dict[str, Any]:
+    try:
+        report = report_summary_dict()
+    except Exception as exc:
+        return {"ok": False, "message": f"audit unavailable: {exc!r}"}
+    if not report.get("ok"):
+        return {"ok": False, "message": "Prediction audit not enabled yet."}
+    if not report.get("n_used_metrics"):
+        return {
+            "ok": True,
+            "message": report.get("message") or "No scored predictions yet; enable logging and sync results after matches finish.",
+            "n_used_metrics": 0,
+            "brier_by_data_quality_bucket": report.get("brier_by_data_quality_bucket") or [],
+        }
+    return {
+        "ok": True,
+        "n_used_metrics": report.get("n_used_metrics"),
+        "brier_score_1x2": report.get("brier_score_1x2"),
+        "log_loss_1x2": report.get("log_loss_1x2"),
+        "value_hit_rate": report.get("value_hit_rate"),
+        "brier_by_data_quality_bucket": report.get("brier_by_data_quality_bucket") or [],
+    }
+
+
 def build_insights(fixtures: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Build a compact handicapper-style insights payload for templates/API."""
     packets = [build_assistant_packet(f) for f in fixtures]
@@ -148,4 +219,7 @@ def build_insights(fixtures: List[Dict[str, Any]]) -> Dict[str, Any]:
         "angles": _form_xg_table_angles(packets),
         "bet_builders": build_bet_builder_suggestions(packets, limit=8),
         "coverage": data_coverage_status(),
+        "trust_digest": _trust_digest(packets),
+        "avoid_watchlist": _avoid_watchlist(packets),
+        "audit": _audit_snapshot(),
     }

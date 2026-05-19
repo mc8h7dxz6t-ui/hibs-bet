@@ -106,6 +106,54 @@ class FootballDataOrgClient(BaseApiClient):
         data = self._get_json(endpoint, params=params)
         return data.get("matches", [])
 
+    def fetch_standings(self, competition_code: str, season: int) -> List[Dict[str, Any]]:
+        """Documented Football-Data.org standings endpoint for current/historical tables."""
+        endpoint = f"competitions/{competition_code}/standings"
+        params = {"season": season}
+        data = self._get_json(endpoint, params=params)
+        if not isinstance(data, dict):
+            return []
+        if data.get("errorCode") or data.get("message"):
+            print(f"[Football-Data.org standings] {competition_code}: {data.get('message', data)}")
+            return []
+        return data.get("standings", []) or []
+
+    def fetch_team_position(self, team_id: int, competition_code: str, season: int) -> Dict[str, Any]:
+        """Get a team's league-table row from Football-Data.org standings."""
+        if not team_id or not competition_code:
+            return {}
+        cache_key = f"football_data_team_position_{team_id}_{competition_code}_{season}"
+        cached = self.cache.get(cache_key, ttl_hours=12)
+        if cached:
+            return cached
+        try:
+            groups = self.fetch_standings(competition_code, season)
+            for group in groups or []:
+                if str(group.get("type") or "").upper() not in ("TOTAL", ""):
+                    continue
+                for entry in group.get("table") or []:
+                    team = entry.get("team") or {}
+                    if team.get("id") != team_id:
+                        continue
+                    result = {
+                        "position": entry.get("position"),
+                        "played": entry.get("playedGames", 0),
+                        "won": entry.get("won", 0),
+                        "drawn": entry.get("draw", 0),
+                        "lost": entry.get("lost", 0),
+                        "goals_for": entry.get("goalsFor", 0),
+                        "goals_against": entry.get("goalsAgainst", 0),
+                        "goal_diff": entry.get("goalDifference", 0),
+                        "points": entry.get("points", 0),
+                        "form": entry.get("form", ""),
+                        "source": "football_data_org",
+                    }
+                    self.cache.set(cache_key, result, ttl_hours=12)
+                    return result
+        except Exception:
+            pass
+        return {}
+
     def parse_form_from_matches(self, matches: List[Dict[str, Any]]) -> Dict[str, Any]:
         form = []
         wins = 0
@@ -314,6 +362,7 @@ class ApiSportsFootballClient(BaseApiClient):
                             "goal_diff": entry.get("goalsDiff", 0),
                             "points": entry.get("points", 0),
                             "form": entry.get("form", ""),
+                            "source": "api_sports",
                         }
                         self.cache.set(cache_key, result, ttl_hours=6)
                         return result

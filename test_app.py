@@ -122,6 +122,7 @@ def test_flask_routes():
             "/tables",
             "/guide",
             "/status",
+            "/settings",
         }
         missing = sorted(required - routes)
         if missing:
@@ -237,18 +238,24 @@ def test_insights_tables_routes_and_snapshots():
             insights = client.get("/insights")
             tables = client.get("/tables")
             guide = client.get("/guide")
+            settings = client.get("/settings")
             dashboard = client.get("/")
 
         assert insights.status_code == 200, insights.get_data(as_text=True)[:200]
         assert tables.status_code == 200, tables.get_data(as_text=True)[:200]
         assert guide.status_code == 200, guide.get_data(as_text=True)[:200]
+        assert settings.status_code == 200, settings.get_data(as_text=True)[:200]
         assert b"League Tables" in tables.data
         assert b"Betting Guide" in guide.data
+        assert b"Bet engine profile" in settings.data
         assert dashboard.status_code == 200, dashboard.get_data(as_text=True)[:200]
         body = dashboard.get_data(as_text=True)
         assert "Aberdeen" in body and "Hibs" in body and "Dundee" in body
+        assert "What this page does" in body
+        assert "1 leagues loaded" in body
+        assert "Scottish Premiership" in body
         assert "Table N/A" not in body
-        print("  ✓ /insights, /tables, and one-above/one-below snapshots render")
+        print("  ✓ /insights, /tables, /settings, and dashboard context render")
         return True
     except Exception as e:
         print(f"  ✗ Insights/tables route test failed: {e}")
@@ -895,6 +902,57 @@ def test_scraped_xg_resolution():
         assert out["xg_source"] == "scraped_recent_xg", out.get("xg_source")
         assert out["xg_home"] > 1.4
         assert out["xg_away"] > 1.3
+
+        enriched_form = {
+            "xg_home": 1.35,
+            "xg_away": 1.05,
+            "xg_source": "goals_proxy",
+            "home_recent_n": 8,
+            "away_recent_n": 7,
+            "home_recent": [],
+            "away_recent": [],
+            "supplemental": {},
+        }
+        out_form = apply_scraped_xg_to_enriched(fixture, "EPL", enriched_form)
+        assert out_form["xg_source"] == "form_derived_xg", out_form.get("xg_source")
+        enriched_ss = {
+            "xg_home": 1.0,
+            "xg_away": 1.0,
+            "xg_source": "goals_proxy",
+            "supplemental": {
+                "sofascore_xg": {
+                    "home_avg_for": 1.62,
+                    "away_avg_for": 1.41,
+                    "home_n": 5,
+                    "away_n": 4,
+                }
+            },
+        }
+        out_ss = apply_scraped_xg_to_enriched(fixture, "BELGIUM_FIRST", enriched_ss)
+        assert out_ss["xg_source"] == "sofascore_xg", out_ss.get("xg_source")
+        assert out_ss["xg_home"] == 1.62
+        assert out_ss["xg_away"] == 1.41
+
+        from hibs_predictor.scrapers.sofascore_client import parse_xg_from_statistics_payload
+
+        stats = {
+            "statistics": [
+                {
+                    "period": "ALL",
+                    "groups": [
+                        {
+                            "groupName": "Football",
+                            "statisticsItems": [
+                                {"name": "Expected goals", "home": "1.84", "away": "0.53"},
+                            ],
+                        }
+                    ],
+                }
+            ]
+        }
+        pair = parse_xg_from_statistics_payload(stats)
+        assert pair == (1.84, 0.53), pair
+
         print("  ✓ Scraped recent-match xG applied")
         return True
     except Exception as e:
@@ -921,6 +979,285 @@ def test_kickoff_display_tz():
         return False
 
 
+def test_fotmob_adapter_mocked():
+    """FotMob fixture fallback parses mocked public daily payload without network."""
+    print("\nTesting FotMob adapter...")
+    try:
+        from datetime import date
+        from unittest.mock import patch
+        from hibs_predictor.cache import Cache
+        from hibs_predictor.scrapers import fotmob_client
+        import tempfile
+
+        payload = {
+            "leagues": [
+                {
+                    "id": 47,
+                    "name": "Premier League",
+                    "matches": [
+                        {
+                            "id": 123,
+                            "utcTime": "2026-05-18T19:00:00Z",
+                            "home": {"id": 1, "name": "Arsenal"},
+                            "away": {"id": 2, "name": "Burnley"},
+                            "status": {"short": "NS"},
+                        }
+                    ],
+                }
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Cache(cache_dir=tmp)
+            with patch("hibs_predictor.scrapers.fotmob_client.fetch_matches_for_date", return_value=payload):
+                rows = fotmob_client.fixtures_for_league("EPL", date(2026, 5, 18), date(2026, 5, 18), cache=cache)
+        assert len(rows) == 1
+        assert rows[0]["home"]["name"] == "Arsenal"
+        print("  ✓ FotMob adapter parses mocked fixtures")
+        return True
+    except Exception as e:
+        print(f"  ✗ FotMob adapter test failed: {e}")
+        return False
+
+
+def test_football_data_standings_mocked():
+    """Football-Data.org standings parser resolves a team row without network."""
+    print("\nTesting Football-Data standings...")
+    try:
+        from unittest.mock import patch
+        from hibs_predictor.api_clients import FootballDataOrgClient
+
+        payload = {
+            "standings": [
+                {
+                    "type": "TOTAL",
+                    "table": [
+                        {
+                            "position": 1,
+                            "team": {"id": 57, "name": "Arsenal FC"},
+                            "playedGames": 38,
+                            "won": 26,
+                            "draw": 8,
+                            "lost": 4,
+                            "goalsFor": 84,
+                            "goalsAgainst": 31,
+                            "goalDifference": 53,
+                            "points": 86,
+                            "form": "WWDWW",
+                        }
+                    ],
+                }
+            ]
+        }
+        client = FootballDataOrgClient("test-key")
+        with patch.object(client, "_get_json", return_value=payload):
+            row = client.fetch_team_position(57, "PL", 2025)
+        assert row["position"] == 1
+        assert row["source"] == "football_data_org"
+        assert row["played"] == 38
+        print("  ✓ Football-Data standings parser OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Football-Data standings test failed: {e}")
+        return False
+
+
+def test_table_rows_use_previous_season_standings():
+    """Tables fall back to cached last-completed standings when current season is empty."""
+    print("\nTesting previous-season table fallback...")
+    try:
+        import tempfile
+        from unittest.mock import patch
+        from hibs_predictor.cache import Cache
+        from hibs_predictor import web
+
+        class FakeFootballData:
+            def __init__(self, cache):
+                self.cache = cache
+
+            def fetch_standings(self, competition_code, season):
+                if season == 2025:
+                    return []
+                return [
+                    {
+                        "type": "TOTAL",
+                        "table": [
+                            {
+                                "position": 2,
+                                "team": {"id": 57, "name": "Arsenal FC"},
+                                "playedGames": 38,
+                                "won": 24,
+                                "draw": 9,
+                                "lost": 5,
+                                "goalsFor": 80,
+                                "goalsAgainst": 34,
+                                "goalDifference": 46,
+                                "points": 81,
+                            }
+                        ],
+                    }
+                ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_client = FakeFootballData(Cache(cache_dir=tmp))
+            with patch.dict(web.aggregator.clients, {"football_data_org": fake_client}, clear=True), patch(
+                "hibs_predictor.web.datetime"
+            ) as fake_dt:
+                from datetime import datetime as real_datetime, timezone
+
+                fake_dt.now.return_value = real_datetime(2026, 5, 18, tzinfo=timezone.utc)
+                fake_dt.fromisoformat.side_effect = real_datetime.fromisoformat
+                rows = web._fetch_full_table_rows("EPL", live_fetch=True)
+        assert rows and rows[0]["team"] == "Arsenal FC"
+        assert rows[0]["season_status"] == "last_completed"
+        table = web._build_league_tables([], include_live=False)
+        assert isinstance(table, list)
+        print("  ✓ Previous-season standings fallback OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Previous-season standings fallback failed: {e}")
+        return False
+
+
+def test_assistant_freeform_clarifies_ambiguity():
+    """Assistant is free-form and asks for clarification when a team query matches multiple fixtures."""
+    print("\nTesting free-form assistant clarification...")
+    try:
+        from hibs_predictor.assistant_chat import handle_chat
+
+        packets = [
+            {"id": 1, "home": "Arsenal", "away": "Burnley", "league": "EPL", "structured_insight": {}, "data_quality_pct": 80},
+            {"id": 2, "home": "Chelsea", "away": "Arsenal", "league": "EPL", "structured_insight": {}, "data_quality_pct": 80},
+        ]
+        res = handle_chat("analyze Arsenal", packets, recommendations={"disclaimer": ""})
+        text = " ".join(" ".join(b.get("lines", [])) for b in res.get("blocks", []))
+        assert "more than one" in text.lower()
+        assert "Arsenal v Burnley" in text or "Chelsea v Arsenal" in text
+        print("  ✓ Assistant asks concise clarification")
+        return True
+    except Exception as e:
+        print(f"  ✗ Assistant clarification test failed: {e}")
+        return False
+
+
+def test_field_quality_and_league_profile():
+    """Field-level trust buckets and league profile calibration are exposed."""
+    print("\nTesting field quality and league profile calibration...")
+    try:
+        from hibs_predictor.data_quality import compute_fixture_data_quality
+        from hibs_predictor.league_profiles import apply_league_probability_profile, value_margin_extra
+
+        dq = compute_fixture_data_quality(
+            {
+                "fixture": {"id": 99},
+                "teams": {"home": {"id": 1}, "away": {"id": 2}},
+                "home_recent_n": 8,
+                "away_recent_n": 2,
+                "home_stats": {"played": 20, "goals_for": 35, "goals_against": 20},
+                "away_stats": {},
+                "home_position": {"position": 2},
+                "away_position": {},
+                "xg_source": "goals_proxy",
+                "odds_home": 1.8,
+                "odds_draw": 3.6,
+                "odds_away": 4.5,
+                "market_odds": {},
+                "supplemental": {},
+                "fixture_injuries": [],
+            }
+        )
+        assert "field_scores" in dq
+        assert dq["field_scores"]["standings"]["status"] in ("thin", "usable", "missing")
+        assert dq["weak_fields"]
+
+        dq_form = compute_fixture_data_quality(
+            {
+                "fixture": {"id": 100},
+                "teams": {"home": {"id": 1}, "away": {"id": 2}},
+                "home_recent_n": 10,
+                "away_recent_n": 10,
+                "home_stats": {"played": 20, "goals_for": 35, "goals_against": 20},
+                "away_stats": {"played": 20, "goals_for": 30, "goals_against": 25},
+                "home_position": {"position": 2},
+                "away_position": {"position": 5},
+                "xg_source": "form_derived_xg",
+                "odds_available": True,
+                "odds_home": 1.8,
+                "odds_draw": 3.6,
+                "odds_away": 4.5,
+                "line_odds": {"btts_yes": 1.7, "over25": 1.9},
+                "market_odds": {},
+                "supplemental": {"wikipedia_league_supported": True},
+                "fixture_injuries": [],
+            }
+        )
+        assert dq_form["score_pct"] >= 90.0
+        xg_block = next(b for b in dq_form["blocks"] if b["key"] == "xg")
+        assert xg_block["earned"] >= 14.0
+
+        adjusted, debug = apply_league_probability_profile({"home": 0.62, "draw": 0.18, "away": 0.20}, "LEAGUE_TWO")
+        assert round(sum(adjusted.values()), 5) == 1.0
+        assert debug["label"] == "English lower-league profile"
+        assert value_margin_extra("LEAGUE_TWO", 65) > value_margin_extra("EPL", 90)
+        print("  ✓ Field quality and league profiles exposed")
+        return True
+    except Exception as e:
+        print(f"  ✗ Field quality / league profile test failed: {e}")
+        return False
+
+
+def test_insights_trust_digest_and_audit():
+    """Insights include trust digest, avoid list and audit placeholder."""
+    print("\nTesting insights trust digest...")
+    try:
+        from hibs_predictor.insights import build_insights
+
+        fixtures = [
+            {
+                "id": 300,
+                "home": "Top FC",
+                "away": "Thin Data FC",
+                "date": "2026-05-18T15:00:00+00:00",
+                "league": "EPL",
+                "league_name": "Premier League",
+                "home_last10": [],
+                "away_last10": [],
+                "home_position": {"position": 1},
+                "away_position": {"position": 18},
+                "fixture_injuries": [],
+                "xg_source": "goals_proxy",
+                "has_value_bet": False,
+                "data_quality": {
+                    "score_pct": 58,
+                    "trust_label": "Thin data",
+                    "weak_fields": ["Expected goals", "Team news / context"],
+                    "field_scores": {},
+                    "blocks": [],
+                },
+                "prediction": {
+                    "prediction_unavailable": False,
+                    "structured_insight": {"pick_key": "avoid", "pick": "AVOID", "rationale": []},
+                    "pick_menu": [],
+                    "probability_scores": {"home_win_pct": 55, "draw_pct": 25, "away_win_pct": 20},
+                    "value_bets_display": [],
+                    "value_bets_rejected": {"away": "low_probability_longshot"},
+                    "bookmaker_odds": {"home": 1.6, "draw": 4.0, "away": 6.0},
+                    "line_odds": {},
+                },
+            }
+        ]
+        insights = build_insights(fixtures)
+        assert insights["trust_digest"]["labels"]["Thin data"] == 1
+        assert insights["trust_digest"]["weak_fields"][0]["label"] == "Expected goals"
+        assert insights["avoid_watchlist"]
+        assert "audit" in insights
+        print("  ✓ Insights trust digest built")
+        return True
+    except Exception as e:
+        print(f"  ✗ Insights trust digest test failed: {e}")
+        return False
+
+
 def test_templates():
     """Test template loading."""
     print("\nTesting templates...")
@@ -928,7 +1265,7 @@ def test_templates():
         from jinja2 import Environment, FileSystemLoader
         template_dir = os.path.join(os.path.dirname(__file__), 'templates')
         env = Environment(loader=FileSystemLoader(template_dir))
-        templates = ["base.html", "dashboard.html", "acca_builder.html", "api_status.html", "insights.html", "tables.html", "guide.html"]
+        templates = ["base.html", "dashboard.html", "acca_builder.html", "api_status.html", "insights.html", "tables.html", "guide.html", "settings.html"]
         for template in templates:
             env.get_template(template)
             print(f"  ✓ Template loaded: {template}")
@@ -960,11 +1297,17 @@ def main():
         test_pick_menu,
         test_dashboard_days_grouping,
         test_kickoff_display_tz,
+        test_fotmob_adapter_mocked,
+        test_football_data_standings_mocked,
+        test_table_rows_use_previous_season_standings,
         test_scottish_fbref_xg,
         test_scraped_xg_resolution,
         test_assistant_recommendations,
         test_insights_and_bet_builders,
         test_assistant_chat,
+        test_assistant_freeform_clarifies_ambiguity,
+        test_field_quality_and_league_profile,
+        test_insights_trust_digest_and_audit,
         test_templates,
     ]
     

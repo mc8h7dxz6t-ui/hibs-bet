@@ -3,7 +3,7 @@
 
     var packets = [];
     var recommendations = null;
-    var panel, body, fab, closeBtn, fixtureSel, form, inputEl, sendBtn;
+    var panel, body, fab, closeBtn, fixtureContext, form, inputEl, sendBtn;
     var busy = false;
 
     function init() {
@@ -12,13 +12,12 @@
         body = document.getElementById('hibs-assistant-body');
         fab = document.getElementById('hibs-assistant-fab');
         closeBtn = document.getElementById('hibs-assistant-close');
-        fixtureSel = document.getElementById('hibs-assistant-fixture');
+        fixtureContext = document.getElementById('hibs-assistant-fixture');
         form = document.getElementById('hibs-assistant-form');
         inputEl = document.getElementById('hibs-assistant-input');
         sendBtn = document.getElementById('hibs-assistant-send');
         if (!panel || !body || !fab) return;
 
-        populateFixtureSelect();
         fab.addEventListener('click', togglePanel);
         if (closeBtn) closeBtn.addEventListener('click', function () { panel.classList.remove('open'); });
         if (form) {
@@ -39,20 +38,6 @@
         }
     }
 
-    function populateFixtureSelect() {
-        if (!fixtureSel) return;
-        while (fixtureSel.options.length > 1) fixtureSel.remove(1);
-        packets.forEach(function (p) {
-            var opt = document.createElement('option');
-            opt.value = String(p.id != null ? p.id : (p.home + '|' + p.away));
-            var ko = p.kickoff_time || '';
-            if (!ko && p.date && p.date.indexOf('T') !== -1) ko = p.date.slice(11, 16);
-            if (ko) ko = ko + ' ';
-            opt.textContent = ko + (p.home || '') + ' v ' + (p.away || '');
-            fixtureSel.appendChild(opt);
-        });
-    }
-
     function togglePanel() {
         panel.classList.toggle('open');
         if (panel.classList.contains('open') && body && !body.childElementCount) {
@@ -61,7 +46,7 @@
     }
 
     function welcomeHtml() {
-        return '<div class="hibs-assistant-card"><p class="ac-line">Ask anything about fixtures, stats, value, or accas. I only use matches with <strong>strong data coverage</strong>.</p><p class="ac-line" style="font-size:0.88em;color:var(--muted);">Try: <em>best bets</em>, <em>mixed acca</em>, <em>BTTS acca</em>, <em>stats for Hibs v Hearts</em>, <em>deep dive all</em>.</p></div>';
+        return '<div class="hibs-assistant-card"><p class="ac-line">Ask any football or betting question in plain English. I infer the fixture, team, market, or topic from your message and only use available model data.</p><p class="ac-line" style="font-size:0.88em;color:var(--muted);">Try: <em>Hibs deep dive</em>, <em>best bets</em>, <em>mixed acca</em>, <em>BTTS acca</em>, <em>explain Arsenal xG</em>, <em>value bets</em>.</p></div>';
     }
 
     function setBusy(on) {
@@ -77,7 +62,7 @@
         inputEl.value = '';
         appendUser(q);
         setBusy(true);
-        var fid = fixtureSel && fixtureSel.value ? fixtureSel.value : null;
+        var fid = fixtureContext && fixtureContext.value ? fixtureContext.value : null;
         fetch('/api/assistant/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -192,12 +177,21 @@
         return s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     }
 
+    function oddsHtml(odds) {
+        var dec = parseFloat(odds);
+        if (!isFinite(dec)) return esc(odds);
+        var txt = window.HibsOdds && typeof HibsOdds.formatOdds === 'function'
+            ? HibsOdds.formatOdds(dec)
+            : dec.toFixed(2);
+        return '<span data-odds-dec="' + dec + '">' + txt + '</span>';
+    }
+
     function singleCardHtml(leg) {
         var h = '<div class="hibs-assistant-card">';
         h += '<p class="ac-line"><strong>' + esc(leg.match || (leg.home + ' v ' + leg.away)) + '</strong>';
         if (leg.kickoff_time) h += ' · ' + esc(leg.kickoff_time);
         h += '</p><p class="ac-line"><strong>Pick:</strong> <span style="color:var(--neon)">' + esc(leg.market_label) + '</span>';
-        if (leg.odds) h += ' @ ' + leg.odds;
+        if (leg.odds) h += ' @ ' + oddsHtml(leg.odds);
         if (leg.model_pct != null) h += ' · model ' + leg.model_pct + '%';
         h += '</p>';
         if (leg.is_value && leg.edge_pct != null) {
@@ -216,7 +210,7 @@
         var html = '<div class="hibs-assistant-card hibs-acca-card">';
         html += '<p class="ac-line"><strong>' + esc(acca.title) + '</strong> · ' + acca.leg_count + ' legs</p>';
         if (acca.combined_odds) {
-            html += '<p class="ac-line">Combined <strong style="color:var(--gold);">' + acca.combined_odds + '</strong>';
+            html += '<p class="ac-line">Combined <strong style="color:var(--gold);">' + oddsHtml(acca.combined_odds) + '</strong>';
             if (acca.joint_confidence_pct != null) {
                 html += ' · joint conf. ~' + acca.joint_confidence_pct + '%';
             }
@@ -251,7 +245,7 @@
         });
         html += '</ol>';
         if (builder.estimated_independent_odds) {
-            html += '<p class="ac-line" style="font-size:0.86em;color:var(--muted);">Component odds multiply to ~' + builder.estimated_independent_odds + ', but same-game markets are correlated so get a live bookmaker quote.</p>';
+            html += '<p class="ac-line" style="font-size:0.86em;color:var(--muted);">Component odds multiply to ~' + oddsHtml(builder.estimated_independent_odds) + ', but same-game markets are correlated so get a live bookmaker quote.</p>';
         }
         if (builder.joint_confidence_pct != null) {
             html += '<p class="ac-line">Model builder confidence: <strong>' + builder.joint_confidence_pct + '%</strong></p>';
@@ -294,7 +288,7 @@
         }
         if (pkt.has_value_bet && pkt.value_bets_display && pkt.value_bets_display[0]) {
             var v = pkt.value_bets_display[0];
-            html += '<p class="ac-line" style="color:var(--gold);">Value: ' + esc(v.market_label) + ' @ ' + v.odds;
+            html += '<p class="ac-line" style="color:var(--gold);">Value: ' + esc(v.market_label) + ' @ ' + oddsHtml(v.odds);
             if (v.edge_pct != null) html += ' · +' + v.edge_pct + '%';
             html += '</p>';
         }
@@ -305,7 +299,7 @@
     function legHtml(leg) {
         var ko = leg.kickoff_time ? esc(leg.kickoff_time) + ' ' : '';
         var s = ko + '<strong>' + esc(leg.home) + '</strong> v <strong>' + esc(leg.away) + '</strong> — ' + esc(leg.market_label);
-        if (leg.odds) s += ' @ ' + leg.odds;
+        if (leg.odds) s += ' @ ' + oddsHtml(leg.odds);
         if (leg.model_pct != null) s += ' (' + leg.model_pct + '%)';
         if (leg.is_value) s += ' <span style="color:var(--gold);">VALUE</span>';
         return s;
@@ -367,7 +361,6 @@
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 loadSnapshot(data);
-                populateFixtureSelect();
             })
             .catch(function () { /* keep embedded snapshot */ });
     }

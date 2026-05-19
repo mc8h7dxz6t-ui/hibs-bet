@@ -54,6 +54,13 @@
     return Object.keys(loadSlip()).length;
   }
 
+  function formatOdds(odds) {
+    if (global.HibsOdds && typeof global.HibsOdds.formatOdds === "function") {
+      return global.HibsOdds.formatOdds(odds);
+    }
+    return (Number(odds) || 0).toFixed(2);
+  }
+
   function renderDrawer() {
     const body = document.getElementById("betslip-drawer-body");
     const empty = document.getElementById("betslip-drawer-empty");
@@ -92,8 +99,10 @@
         "</div>" +
         '<div class="betslip-leg-row"><span class="betslip-leg-pick">' +
         escapeHtml(s.label || ol) +
-        '</span><span class="betslip-leg-odds">' +
-        (s.odds || 0).toFixed(2) +
+        '</span><span class="betslip-leg-odds" data-odds-dec="' +
+        (s.odds || 0) +
+        '">' +
+        formatOdds(s.odds || 0) +
         "</span></div>";
       body.appendChild(row);
     });
@@ -102,7 +111,7 @@
         removeSelection(btn.getAttribute("data-fid"));
       });
     });
-    if (oddsEl) oddsEl.textContent = keys.length ? totalOdds.toFixed(2) : "—";
+    if (oddsEl) oddsEl.textContent = keys.length ? formatOdds(totalOdds) : "—";
 
     const stakeIn = document.getElementById("betslip-drawer-stake");
     if (stakeIn) recalcDrawerReturns(stakeIn.value);
@@ -185,4 +194,5 @@
   } else {
     wireDrawerUi();
   }
+  document.addEventListener("hibs-odds-format-change", renderDrawer);
 })(window);

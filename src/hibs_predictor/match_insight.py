@@ -474,10 +474,17 @@ def build_assistant_packet(fixture_row: Dict[str, Any]) -> Dict[str, Any]:
         "structured_insight": p.get("structured_insight"),
         "pick_menu": p.get("pick_menu"),
         "probability_scores": p.get("probability_scores"),
+        "prediction_quality_hint": p.get("prediction_quality_hint") or {},
+        "league_model_profile": p.get("league_model_profile") or {},
+        "matchup_calibration": p.get("matchup_calibration"),
+        "value_bets_rejected": p.get("value_bets_rejected") or {},
         "value_bets_display": p.get("value_bets_display") or [],
         "has_value_bet": fixture_row.get("has_value_bet"),
         "prediction_unavailable": bool(p.get("prediction_unavailable")),
         "data_quality_pct": (fixture_row.get("data_quality") or {}).get("score_pct"),
+        "field_scores": (fixture_row.get("data_quality") or {}).get("field_scores") or {},
+        "weak_fields": (fixture_row.get("data_quality") or {}).get("weak_fields") or [],
+        "trust_label": (fixture_row.get("data_quality") or {}).get("trust_label"),
     }
 
 

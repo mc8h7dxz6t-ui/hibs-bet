@@ -34,17 +34,17 @@
             <div class="odds-trio">
                 <div class="odd-box {% if p.predicted_outcome=='home' %}best{% endif %}">
                     <div class="odd-lbl">1</div>
-                    <div class="odd-val">{% if p.bookmaker_odds.home is not none %}{{ "%.2f"|format(p.bookmaker_odds.home) }}{% else %}—{% endif %}</div>
+                    <div class="odd-val"{% if p.bookmaker_odds.home is not none %} data-odds-dec="{{ p.bookmaker_odds.home }}"{% endif %}>{% if p.bookmaker_odds.home is not none %}{{ "%.2f"|format(p.bookmaker_odds.home) }}{% else %}—{% endif %}</div>
                     <div class="odd-pct">{{ p.probabilities_pct.home }}%</div>
                 </div>
                 <div class="odd-box {% if p.predicted_outcome=='draw' %}best{% endif %}">
                     <div class="odd-lbl">X</div>
-                    <div class="odd-val">{% if p.bookmaker_odds.draw is not none %}{{ "%.2f"|format(p.bookmaker_odds.draw) }}{% else %}—{% endif %}</div>
+                    <div class="odd-val"{% if p.bookmaker_odds.draw is not none %} data-odds-dec="{{ p.bookmaker_odds.draw }}"{% endif %}>{% if p.bookmaker_odds.draw is not none %}{{ "%.2f"|format(p.bookmaker_odds.draw) }}{% else %}—{% endif %}</div>
                     <div class="odd-pct">{{ p.probabilities_pct.draw }}%</div>
                 </div>
                 <div class="odd-box {% if p.predicted_outcome=='away' %}best{% endif %}">
                     <div class="odd-lbl">2</div>
-                    <div class="odd-val">{% if p.bookmaker_odds.away is not none %}{{ "%.2f"|format(p.bookmaker_odds.away) }}{% else %}—{% endif %}</div>
+                    <div class="odd-val"{% if p.bookmaker_odds.away is not none %} data-odds-dec="{{ p.bookmaker_odds.away }}"{% endif %}>{% if p.bookmaker_odds.away is not none %}{{ "%.2f"|format(p.bookmaker_odds.away) }}{% else %}—{% endif %}</div>
                     <div class="odd-pct">{{ p.probabilities_pct.away }}%</div>
                 </div>
             </div>

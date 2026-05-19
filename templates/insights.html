@@ -45,12 +45,17 @@
                 <a href="/tables" class="site-link">Tables</a>
                 <a href="/guide" class="site-link">Guide</a>
                 <a href="/status" class="site-link">API status</a>
+                <a href="/settings" class="site-link">Settings</a>
             </nav>
         </div>
         <div class="site-top-right">
             <span class="pill-soft">{{ total }} fixtures</span>
             <span class="pill-soft">{{ fetch_days }}-day window</span>
             <span class="pill-soft">Times: {{ display_tz_label }}</span>
+            <div class="odds-toggle" role="group" aria-label="Odds format">
+                <button type="button" class="ot ot-active" data-odds="dec" aria-pressed="true">Dec</button>
+                <button type="button" class="ot" data-odds="frac" aria-pressed="false">Frac</button>
+            </div>
         </div>
     </header>
 
@@ -74,7 +79,7 @@
                 <div class="ir-meta">{{ row.league }}{% if row.kickoff_time %} · {{ row.kickoff_time }}{% endif %}</div>
                 <div class="ir-main"><a href="/#fix-{{ row.fixture_id }}">{{ row.match }}</a> — {{ row.market_label }}</div>
                 <span class="ir-pill ir-good">Model {{ row.model_pct }}%</span>
-                {% if row.odds %}<span class="ir-pill">Odds {{ "%.2f"|format(row.odds) }}</span>{% endif %}
+                {% if row.odds %}<span class="ir-pill" data-odds-dec="{{ row.odds }}" data-odds-template="Odds {odds}">Odds {{ "%.2f"|format(row.odds) }}</span>{% endif %}
                 {% if row.data_quality_pct is not none %}<span class="ir-pill">Data {{ row.data_quality_pct }}%</span>{% endif %}
             </div>
             {% else %}
@@ -88,7 +93,7 @@
             <div class="insight-row">
                 <div class="ir-meta">{{ row.league }}{% if row.kickoff_time %} · {{ row.kickoff_time }}{% endif %}</div>
                 <div class="ir-main"><a href="/#fix-{{ row.fixture_id }}">{{ row.match }}</a> — {{ row.market_label }}</div>
-                {% if row.odds %}<span class="ir-pill">Odds {{ "%.2f"|format(row.odds) }}</span>{% endif %}
+                {% if row.odds %}<span class="ir-pill" data-odds-dec="{{ row.odds }}" data-odds-template="Odds {odds}">Odds {{ "%.2f"|format(row.odds) }}</span>{% endif %}
                 {% if row.edge_pct is not none %}<span class="ir-pill ir-gold">+{{ "%.1f"|format(row.edge_pct) }}% edge</span>{% endif %}
                 {% if row.roi_percent is not none %}<span class="ir-pill">ROI {{ "%.1f"|format(row.roi_percent) }}%</span>{% endif %}
             </div>
@@ -119,7 +124,7 @@
                 <div class="ir-meta">{{ row.league_name or row.league }}{% if row.kickoff_time %} · {{ row.kickoff_time }}{% endif %}</div>
                 <div class="ir-main"><a href="/#fix-{{ row.fixture_id }}">{{ row.match }}</a> — {{ row.title }}</div>
                 {% for leg in row.legs %}
-                <span class="ir-pill">{{ leg.market_label }}{% if leg.odds %} {{ "%.2f"|format(leg.odds) }}{% endif %}</span>
+                <span class="ir-pill"{% if leg.odds %} data-odds-dec="{{ leg.odds }}" data-odds-template="{{ leg.market_label|e }} {odds}"{% endif %}>{{ leg.market_label }}{% if leg.odds %} {{ "%.2f"|format(leg.odds) }}{% endif %}</span>
                 {% endfor %}
                 {% if row.joint_confidence_pct is not none %}<span class="ir-pill ir-good">Model {{ row.joint_confidence_pct }}%</span>{% endif %}
             </div>
@@ -145,6 +150,41 @@
         </section>
 
         <section class="insight-card">
+            <h2>Trust & Accuracy Controls</h2>
+            <div class="insight-row">
+                <div class="ir-main">Data trust split</div>
+                {% for label, count in insights.trust_digest.labels.items() %}
+                <span class="ir-pill {% if 'Strong' in label or 'Good' in label %}ir-good{% elif 'Thin' in label %}ir-warn{% endif %}">{{ label }}: {{ count }}</span>
+                {% endfor %}
+            </div>
+            <div class="insight-row">
+                <div class="ir-main">Most common weak fields</div>
+                {% for row in insights.trust_digest.weak_fields %}
+                <span class="ir-pill ir-warn">{{ row.label }} × {{ row.count }}</span>
+                {% else %}
+                <span class="ir-pill ir-good">No recurring weak field</span>
+                {% endfor %}
+            </div>
+            <p class="ir-meta">The engine now reads these field-level scores before promoting picks, so thin xG/table/team-news data reduces trust without hiding the fixture.</p>
+        </section>
+
+        <section class="insight-card">
+            <h2>Avoid / Caution Watchlist</h2>
+            {% for row in insights.avoid_watchlist %}
+            <div class="insight-row">
+                <div class="ir-meta">{{ row.league }}{% if row.kickoff_time %} · {{ row.kickoff_time }}{% endif %}</div>
+                <div class="ir-main"><a href="/#fix-{{ row.fixture_id }}">{{ row.match }}</a></div>
+                {% if row.data_quality_pct is not none %}<span class="ir-pill ir-warn">Data {{ row.data_quality_pct }}%</span>{% endif %}
+                {% for reason in row.reasons %}
+                <span class="ir-pill">{{ reason }}</span>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty-mini">No obvious avoid/caution flags in the current fixture set.</div>
+            {% endfor %}
+        </section>
+
+        <section class="insight-card">
             <h2>2025/26 and 2026/27 Coverage</h2>
             <div class="coverage-grid">
                 {% for season in insights.coverage.seasons %}
@@ -164,6 +204,23 @@
                 <span class="ir-pill">{{ insights.coverage.counts.planned }} planned</span>
             </div>
             <p class="ir-meta" style="margin-top:10px;">{{ insights.coverage.player_prop_note }}</p>
+        </section>
+
+        <section class="insight-card">
+            <h2>Calibration Snapshot</h2>
+            {% if insights.audit.n_used_metrics %}
+            <div class="insight-row">
+                <div class="ir-main">{{ insights.audit.n_used_metrics }} scored prediction rows</div>
+                <span class="ir-pill">Brier {{ insights.audit.brier_score_1x2 }}</span>
+                <span class="ir-pill">Log loss {{ insights.audit.log_loss_1x2 }}</span>
+                {% if insights.audit.value_hit_rate is not none %}<span class="ir-pill ir-gold">Value hit {{ insights.audit.value_hit_rate }}%</span>{% endif %}
+            </div>
+            {% else %}
+            <div class="empty-mini">{{ insights.audit.message }}</div>
+            {% endif %}
+            {% for row in insights.audit.brier_by_data_quality_bucket or [] %}
+            <span class="ir-pill">DQ {{ row.bucket }}: {% if row.brier is not none %}Brier {{ row.brier }}{% else %}not scored{% endif %}</span>
+            {% endfor %}
         </section>
     </div>
 </div>

@@ -106,6 +106,36 @@ def resolve_scraped_xg(
                 meta["understat_fetch"] = "direct"
                 return pair[0], pair[1], "understat_xg", meta
 
+    ss_block = sup.get("sofascore_xg") if isinstance(sup, dict) else None
+    if isinstance(ss_block, dict):
+        try:
+            xh = float(ss_block.get("home_avg_for") or 0)
+            xa = float(ss_block.get("away_avg_for") or 0)
+            hn = int(ss_block.get("home_n") or 0)
+            an = int(ss_block.get("away_n") or 0)
+        except (TypeError, ValueError):
+            xh = xa = hn = an = 0
+        if xh > 0.04 and xa > 0.04 and hn >= 2 and an >= 2:
+            meta["sofascore_n"] = {"home": hn, "away": an}
+            return xh, xa, "sofascore_xg", meta
+
+    try:
+        from hibs_predictor.scrapers.sofascore_client import sofascore_xg_enabled, team_xg_profile_for_name
+
+        if sofascore_xg_enabled():
+            hp = team_xg_profile_for_name(home_nm)
+            ap = team_xg_profile_for_name(away_nm)
+            if hp and ap:
+                xh = float(hp.get("avg_xg_for") or 0)
+                xa = float(ap.get("avg_xg_for") or 0)
+                if xh > 0.04 and xa > 0.04:
+                    meta["sofascore_fetch"] = "direct"
+                    meta["home_n"] = hp.get("n")
+                    meta["away_n"] = ap.get("n")
+                    return xh, xa, "sofascore_xg", meta
+    except Exception:
+        pass
+
     try:
         from hibs_predictor.scrapers.fbref_scottish_xg import resolve_scottish_fbref_xg
 
@@ -136,6 +166,20 @@ def resolve_scraped_xg(
         base_a = float(enriched.get("xg_away") or 1.1)
         meta["partial_scrape"] = True
         return (h_avg if h_avg is not None else base_h), (a_avg if a_avg is not None else base_a), "partial_scraped_xg", meta
+
+    if current in ("goals_proxy", "mixed_api_goals_proxy", "unknown", ""):
+        try:
+            nh = int(float(enriched.get("home_recent_n") or 0))
+            na = int(float(enriched.get("away_recent_n") or 0))
+        except (TypeError, ValueError):
+            nh = na = 0
+        xh = float(enriched.get("xg_home") or 0)
+        xa = float(enriched.get("xg_away") or 0)
+        if nh >= 4 and na >= 4 and xh > 0.08 and xa > 0.08:
+            meta["form_derived"] = True
+            meta["home_n"] = nh
+            meta["away_n"] = na
+            return xh, xa, "form_derived_xg", meta
 
     return None
 

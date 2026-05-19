@@ -1,6 +1,8 @@
 """Data aggregator that enriches fixtures with multi-API data."""
 
 import os
+import re
+import unicodedata
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 
@@ -60,6 +62,39 @@ def _env_first_usable(*names: str) -> str:
 
 def _env_flag_truthy(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _season_candidates(now: Optional[datetime] = None) -> List[int]:
+    """Current domestic season id plus previous season for completed/thin windows."""
+    d = now or datetime.now()
+    primary = d.year if d.month >= 7 else d.year - 1
+    return [primary, primary - 1]
+
+
+def _norm_team_name(name: Any) -> str:
+    text = unicodedata.normalize("NFKD", str(name or ""))
+    text = "".join(c for c in text if not unicodedata.combining(c)).lower()
+    text = re.sub(r"[^a-z0-9]+", " ", text).strip()
+    for suffix in (" fc", " afc", " cf", " sc"):
+        if text.endswith(suffix):
+            text = text[: -len(suffix)].strip()
+    return text
+
+
+def _football_data_position_from_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "position": entry.get("position"),
+        "played": entry.get("playedGames", 0),
+        "won": entry.get("won", 0),
+        "drawn": entry.get("draw", 0),
+        "lost": entry.get("lost", 0),
+        "goals_for": entry.get("goalsFor", 0),
+        "goals_against": entry.get("goalsAgainst", 0),
+        "goal_diff": entry.get("goalDifference", 0),
+        "points": entry.get("points", 0),
+        "form": entry.get("form", ""),
+        "source": "football_data_org",
+    }
 
 
 def _effective_skip_odds_api(clients: Dict[str, Any]) -> bool:
@@ -331,12 +366,63 @@ class DataAggregator:
 
         return clients
 
+    def _fetch_api_sports_position_with_fallback(
+        self, team_id: Optional[int], league_api_id: Optional[int], season: int
+    ) -> Dict[str, Any]:
+        if not team_id or not league_api_id or "api_sports" not in self.clients:
+            return {}
+        for sy in [season, season - 1]:
+            row = self._fetch_team_position(team_id, league_api_id, sy)
+            if row:
+                row.setdefault("source", "api_sports")
+                if sy != season:
+                    row.setdefault("season_status", "last_completed")
+                return row
+        return {}
+
+    def _fetch_football_data_position_with_fallback(
+        self,
+        team_id: Optional[int],
+        team_name: str,
+        competition_code: Optional[str],
+        season: int,
+    ) -> Dict[str, Any]:
+        if not competition_code or "football_data_org" not in self.clients:
+            return {}
+        client = self.clients["football_data_org"]
+        for sy in [season, season - 1]:
+            if team_id:
+                row = client.fetch_team_position(int(team_id), str(competition_code), int(sy))
+                if row:
+                    if sy != season:
+                        row.setdefault("season_status", "last_completed")
+                    return row
+            try:
+                groups = client.fetch_standings(str(competition_code), int(sy))
+            except Exception:
+                groups = []
+            wanted = _norm_team_name(team_name)
+            if not wanted:
+                continue
+            for group in groups or []:
+                if str(group.get("type") or "").upper() not in ("TOTAL", ""):
+                    continue
+                for entry in group.get("table") or []:
+                    candidate = _norm_team_name((entry.get("team") or {}).get("name"))
+                    if candidate and (candidate == wanted or candidate in wanted or wanted in candidate):
+                        row = _football_data_position_from_entry(entry)
+                        if sy != season:
+                            row.setdefault("season_status", "last_completed")
+                        return row
+        return {}
+
     def enrich_fixture(self, fixture: Dict[str, Any], league_code: str = "EPL") -> Dict[str, Any]:
         """Enrich a fixture with comprehensive data from multiple sources."""
         league = LEAGUES.get(league_code, {})
         league_api_id = league.get("api_sports_id")
+        fdo_comp = league.get("football_data_org_id")
         now = datetime.now()
-        season = now.year if now.month >= 7 else now.year - 1
+        season = _season_candidates(now)[0]
 
         home_id = fixture.get("teams", {}).get("home", {}).get("id")
         away_id = fixture.get("teams", {}).get("away", {}).get("id")
@@ -350,9 +436,9 @@ class DataAggregator:
         ak = (fixture.get("teams", {}) or {}).get("away", {}).get("name") or (fixture.get("away", {}) or {}).get("name", "?")
         dt = str(fixture.get("date", ""))
         if fixture_id_str:
-            cache_key = f"enriched_fixture_{fixture_id_str}_{league_code}_dq4"
+            cache_key = f"enriched_fixture_{fixture_id_str}_{league_code}_dq5"
         else:
-            cache_key = f"enriched_fixture_teams_{league_code}_{hk}|{ak}|{dt}_dq4"
+            cache_key = f"enriched_fixture_teams_{league_code}_{hk}|{ak}|{dt}_dq5"
 
         try:
             fixture_id_for_xg = int(raw_fid) if raw_fid not in (None, "", "0", 0) else None
@@ -458,14 +544,26 @@ class DataAggregator:
             if not skip_api_tbl:
                 try:
                     if not hp.get("position"):
-                        hp = self._fetch_team_position(home_id, league_api_id, season) or hp
+                        hp = self._fetch_api_sports_position_with_fallback(home_id, league_api_id, season) or hp
                 except Exception as exc:
                     print(f"[enrich home_position] {league_code} fid={fixture_id_str}: {exc!r}")
                 try:
                     if not ap.get("position"):
-                        ap = self._fetch_team_position(away_id, league_api_id, season) or ap
+                        ap = self._fetch_api_sports_position_with_fallback(away_id, league_api_id, season) or ap
                 except Exception as exc:
                     print(f"[enrich away_position] {league_code} fid={fixture_id_str}: {exc!r}")
+
+        if fdo_comp and "football_data_org" in self.clients:
+            try:
+                if not hp.get("position"):
+                    hp = self._fetch_football_data_position_with_fallback(home_id, home_nm, fdo_comp, season) or hp
+            except Exception as exc:
+                print(f"[enrich fdo_home_position] {league_code} fid={fixture_id_str}: {exc!r}")
+            try:
+                if not ap.get("position"):
+                    ap = self._fetch_football_data_position_with_fallback(away_id, away_nm, fdo_comp, season) or ap
+            except Exception as exc:
+                print(f"[enrich fdo_away_position] {league_code} fid={fixture_id_str}: {exc!r}")
 
         enriched["home_position"] = hp
         enriched["away_position"] = ap

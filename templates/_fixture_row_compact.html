@@ -28,7 +28,7 @@
             <span class="fr-value-box" title="Model edge vs book implied probability">
                 <span class="fr-value-ico" aria-hidden="true">⚡</span>
                 <span class="fr-value-lbl">{{ v.market_label }}</span>
-                <span class="fr-value-odds">@ {{ "%.2f"|format(v.odds) }}</span>
+                <span class="fr-value-odds" data-odds-dec="{{ v.odds }}" data-odds-template="@ {odds}">@ {{ "%.2f"|format(v.odds) }}</span>
                 {% if v.edge_pct is defined and v.edge_pct is not none %}
                 <span class="fr-value-edge">+{{ "%.1f"|format(v.edge_pct) }}%</span>
                 {% endif %}
@@ -57,21 +57,25 @@
         {% set dq = fixture.data_quality.score_pct %}
         <span class="fr-dq {% if dq >= 85 %}ok{% elif dq >= 70 %}mid{% else %}low{% endif %}">{{ dq }}% data</span>
         {% endif %}
-        <div class="fr-menus" onclick="event.stopPropagation();">
+        <div class="fr-menus" data-summary-control
+             onclick="event.stopPropagation();" onpointerdown="event.stopPropagation();" onmousedown="event.stopPropagation();" onmouseup="event.stopPropagation();" ontouchstart="event.stopPropagation();">
             {% set pick_menu = p.pick_menu if p and p.pick_menu is defined and p.pick_menu else [] %}
             {% if pick_menu %}
-            <select class="fr-pick-menu" title="Pick market (1X2, goals, combos)" onclick="event.stopPropagation();" onmousedown="event.stopPropagation();"
+            <select class="fr-pick-menu" title="Pick market (1X2, goals, combos)"
+                onclick="event.stopPropagation();" onpointerdown="event.stopPropagation();" onmousedown="event.stopPropagation();" onmouseup="event.stopPropagation();" onchange="event.stopPropagation();" onkeydown="event.stopPropagation();" ontouchstart="event.stopPropagation();"
                 data-fid="{{ fixture.id }}" data-home="{{ fixture.home }}" data-away="{{ fixture.away }}" data-league="{{ fixture.league_name or fixture.league }}">
                 {% for item in pick_menu %}
                 <option value="{{ item.key }}" {% if item.recommended %}selected{% endif %}
-                    data-odds="{{ item.odds if item.odds else '' }}" data-label="{{ item.label }}">
+                    data-odds="{{ item.odds if item.odds else '' }}" data-label="{{ item.label|e }}"{% if item.odds %} data-odds-dec="{{ item.odds }}" data-odds-template="{{ item.label|e }}{% if item.model_pct is not none %} · {{ item.model_pct }}%{% endif %} @ {odds}{% if item.is_value %} · VALUE{% endif %}"{% endif %}>
                     {{ item.label }}{% if item.model_pct is not none %} · {{ item.model_pct }}%{% endif %}{% if item.odds %} @ {{ "%.2f"|format(item.odds) }}{% endif %}{% if item.is_value %} · VALUE{% endif %}
                 </option>
                 {% endfor %}
             </select>
-            <button type="button" class="fr-add-slip" title="Add selected pick to betslip">+ Slip</button>
+            <button type="button" class="fr-add-slip" title="Add selected pick to betslip"
+                onclick="event.stopPropagation();" onpointerdown="event.stopPropagation();" onmousedown="event.stopPropagation();" onmouseup="event.stopPropagation();" ontouchstart="event.stopPropagation();">+ Slip</button>
             {% endif %}
-            <select class="fr-league-snap" title="League table snapshot" onclick="event.stopPropagation();" onmousedown="event.stopPropagation();">
+            <select class="fr-league-snap" title="League table snapshot"
+                onclick="event.stopPropagation();" onpointerdown="event.stopPropagation();" onmousedown="event.stopPropagation();" onmouseup="event.stopPropagation();" onchange="event.stopPropagation();" onkeydown="event.stopPropagation();" ontouchstart="event.stopPropagation();">
                 {% set home_snap = fixture.home_table_snapshot if fixture.home_table_snapshot is defined else [] %}
                 {% set away_snap = fixture.away_table_snapshot if fixture.away_table_snapshot is defined else [] %}
                 {% if home_snap or away_snap %}
@@ -102,15 +106,15 @@
         </div>
         {% endif %}
     </div>
-    <span class="fr-od fr-od-h{% if vb.get('home') %} fr-od-value{% endif %}" title="{% if vb.get('home') %}Value: Home{% endif %}">{% if p and p.bookmaker_odds.home is not none %}{{ "%.2f"|format(p.bookmaker_odds.home) }}{% else %}—{% endif %}</span>
-    <span class="fr-od fr-od-x{% if vb.get('draw') %} fr-od-value{% endif %}" title="{% if vb.get('draw') %}Value: Draw{% endif %}">{% if p and p.bookmaker_odds.draw is not none %}{{ "%.2f"|format(p.bookmaker_odds.draw) }}{% else %}—{% endif %}</span>
-    <span class="fr-od fr-od-a{% if vb.get('away') %} fr-od-value{% endif %}" title="{% if vb.get('away') %}Value: Away{% endif %}">{% if p and p.bookmaker_odds.away is not none %}{{ "%.2f"|format(p.bookmaker_odds.away) }}{% else %}—{% endif %}</span>
-    <span class="fr-od{% if vb.get('btts_yes') %} fr-od-value{% endif %}" title="{% if vb.get('btts_yes') %}Value: BTTS Yes{% endif %}">{% if lo.get('btts_yes') %}{{ "%.2f"|format(lo.btts_yes) }}{% else %}—{% endif %}</span>
-    <span class="fr-od{% if vb.get('over15') %} fr-od-value{% endif %}" title="{% if vb.get('over15') %}Value: Over 1.5{% endif %}">{% if lo.get('over15') %}{{ "%.2f"|format(lo.over15) }}{% else %}—{% endif %}</span>
-    <span class="fr-od{% if vb.get('over25') %} fr-od-value{% endif %}" title="{% if vb.get('over25') %}Value: Over 2.5{% endif %}">{% if lo.get('over25') %}{{ "%.2f"|format(lo.over25) }}{% else %}—{% endif %}</span>
-    <span class="fr-od{% if vb.get('under25') %} fr-od-value{% endif %}" title="{% if vb.get('under25') %}Value: Under 2.5{% endif %}">{% if lo.get('under25') %}{{ "%.2f"|format(lo.under25) }}{% else %}—{% endif %}</span>
-    <span class="fr-od{% if vb.get('over35') %} fr-od-value{% endif %}" title="{% if vb.get('over35') %}Value: Over 3.5{% endif %}">{% if lo.get('over35') %}{{ "%.2f"|format(lo.over35) }}{% else %}—{% endif %}</span>
-    <span class="fr-od{% if vb.get('under35') %} fr-od-value{% endif %}" title="{% if vb.get('under35') %}Value: Under 3.5{% endif %}">{% if lo.get('under35') %}{{ "%.2f"|format(lo.under35) }}{% else %}—{% endif %}</span>
+    <span class="fr-od fr-od-h{% if vb.get('home') %} fr-od-value{% endif %}" title="{% if vb.get('home') %}Value: Home{% endif %}"{% if p and p.bookmaker_odds.home is not none %} data-odds-dec="{{ p.bookmaker_odds.home }}"{% endif %}>{% if p and p.bookmaker_odds.home is not none %}{{ "%.2f"|format(p.bookmaker_odds.home) }}{% else %}—{% endif %}</span>
+    <span class="fr-od fr-od-x{% if vb.get('draw') %} fr-od-value{% endif %}" title="{% if vb.get('draw') %}Value: Draw{% endif %}"{% if p and p.bookmaker_odds.draw is not none %} data-odds-dec="{{ p.bookmaker_odds.draw }}"{% endif %}>{% if p and p.bookmaker_odds.draw is not none %}{{ "%.2f"|format(p.bookmaker_odds.draw) }}{% else %}—{% endif %}</span>
+    <span class="fr-od fr-od-a{% if vb.get('away') %} fr-od-value{% endif %}" title="{% if vb.get('away') %}Value: Away{% endif %}"{% if p and p.bookmaker_odds.away is not none %} data-odds-dec="{{ p.bookmaker_odds.away }}"{% endif %}>{% if p and p.bookmaker_odds.away is not none %}{{ "%.2f"|format(p.bookmaker_odds.away) }}{% else %}—{% endif %}</span>
+    <span class="fr-od{% if vb.get('btts_yes') %} fr-od-value{% endif %}" title="{% if vb.get('btts_yes') %}Value: BTTS Yes{% endif %}"{% if lo.get('btts_yes') %} data-odds-dec="{{ lo.btts_yes }}"{% endif %}>{% if lo.get('btts_yes') %}{{ "%.2f"|format(lo.btts_yes) }}{% else %}—{% endif %}</span>
+    <span class="fr-od{% if vb.get('over15') %} fr-od-value{% endif %}" title="{% if vb.get('over15') %}Value: Over 1.5{% endif %}"{% if lo.get('over15') %} data-odds-dec="{{ lo.over15 }}"{% endif %}>{% if lo.get('over15') %}{{ "%.2f"|format(lo.over15) }}{% else %}—{% endif %}</span>
+    <span class="fr-od{% if vb.get('over25') %} fr-od-value{% endif %}" title="{% if vb.get('over25') %}Value: Over 2.5{% endif %}"{% if lo.get('over25') %} data-odds-dec="{{ lo.over25 }}"{% endif %}>{% if lo.get('over25') %}{{ "%.2f"|format(lo.over25) }}{% else %}—{% endif %}</span>
+    <span class="fr-od{% if vb.get('under25') %} fr-od-value{% endif %}" title="{% if vb.get('under25') %}Value: Under 2.5{% endif %}"{% if lo.get('under25') %} data-odds-dec="{{ lo.under25 }}"{% endif %}>{% if lo.get('under25') %}{{ "%.2f"|format(lo.under25) }}{% else %}—{% endif %}</span>
+    <span class="fr-od{% if vb.get('over35') %} fr-od-value{% endif %}" title="{% if vb.get('over35') %}Value: Over 3.5{% endif %}"{% if lo.get('over35') %} data-odds-dec="{{ lo.over35 }}"{% endif %}>{% if lo.get('over35') %}{{ "%.2f"|format(lo.over35) }}{% else %}—{% endif %}</span>
+    <span class="fr-od{% if vb.get('under35') %} fr-od-value{% endif %}" title="{% if vb.get('under35') %}Value: Under 3.5{% endif %}"{% if lo.get('under35') %} data-odds-dec="{{ lo.under35 }}"{% endif %}>{% if lo.get('under35') %}{{ "%.2f"|format(lo.under35) }}{% else %}—{% endif %}</span>
     <span class="fr-chev" aria-hidden="true">▾</span>
     {% if fixture.has_value_bet %}
     {% set top_v = vb_list[0] if vb_list else none %}
