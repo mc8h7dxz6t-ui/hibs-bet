@@ -9,8 +9,8 @@ __pycache__/
 .DS_Store
 # Separate app — lives in ~/Projects/cheeky-monkeys-time
 cheeky-monkeys-time/
-.env
 .env.save
+.cache-staging/
 .env.*.local
 .rate_limit_state.json
 .cache/
