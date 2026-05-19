@@ -144,10 +144,10 @@ SOURCE_CATALOG: List[Dict[str, Any]] = [
     {
         "id": "soccerstats",
         "label": "SoccerStats",
-        "focus": "League trends, goal timing, H2H-style tables",
-        "status": "planned",
-        "module": None,
-        "notes": "Simple HTML layout (easier to parse) but still check robots/ToS.",
+        "focus": "League table standings when API positions are missing",
+        "status": "wired",
+        "module": "hibs_predictor.scrapers.soccerstats_standings",
+        "notes": "HTML tables.asp fallback after Wikipedia/API; cached 12h per league.",
     },
     {
         "id": "datamb",

@@ -20,7 +20,9 @@ from hibs_predictor.config import LEAGUES
 from hibs_predictor.cache import Cache
 from hibs_predictor.data_quality import compute_fixture_data_quality
 from hibs_predictor.scrapers.supplemental import collect_supplemental
+from hibs_predictor.fixture_utils import fixture_team_id, fixture_team_name
 from hibs_predictor.scrapers import wikipedia_standings as wiki_standings
+from hibs_predictor.scrapers import soccerstats_standings as soccerstats_standings
 
 
 def _project_root() -> str:
@@ -206,6 +208,49 @@ def _implied_prob(odds: float) -> float:
     if odds is None or odds <= 1.0:
         return 0.0
     return 1.0 / float(odds)
+
+
+def _fdo_match_to_recent_format(match: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Normalize Football-Data.org finished match → API-Sports-like shape for rate calculators."""
+    ht = match.get("homeTeam") or {}
+    at = match.get("awayTeam") or {}
+    if not isinstance(ht, dict) or not isinstance(at, dict):
+        return None
+    hid, aid = ht.get("id"), at.get("id")
+    ft = (match.get("score") or {}).get("fullTime") or {}
+    home_g, away_g = ft.get("home"), ft.get("away")
+    if home_g is None or away_g is None:
+        return None
+    try:
+        return {
+            "teams": {"home": {"id": int(hid)}, "away": {"id": int(aid)}},
+            "goals": {"home": int(home_g), "away": int(away_g)},
+            "_source": "football_data_org",
+        }
+    except (TypeError, ValueError):
+        return None
+
+
+def _stats_from_fdo_matches(matches: List[Dict[str, Any]]) -> Dict[str, Any]:
+    from hibs_predictor.api_clients import FootballDataOrgClient
+
+    if not matches:
+        return {}
+    parsed = FootballDataOrgClient.parse_form_from_matches(matches)
+    n = min(10, len(matches))
+    if n == 0:
+        return {}
+    gf = float(parsed.get("goals_for") or 0)
+    ga = float(parsed.get("goals_against") or 0)
+    return {
+        "goals_for": gf,
+        "goals_against": ga,
+        "played": n,
+        "wins": parsed.get("wins", 0),
+        "draws": parsed.get("draws", 0),
+        "losses": parsed.get("losses", 0),
+        "source": "football_data_org",
+    }
 
 
 def _empty_rates() -> Dict[str, float]:
@@ -424,21 +469,21 @@ class DataAggregator:
         now = datetime.now()
         season = _season_candidates(now)[0]
 
-        home_id = fixture.get("teams", {}).get("home", {}).get("id")
-        away_id = fixture.get("teams", {}).get("away", {}).get("id")
+        home_id = fixture_team_id(fixture, "home")
+        away_id = fixture_team_id(fixture, "away")
 
         fx = fixture.get("fixture")
         raw_fid = fx.get("id") if isinstance(fx, dict) else None
         if raw_fid is None:
             raw_fid = fixture.get("id")
         fixture_id_str = str(raw_fid).strip() if raw_fid not in (None, "", 0, "0") else ""
-        hk = (fixture.get("teams", {}) or {}).get("home", {}).get("name") or (fixture.get("home", {}) or {}).get("name", "?")
-        ak = (fixture.get("teams", {}) or {}).get("away", {}).get("name") or (fixture.get("away", {}) or {}).get("name", "?")
+        hk = fixture_team_name(fixture, "home") or "?"
+        ak = fixture_team_name(fixture, "away") or "?"
         dt = str(fixture.get("date", ""))
         if fixture_id_str:
-            cache_key = f"enriched_fixture_{fixture_id_str}_{league_code}_dq5"
+            cache_key = f"enriched_fixture_{fixture_id_str}_{league_code}_dq6"
         else:
-            cache_key = f"enriched_fixture_teams_{league_code}_{hk}|{ak}|{dt}_dq5"
+            cache_key = f"enriched_fixture_teams_{league_code}_{hk}|{ak}|{dt}_dq6"
 
         try:
             fixture_id_for_xg = int(raw_fid) if raw_fid not in (None, "", "0", 0) else None
@@ -452,12 +497,12 @@ class DataAggregator:
         enriched = dict(fixture)
 
         try:
-            enriched["home_recent"] = self._fetch_team_recent_matches(home_id)
+            enriched["home_recent"] = self._fetch_team_recent_matches(home_id, fdo_comp=fdo_comp)
         except Exception as exc:
             print(f"[enrich home_recent] {league_code} fid={fixture_id_str}: {exc!r}")
             enriched["home_recent"] = []
         try:
-            enriched["away_recent"] = self._fetch_team_recent_matches(away_id)
+            enriched["away_recent"] = self._fetch_team_recent_matches(away_id, fdo_comp=fdo_comp)
         except Exception as exc:
             print(f"[enrich away_recent] {league_code} fid={fixture_id_str}: {exc!r}")
             enriched["away_recent"] = []
@@ -479,12 +524,16 @@ class DataAggregator:
         enriched["away_over15_rate"] = away_rates["over15_rate"]
 
         try:
-            enriched["home_stats"] = self._fetch_team_stats(home_id, league_code, league_api_id, season, home_rates)
+            enriched["home_stats"] = self._fetch_team_stats(
+                home_id, league_code, league_api_id, season, home_rates, fdo_comp=fdo_comp
+            )
         except Exception as exc:
             print(f"[enrich home_stats] {league_code} fid={fixture_id_str}: {exc!r}")
             enriched["home_stats"] = {}
         try:
-            enriched["away_stats"] = self._fetch_team_stats(away_id, league_code, league_api_id, season, away_rates)
+            enriched["away_stats"] = self._fetch_team_stats(
+                away_id, league_code, league_api_id, season, away_rates, fdo_comp=fdo_comp
+            )
         except Exception as exc:
             print(f"[enrich away_stats] {league_code} fid={fixture_id_str}: {exc!r}")
             enriched["away_stats"] = {}
@@ -515,8 +564,8 @@ class DataAggregator:
             print(f"[enrich away_away_factor] {league_code} fid={fixture_id_str}: {exc!r}")
             enriched["away_away_factor"] = 1.0
 
-        home_nm = fixture.get("home", {}).get("name") or fixture.get("teams", {}).get("home", {}).get("name", "")
-        away_nm = fixture.get("away", {}).get("name") or fixture.get("teams", {}).get("away", {}).get("name", "")
+        home_nm = fixture_team_name(fixture, "home")
+        away_nm = fixture_team_name(fixture, "away")
         prefer_wiki = os.getenv("HIBS_PREFER_SCRAPED_STANDINGS", "1").lower() in ("1", "true", "yes")
         wiki_rows: List[Dict[str, Any]] = []
         if prefer_wiki and league_code in wiki_standings.WP_SUFFIX:
@@ -564,6 +613,22 @@ class DataAggregator:
                     ap = self._fetch_football_data_position_with_fallback(away_id, away_nm, fdo_comp, season) or ap
             except Exception as exc:
                 print(f"[enrich fdo_away_position] {league_code} fid={fixture_id_str}: {exc!r}")
+
+        if prefer_wiki and league_code in soccerstats_standings.LEAGUE_PARAM:
+            try:
+                if not hp.get("position") or not ap.get("position"):
+                    ss_rows = self._cached_soccerstats_league_table(league_code)
+                    if ss_rows:
+                        if not hp.get("position"):
+                            sr = soccerstats_standings.find_team_row(ss_rows, home_nm)
+                            if sr:
+                                hp = soccerstats_standings.row_to_position_shape(sr)
+                        if not ap.get("position"):
+                            sr_a = soccerstats_standings.find_team_row(ss_rows, away_nm)
+                            if sr_a:
+                                ap = soccerstats_standings.row_to_position_shape(sr_a)
+            except Exception as exc:
+                print(f"[enrich soccerstats_positions] {league_code} fid={fixture_id_str}: {exc!r}")
 
         enriched["home_position"] = hp
         enriched["away_position"] = ap
@@ -634,6 +699,7 @@ class DataAggregator:
         league_api_id: Optional[int] = None,
         season: int = None,
         recent_rates: Optional[Dict[str, float]] = None,
+        fdo_comp: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Fetch team statistics from API-Football; augment with recent-match aggregates when sparse."""
         recent_rates = recent_rates or {}
@@ -686,6 +752,15 @@ class DataAggregator:
                 except Exception:
                     continue
 
+        if (not stats or (stats.get("goals_for", 0) == 0 and stats.get("goals_against", 0) == 0)) and fdo_comp and "football_data_org" in self.clients:
+            try:
+                fdo_matches = self.clients["football_data_org"].fetch_team_matches(int(team_id), 10)
+                fdo_stats = _stats_from_fdo_matches(fdo_matches)
+                if fdo_stats.get("played"):
+                    stats = fdo_stats
+            except Exception:
+                pass
+
         if (not stats or (stats.get("goals_for", 0) == 0 and stats.get("goals_against", 0) == 0)) and recent_rates.get("n", 0) >= 3:
             gf = recent_rates["avg_gf"] * 10.0
             ga = recent_rates["avg_ga"] * 10.0
@@ -717,6 +792,15 @@ class DataAggregator:
             pass
         return {}
 
+    def _cached_soccerstats_league_table(self, league_code: str) -> List[Dict[str, Any]]:
+        cache_key = f"soccerstats_table_{league_code}"
+        cached = self.cache.get(cache_key, ttl_hours=12)
+        if cached:
+            return cached
+        rows = soccerstats_standings.fetch_league_table(league_code, cache=self.cache)
+        self.cache.set(cache_key, rows, ttl_hours=12)
+        return rows
+
     def _cached_wikipedia_league_table(self, league_code: str) -> List[Dict[str, Any]]:
         """One Wikipedia standings parse per league per ~12h (disk cache)."""
         sk = wiki_standings._season_wiki_title_part()
@@ -728,12 +812,18 @@ class DataAggregator:
         self.cache.set(cache_key, rows, ttl_hours=12)
         return rows
 
-    def _fetch_team_recent_matches(self, team_id: Optional[int], limit: int = 10) -> List[Dict[str, Any]]:
-        """Fetch team's last matches from API-Sports."""
+    def _fetch_team_recent_matches(
+        self,
+        team_id: Optional[int],
+        limit: int = 10,
+        fdo_comp: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Last finished matches: API-Sports when ids match; else Football-Data.org for FDO fixture ids."""
         if not team_id:
             return []
 
-        cache_key = f"team_recent_{team_id}"
+        provider = "fdo" if fdo_comp else "api"
+        cache_key = f"team_recent_{provider}_{team_id}"
         cached = self.cache.get(cache_key, ttl_hours=4)
         if cached:
             return cached
@@ -742,6 +832,16 @@ class DataAggregator:
         if "api_sports" in self.clients:
             try:
                 matches = self.clients["api_sports"].fetch_team_last_matches(team_id, limit=limit)
+            except Exception:
+                pass
+
+        if not matches and fdo_comp and "football_data_org" in self.clients:
+            try:
+                raw = self.clients["football_data_org"].fetch_team_matches(int(team_id), limit)
+                for m in raw or []:
+                    norm = _fdo_match_to_recent_format(m)
+                    if norm:
+                        matches.append(norm)
             except Exception:
                 pass
 
@@ -859,8 +959,8 @@ class DataAggregator:
     def _fetch_odds_bundle(self, fixture: Dict[str, Any], league_code: str) -> Dict[str, Any]:
         """Primary + secondary 1X2 sources, cross-implied delta, and side markets from API-Football."""
         fixture_id = fixture.get("fixture", {}).get("id")
-        home_name = (fixture.get("home", {}).get("name", "") or "").lower()
-        away_name = (fixture.get("away", {}).get("name", "") or "").lower()
+        home_name = (fixture_team_name(fixture, "home") or "").lower()
+        away_name = (fixture_team_name(fixture, "away") or "").lower()
 
         cache_key = f"odds_bundle_{fixture_id}_{league_code}"
         cached = self.cache.get(cache_key, ttl_hours=1)

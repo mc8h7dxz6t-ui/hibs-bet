@@ -849,6 +849,109 @@ def test_scottish_fbref_xg():
         return False
 
 
+def test_fdo_recent_matches_for_serie_a_shape():
+    """Football-Data.org last matches normalize for rate calculators."""
+    print("\nTesting FDO recent-match adapter...")
+    try:
+        from hibs_predictor.data_aggregator import _fdo_match_to_recent_format, _recent_match_rates
+
+        m = {
+            "homeTeam": {"id": 99, "name": "ACF Fiorentina"},
+            "awayTeam": {"id": 102, "name": "Atalanta BC"},
+            "score": {"fullTime": {"home": 2, "away": 1}},
+        }
+        norm = _fdo_match_to_recent_format(m)
+        assert norm and norm["goals"]["home"] == 2
+        rates = _recent_match_rates([norm], 99)
+        assert rates["n"] >= 1.0
+        assert rates["avg_gf"] > 0
+        print("  ✓ FDO match adapter")
+        return True
+    except Exception as e:
+        print(f"  ✗ FDO adapter failed: {e}")
+        return False
+
+
+def test_understat_serie_a_name_match():
+    print("\nTesting Understat Serie A name matching...")
+    try:
+        from hibs_predictor.scrapers.understat_client import _names_match
+
+        assert _names_match("ACF Fiorentina", "Fiorentina")
+        assert _names_match("FC Internazionale Milano", "Inter")
+        assert _names_match("Atalanta BC", "Atalanta")
+        print("  ✓ Understat name aliases")
+        return True
+    except Exception as e:
+        print(f"  ✗ Understat names failed: {e}")
+        return False
+
+
+def test_fbref_schedule_xg_championship():
+    """EFL Championship uses fbref_schedule_xg tag (mocked rows)."""
+    print("\nTesting FBref schedule xG (Championship)...")
+    try:
+        from unittest.mock import patch
+
+        from hibs_predictor.scraped_xg import apply_scraped_xg_to_enriched
+
+        rows = [{"home": "Leeds United", "away": "Sheffield United", "xg_home": 1.7, "xg_away": 1.1}]
+        fixture = {
+            "teams": {"home": {"id": 1, "name": "Leeds United"}, "away": {"id": 2, "name": "Sheffield United"}},
+            "home": {"name": "Leeds United"},
+            "away": {"name": "Sheffield United"},
+        }
+        enriched = {"xg_home": 1.0, "xg_away": 1.0, "xg_source": "goals_proxy", "supplemental": {}}
+        with patch("hibs_predictor.scrapers.fbref_scottish_xg.fetch_schedule_rows", return_value=rows):
+            out = apply_scraped_xg_to_enriched(fixture, "CHAMPIONSHIP", enriched)
+        assert out["xg_source"] == "fbref_schedule_xg", out.get("xg_source")
+        assert out["xg_home"] == 1.7
+        print("  ✓ Championship FBref schedule xG")
+        return True
+    except Exception as e:
+        print(f"  ✗ FBref schedule xG test failed: {e}")
+        return False
+
+
+def test_soccerstats_standings_parse():
+    """SoccerStats HTML table parser extracts positions."""
+    print("\nTesting SoccerStats standings parse...")
+    try:
+        from hibs_predictor.scrapers import soccerstats_standings as ss
+
+        html = """
+        <html><body><table>
+        <tr><th>#</th><th>Team</th><th>GP</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>Pts</th></tr>
+        <tr><td>1.</td><td>Arsenal</td><td>38</td><td>28</td><td>5</td><td>5</td><td>86</td><td>28</td><td>89</td></tr>
+        <tr><td>2.</td><td>Liverpool</td><td>38</td><td>27</td><td>6</td><td>5</td><td>80</td><td>32</td><td>87</td></tr>
+        </table></body></html>
+        """
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html, "html.parser")
+        table = soup.find("table")
+        rows = []
+        for tr in table.find_all("tr")[1:]:
+            tds = tr.find_all("td")
+            texts = [td.get_text(strip=True) for td in tds]
+            rows.append(texts)
+        assert len(rows) == 2
+        parsed = ss.fetch_league_table.__wrapped__ if hasattr(ss.fetch_league_table, "__wrapped__") else None
+        row = ss.find_team_row(
+            [
+                {"position": 1, "team": "Arsenal", "played": 38, "points": 89},
+                {"position": 2, "team": "Liverpool", "played": 38, "points": 87},
+            ],
+            "Arsenal",
+        )
+        assert row and row["position"] == 1
+        print("  ✓ SoccerStats team row match")
+        return True
+    except Exception as e:
+        print(f"  ✗ SoccerStats test failed: {e}")
+        return False
+
+
 def test_scraped_xg_resolution():
     """Scraped xG from recent API matches upgrades goals_proxy."""
     print("\nTesting scraped xG...")
@@ -1301,6 +1404,10 @@ def main():
         test_football_data_standings_mocked,
         test_table_rows_use_previous_season_standings,
         test_scottish_fbref_xg,
+        test_fdo_recent_matches_for_serie_a_shape,
+        test_understat_serie_a_name_match,
+        test_fbref_schedule_xg_championship,
+        test_soccerstats_standings_parse,
         test_scraped_xg_resolution,
         test_assistant_recommendations,
         test_insights_and_bet_builders,

@@ -15,19 +15,21 @@ Coverage scoring: `src/hibs_predictor/data_quality.py` (`full_scope` ≥ **85%**
 | FBref | Top-5 squad tables (heavy); SPFL schedule xG (Scottish) | `HIBS_ENABLE_HEAVY_SCRAPERS`, `HIBS_ENABLE_SCOTTISH_FBREF_XG` |
 | Wikipedia | Standings when API thin | `HIBS_PREFER_SCRAPED_STANDINGS` |
 | SofaScore | Rolling team xG averages → `sofascore_xg` when API reachable | `HIBS_ENABLE_SOFASCORE_XG` or `HIBS_MAX_DATA=1`; optional `pip install curl_cffi` |
+| FBref schedule | Schedule-page xG: Scottish + EFL + NL/PT/BE/DK/GR/AT | `HIBS_ENABLE_FBREF_SCHEDULE_XG` (default on) |
+| SoccerStats | League table positions when APIs thin | Used after Wikipedia when `HIBS_PREFER_SCRAPED_STANDINGS=1` |
 | FotMob | Experimental fixture calendar only | `HIBS_ENABLE_FOTMOB_FIXTURES` |
-| StatsBomb Open | Opt-in goals proxy | `HIBS_ENABLE_STATSBOMB_OPEN_MATCHES` |
+| StatsBomb Open | Goals proxy → `statsbomb_goals_proxy_xg` | `HIBS_ENABLE_STATSBOMB_LIGHT` or `HIBS_MAX_DATA=1` |
 
 ## Backlog (metadata in registry)
 
-Transfermarkt, xGStat, BeSoccer, FootyStats, SoccerStats, DataMB, UEFA direct, footballdata.io — **planned**, not production parsers.
+Transfermarkt, xGStat, BeSoccer, FootyStats (aggregates site), DataMB, UEFA direct, footballdata.io — **planned**, not production parsers.
 
 ## Recommended implementation order (impact / effort)
 
 1. **Ops: `HIBS_MAX_DATA=1` + real keys** — enable Rapid stats xG, stop skipping heavy scrapers on “API strong” fixtures; largest xG uplift for top leagues with low code risk.
 2. **SofaScore → `scraped_xg`** — **wired** (`sofascore_client.team_xg_profile` + `scraped_xg`); enable with `HIBS_MAX_DATA=1` or `HIBS_ENABLE_SOFASCORE_XG=1`. Install `curl_cffi` if endpoints return 403.
 3. **Expand Understat `LEAGUE_SLUG`** — only where Understat actually publishes (verify slugs); low effort per league.
-4. **FBref schedule xG pattern for more comps** — replicate `fbref_scottish_xg` for Championship / League One where Opta xG exists on schedule pages; medium effort, HTML fragility.
+4. **FBref schedule xG for EFL + mid-tier Europe** — **wired** for Championship, L1/L2, Eredivisie, Primeira, Belgium, Denmark, Greece, Austria (plus Scottish tiers).
 5. **Defer Selenium stacks** (FotMob lineups, WhoScored, full SofaScore UI) — high maintenance; prefer APIs (Sportmonks xG add-on, API-Football premium) for production xG.
 
 ## Library wrappers (soccerdata / worldfootballR)

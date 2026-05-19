@@ -22,6 +22,9 @@ STATSBOMB_LEAGUE_OPEN: Dict[str, Tuple[str, str]] = {
     "BUNDESLIGA": ("Bundesliga", "Germany"),
     "LIGUE_1": ("Ligue 1", "France"),
     "CHAMPIONSHIP": ("Championship", "England"),
+    "EREDIVISIE": ("Eredivisie", "Netherlands"),
+    "PRIMEIRA": ("Primeira Liga", "Portugal"),
+    "BELGIUM_FIRST": ("Pro League", "Belgium"),
 }
 
 

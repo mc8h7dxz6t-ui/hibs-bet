@@ -67,9 +67,13 @@ def _xg_points(src: str, n_h: float, n_a: float) -> float:
         "scraped_recent_xg",
         "scottish_fbref_xg",
         "scottish_fbref_avg_xg",
+        "fbref_schedule_xg",
+        "fbref_schedule_avg_xg",
         "sofascore_xg",
     ):
         return 15.0
+    if s == "statsbomb_goals_proxy_xg":
+        return 12.0
     if s in ("form_derived_xg",):
         return 14.0
     if s in ("partial_scraped_xg", "mixed_api_goals_proxy", "partial_single_side", "partial_xg"):

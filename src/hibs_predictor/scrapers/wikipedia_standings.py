@@ -23,6 +23,8 @@ WP_SUFFIX: Dict[str, str] = {
     "EPL": "Premier_League",
     "SCOTLAND": "Scottish_Premiership",
     "SCOTLAND_CHAMP": "Scottish_Championship",
+    "SCOTLAND_L1": "Scottish_League_One",
+    "SCOTLAND_L2": "Scottish_League_Two",
     "LA_LIGA": "La_Liga",
     "SERIE_A": "Serie_A",
     "BUNDESLIGA": "Bundesliga",
@@ -36,6 +38,12 @@ WP_SUFFIX: Dict[str, str] = {
     "DENMARK_SL": "Danish_Superliga",
     "GREECE_SL": "Super_League_Greece",
     "AUSTRIA_BL": "Austrian_Football_Bundesliga",
+    "UCL": "UEFA_Champions_League",
+    "EUROPA_LEAGUE": "UEFA_Europa_League",
+    "UECL": "UEFA_Europa_Conference_League",
+    "WORLD_CUP": "FIFA_World_Cup",
+    "EUROS": "UEFA_European_Championship",
+    "NATIONS_LEAGUE": "UEFA_Nations_League",
 }
 
 

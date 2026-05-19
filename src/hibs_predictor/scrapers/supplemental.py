@@ -80,7 +80,9 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
         return hit
 
     out: Dict[str, Any] = {}
-    home = (fixture.get("home", {}) or {}).get("name", "")
+    from hibs_predictor.fixture_utils import fixture_team_name
+
+    home = fixture_team_name(fixture, "home")
     heavy_enabled = os.getenv("HIBS_ENABLE_HEAVY_SCRAPERS", "1").lower() not in ("0", "false", "no")
     skip_heavy, skip_reason = _skip_heavy_when_api_strong(enriched)
     heavy = heavy_enabled and not skip_heavy
@@ -104,7 +106,7 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
             from hibs_predictor.scrapers import understat_client as us
 
             if fixture_in_policy_window(fixture) and league_code in us.LEAGUE_SLUG:
-                away_nm = (fixture.get("away", {}) or {}).get("name", "")
+                away_nm = fixture_team_name(fixture, "away")
                 for sy in _understat_season_years_for_fixture(fixture):
                     row = us.find_fixture_row(league_code, sy, home, away_nm)
                     if row:
@@ -114,7 +116,15 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
         except Exception as exc:
             out["understat_light_error"] = str(exc)
 
-    sb_matches = os.getenv("HIBS_ENABLE_STATSBOMB_OPEN_MATCHES", "0").lower() in ("1", "true", "yes")
+    def _statsbomb_team_proxy_on() -> bool:
+        raw = os.getenv("HIBS_ENABLE_STATSBOMB_OPEN_MATCHES", "").strip().lower()
+        if raw in ("0", "false", "no", "off"):
+            return False
+        if raw in ("1", "true", "yes", "on"):
+            return True
+        return os.getenv("HIBS_MAX_DATA", "").strip().lower() in ("1", "true", "yes", "on")
+
+    sb_matches = _statsbomb_team_proxy_on()
     if sb_matches:
         try:
             from hibs_predictor.data_source_policy import fixture_in_policy_window, policy_window_utc
@@ -123,7 +133,7 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
             if fixture_in_policy_window(fixture) and league_code in sb.STATSBOMB_LEAGUE_OPEN:
                 lo, hi = policy_window_utc()
                 d_lo, d_hi = lo.date(), hi.date()
-                away_nm = (fixture.get("away", {}) or {}).get("name", "")
+                away_nm = fixture_team_name(fixture, "away")
                 out["statsbomb_open_team_proxy"] = {
                     "home": sb.team_proxy_from_open_matches(league_code, home, d_lo, d_hi),
                     "away": sb.team_proxy_from_open_matches(league_code, away_nm, d_lo, d_hi),
@@ -135,7 +145,7 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
         try:
             from hibs_predictor.scrapers import understat_client as us
 
-            away_nm = (fixture.get("away", {}) or {}).get("name", "")
+            away_nm = fixture_team_name(fixture, "away")
             row = None
             for sy in _understat_season_years_for_fixture(fixture):
                 row = us.find_fixture_row(league_code, sy, home, away_nm)
@@ -166,6 +176,32 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
         pass
 
     try:
+        from hibs_predictor.scrapers import soccerstats_standings as sstats
+
+        if league_code in sstats.LEAGUE_PARAM:
+            out["soccerstats_league_supported"] = True
+    except Exception:
+        pass
+
+    try:
+        from hibs_predictor.data_source_policy import fixture_in_policy_window
+        from hibs_predictor.scrapers.fbref_scottish_xg import has_fbref_schedule_xg, resolve_fbref_schedule_xg
+
+        if fixture_in_policy_window(fixture) and has_fbref_schedule_xg(league_code):
+            away_nm = fixture_team_name(fixture, "away")
+            fb = resolve_fbref_schedule_xg(league_code, home, away_nm)
+            if fb:
+                xh, xa, tag, fmeta = fb
+                out["fbref_schedule"] = {
+                    "xg_home": xh,
+                    "xg_away": xa,
+                    "source": tag,
+                    **{k: v for k, v in (fmeta or {}).items() if k not in ("xg_home", "xg_away")},
+                }
+    except Exception as exc:
+        out["fbref_schedule_error"] = str(exc)[:160]
+
+    try:
         from hibs_predictor.data_source_policy import fixture_in_policy_window
         from hibs_predictor.scrapers import sofascore_client as ss
 
@@ -175,7 +211,7 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
                 ev = ss.team_last_xg_summary(int(ent["id"]))
                 out["sofascore_team_events"] = ev[:5]
             if ss.sofascore_xg_enabled():
-                away_nm = (fixture.get("away", {}) or {}).get("name", "")
+                away_nm = fixture_team_name(fixture, "away")
                 hp = ss.team_xg_profile_for_name(home)
                 ap = ss.team_xg_profile_for_name(away_nm) if away_nm else None
                 if hp and ap:

@@ -30,12 +30,16 @@ An advanced bet predictor for UK and European football leagues with Edinburgh/Hi
 - **One-Time Setup**: Interactive API key configuration
 - **Fallback Mode**: Uses sample data if APIs unavailable
 
+## Project folder
+
+**Work here:** `~/Applications` (also `~/hibs-betting-app` → same folder). See `PROJECT_LOCATIONS.md`.
+
 ## Quick Start
 
 ### 1. Install & Setup
 
 ```bash
-cd hibs-bet
+cd ~/Applications
 python3 -m pip install -r requirements.txt
 python3 src/hibs_predictor/main.py setup
 ```

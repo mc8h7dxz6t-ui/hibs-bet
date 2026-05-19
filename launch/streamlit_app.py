@@ -12,6 +12,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(REPO_ROOT / ".env")
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+try:
+    from hibs_predictor.m5_optimization import setup_optimizations
+
+    setup_optimizations()
+except Exception:
+    pass
+
 from hibs_predictor.config import HIBS_LEAGUE_FOCUS, LEAGUES
 from hibs_predictor.web import fetch_next_48h_fixtures
 

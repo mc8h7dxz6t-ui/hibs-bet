@@ -3,9 +3,10 @@ Scraped / derived xG for upcoming fixtures when API-Football fixture stats are e
 
 Sources (priority):
   1. Understat league-page row for this fixture (top leagues)
-  2. FBref SPFL schedule xG / team rolling averages (Scottish leagues)
-  3. Average xG from API-Sports last finished matches per team (all leagues with stats)
-  4. Optional blend with existing goals_proxy when only one side has xG
+  2. FBref schedule xG / team rolling averages (Scottish, EFL, selected European)
+  3. StatsBomb open-data goals proxy → estimated xG when enabled
+  4. Average xG from API-Sports last finished matches per team (all leagues with stats)
+  5. Optional blend with existing goals_proxy when only one side has xG
 """
 
 from __future__ import annotations
@@ -31,6 +32,43 @@ def _avg_team_xg_from_recent(matches: List[Dict[str, Any]], team_id: int, min_sa
     if len(vals) < min_samples:
         return None
     return sum(vals) / len(vals)
+
+
+def _statsbomb_xg_enabled() -> bool:
+    raw = (os.getenv("HIBS_ENABLE_STATSBOMB_LIGHT") or "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    return _env_on("HIBS_MAX_DATA", "0")
+
+
+def _xg_from_statsbomb_proxy(
+    sb_proxy: Any,
+    enriched: Dict[str, Any],
+) -> Optional[Tuple[float, float]]:
+    if not isinstance(sb_proxy, dict):
+        return None
+    home = sb_proxy.get("home") if isinstance(sb_proxy.get("home"), dict) else {}
+    away = sb_proxy.get("away") if isinstance(sb_proxy.get("away"), dict) else {}
+    if not home.get("ok") or not away.get("ok"):
+        return None
+    try:
+        h_gf = float(home.get("gf_pg") or 0)
+        h_ga = float(home.get("ga_pg") or 0)
+        a_gf = float(away.get("gf_pg") or 0)
+        a_ga = float(away.get("ga_pg") or 0)
+        h_n = int(home.get("matches_used") or 0)
+        a_n = int(away.get("matches_used") or 0)
+    except (TypeError, ValueError):
+        return None
+    if h_n < 2 or a_n < 2 or h_gf <= 0 or a_gf <= 0:
+        return None
+    strength = float(enriched.get("league_factor") or 1.0)
+    base = 1.1 * max(0.55, min(1.45, strength))
+    xh = max(0.35, min(3.2, (h_gf + a_ga) / 2.0 * base / 1.15))
+    xa = max(0.35, min(3.2, (a_gf + h_ga) / 2.0 * base / 1.15))
+    return xh, xa
 
 
 def _understat_pair_from_dict(us: Dict[str, Any]) -> Optional[Tuple[float, float]]:
@@ -85,8 +123,10 @@ def resolve_scraped_xg(
 
     home_id = (fixture.get("teams", {}) or {}).get("home", {}).get("id") or 0
     away_id = (fixture.get("teams", {}) or {}).get("away", {}).get("id") or 0
-    home_nm = (fixture.get("home", {}) or {}).get("name", "")
-    away_nm = (fixture.get("away", {}) or {}).get("name", "")
+    from hibs_predictor.fixture_utils import fixture_team_name
+
+    home_nm = fixture_team_name(fixture, "home")
+    away_nm = fixture_team_name(fixture, "away")
     sup = enriched.get("supplemental") if isinstance(enriched.get("supplemental"), dict) else {}
     meta: Dict[str, Any] = {}
 
@@ -137,22 +177,30 @@ def resolve_scraped_xg(
         pass
 
     try:
-        from hibs_predictor.scrapers.fbref_scottish_xg import resolve_scottish_fbref_xg
+        from hibs_predictor.scrapers.fbref_scottish_xg import resolve_fbref_schedule_xg
 
-        scot = resolve_scottish_fbref_xg(league_code, home_nm, away_nm)
-        if scot:
-            xh, xa, tag, smeta = scot
+        fb = resolve_fbref_schedule_xg(league_code, home_nm, away_nm)
+        if fb:
+            xh, xa, tag, smeta = fb
             meta.update(smeta)
             return float(xh), float(xa), tag, meta
     except Exception:
         pass
 
-    sup_fbref = sup.get("fbref_scottish") if isinstance(sup, dict) else None
+    sup_fbref = sup.get("fbref_schedule") or sup.get("fbref_scottish")
     if isinstance(sup_fbref, dict):
         pair = _understat_pair_from_dict(sup_fbref)
         if pair:
-            meta["fbref_scottish_key"] = "supplemental"
-            return pair[0], pair[1], str(sup_fbref.get("source") or "scottish_fbref_xg"), meta
+            meta["fbref_schedule_key"] = "supplemental"
+            src = str(sup_fbref.get("source") or "fbref_schedule_xg")
+            return pair[0], pair[1], src, meta
+
+    if _statsbomb_xg_enabled():
+        sb_proxy = sup.get("statsbomb_open_team_proxy") if isinstance(sup, dict) else None
+        pair = _xg_from_statsbomb_proxy(sb_proxy, enriched)
+        if pair:
+            meta["statsbomb"] = "open_goals_proxy"
+            return pair[0], pair[1], "statsbomb_goals_proxy_xg", meta
 
     h_avg = _avg_team_xg_from_recent(enriched.get("home_recent") or [], int(home_id or 0))
     a_avg = _avg_team_xg_from_recent(enriched.get("away_recent") or [], int(away_id or 0))

@@ -1,7 +1,8 @@
-"""FBref SPFL schedule xG for Scottish leagues (no Understat SPL coverage).
+"""FBref competition schedule xG (Scottish + EFL + selected European leagues).
 
 Fetches the competition schedule/scores page once per league+season (cached) and
 resolves fixture xG by team-name match, or rolling team averages from finished rows.
+Understat omits many of these comps; schedule pages often carry Opta xG columns.
 """
 
 from __future__ import annotations
@@ -27,11 +28,36 @@ FBREF_SCOTTISH_LEAGUE: Dict[str, Tuple[str, str]] = {
     "SCOTLAND_L2": ("227", "Scottish-League-Two"),
 }
 
+# Additional comps with schedule-level xG on FBref (no Understat or thin API xG).
+FBREF_SCHEDULE_EXTRA: Dict[str, Tuple[str, str]] = {
+    "SERIE_A": ("11", "Serie-A"),
+    "CHAMPIONSHIP": ("10", "EFL-Championship"),
+    "LEAGUE_ONE": ("15", "EFL-League-One"),
+    "LEAGUE_TWO": ("16", "EFL-League-Two"),
+    "EREDIVISIE": ("23", "Eredivisie"),
+    "PRIMEIRA": ("32", "Primeira-Liga"),
+    "BELGIUM_FIRST": ("37", "Belgian-Pro-League"),
+    "DENMARK_SL": ("50", "Superliga"),
+    "GREECE_SL": ("27", "Super-League-Greece"),
+    "AUSTRIA_BL": ("56", "Austrian-Bundesliga"),
+}
+
+FBREF_SCHEDULE_LEAGUES: Dict[str, Tuple[str, str]] = {**FBREF_SCOTTISH_LEAGUE, **FBREF_SCHEDULE_EXTRA}
+
 SCOTTISH_LEAGUE_CODES = frozenset(FBREF_SCOTTISH_LEAGUE.keys())
+SCHEDULE_XG_LEAGUE_CODES = frozenset(FBREF_SCHEDULE_LEAGUES.keys())
 
 
 def is_scottish_league(league_code: str) -> bool:
     return (league_code or "").strip().upper() in SCOTTISH_LEAGUE_CODES
+
+
+def has_fbref_schedule_xg(league_code: str) -> bool:
+    return (league_code or "").strip().upper() in SCHEDULE_XG_LEAGUE_CODES
+
+
+def _schedule_xg_enabled() -> bool:
+    return _env_on("HIBS_ENABLE_FBREF_SCHEDULE_XG", "1") or _env_on("HIBS_ENABLE_SCOTTISH_FBREF_XG", "1")
 
 
 def _env_on(name: str, default: str = "1") -> bool:
@@ -146,7 +172,7 @@ def fetch_schedule_rows(
     *,
     cache: Optional[Cache] = None,
 ) -> List[Dict[str, Any]]:
-    meta = FBREF_SCOTTISH_LEAGUE.get((league_code or "").strip().upper())
+    meta = FBREF_SCHEDULE_LEAGUES.get((league_code or "").strip().upper())
     if not meta:
         return []
     comp_id, slug = meta
@@ -204,17 +230,16 @@ def avg_team_xg(
     return sum(vals[:last_n]) / min(len(vals), last_n)
 
 
-def resolve_scottish_fbref_xg(
+def resolve_fbref_schedule_xg(
     league_code: str,
     home_name: str,
     away_name: str,
 ) -> Optional[Tuple[float, float, str, Dict[str, Any]]]:
-    """
-    Return (xg_home, xg_away, source_tag, meta) for Scottish league fixtures.
-    """
-    if not _env_on("HIBS_ENABLE_SCOTTISH_FBREF_XG", "1"):
+    """Return (xg_home, xg_away, source_tag, meta) when FBref schedule xG is available."""
+    if not _schedule_xg_enabled():
         return None
-    if not is_scottish_league(league_code):
+    code = (league_code or "").strip().upper()
+    if code not in SCHEDULE_XG_LEAGUE_CODES:
         return None
     try:
         rows = fetch_schedule_rows(league_code)
@@ -222,14 +247,28 @@ def resolve_scottish_fbref_xg(
         return None
     if not rows:
         return None
+    scot = is_scottish_league(code)
+    tag_row = "scottish_fbref_xg" if scot else "fbref_schedule_xg"
+    tag_avg = "scottish_fbref_avg_xg" if scot else "fbref_schedule_avg_xg"
     meta: Dict[str, Any] = {"league": league_code, "rows": len(rows)}
     pair = find_fixture_xg(league_code, home_name, away_name, rows=rows)
     if pair:
         meta["match"] = "schedule_row"
-        return pair[0], pair[1], "scottish_fbref_xg", meta
+        return pair[0], pair[1], tag_row, meta
     h_avg = avg_team_xg(league_code, home_name, rows=rows)
     a_avg = avg_team_xg(league_code, away_name, rows=rows)
     if h_avg is not None and a_avg is not None:
         meta["match"] = "team_avg_last10"
-        return h_avg, a_avg, "scottish_fbref_avg_xg", meta
+        return h_avg, a_avg, tag_avg, meta
     return None
+
+
+def resolve_scottish_fbref_xg(
+    league_code: str,
+    home_name: str,
+    away_name: str,
+) -> Optional[Tuple[float, float, str, Dict[str, Any]]]:
+    """Backward-compatible alias — Scottish leagues only."""
+    if not is_scottish_league(league_code):
+        return None
+    return resolve_fbref_schedule_xg(league_code, home_name, away_name)

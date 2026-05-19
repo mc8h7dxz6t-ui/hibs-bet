@@ -13,6 +13,15 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 load_dotenv(os.path.join(BASE_DIR, ".env.local"))
 
+try:
+    from hibs_predictor.m5_optimization import setup_optimizations
+
+    _optimization_config = setup_optimizations()
+    if _optimization_config["platform"]["is_apple_silicon"]:
+        print("Apple Silicon (M-series) optimizations enabled")
+except Exception as exc:
+    print(f"M5 optimizations skipped: {exc}")
+
 from flask import Flask, render_template, jsonify, request, abort
 from hibs_predictor.config import LEAGUES, ALL_LEAGUE_CODES, LEAGUE_REGIONS, DASHBOARD_LEAGUE_ORDER
 from hibs_predictor.cache import Cache
@@ -86,8 +95,10 @@ def _env_truthy(name: str) -> bool:
 
 
 def _fixture_key(fixture: Dict[str, Any]) -> str:
-    home = fixture.get("home", {}).get("name") or fixture.get("teams", {}).get("home", {}).get("name", "")
-    away = fixture.get("away", {}).get("name") or fixture.get("teams", {}).get("away", {}).get("name", "")
+    from hibs_predictor.fixture_utils import fixture_team_name
+
+    home = fixture_team_name(fixture, "home")
+    away = fixture_team_name(fixture, "away")
     return f"{home}|{away}|{fixture.get('date', '')}"
 
 

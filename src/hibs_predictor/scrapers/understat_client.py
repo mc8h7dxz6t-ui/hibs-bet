@@ -57,6 +57,39 @@ def fetch_league_matches(league_code: str, season_year: int) -> List[Dict[str, A
     return arr or []
 
 
+def _norm_match_name(name: str) -> str:
+    """Loose match for API-Football / FDO long names vs Understat short titles."""
+    s = (name or "").lower().strip()
+    for drop in (
+        "acf ",
+        "ac ",
+        "fc ",
+        "ss ",
+        "us ",
+        "ssd ",
+        "uc ",
+        "as ",
+        "1909 ",
+        "1913 ",
+        "bc ",
+    ):
+        if s.startswith(drop):
+            s = s[len(drop) :].strip()
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+
+def _names_match(a: str, b: str) -> bool:
+    na, nb = _norm_match_name(a), _norm_match_name(b)
+    if not na or not nb:
+        return False
+    if na == nb or na in nb or nb in na:
+        return True
+    pa = [p for p in na.split() if len(p) > 2]
+    pb = [p for p in nb.split() if len(p) > 2]
+    return bool(pa and pb and pa[0] == pb[0])
+
+
 def find_fixture_row(
     league_code: str,
     season_year: int,
@@ -64,15 +97,12 @@ def find_fixture_row(
     away_name: str,
 ) -> Optional[Dict[str, Any]]:
     rows = fetch_league_matches(league_code, season_year)
-    h = (home_name or "").lower()
-    a = (away_name or "").lower()
     for row in rows:
         ho = row.get("h") or {}
         ao = row.get("a") or {}
         rh = ho.get("title") if isinstance(ho, dict) else str(ho)
         ra = ao.get("title") if isinstance(ao, dict) else str(ao)
-        rh, ra = str(rh).lower(), str(ra).lower()
-        if (h in rh or rh in h) and (a in ra or ra in a):
+        if _names_match(home_name, rh) and _names_match(away_name, ra):
             return row
     return None
 
