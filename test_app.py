@@ -1605,8 +1605,8 @@ def test_settings_fixture_window_ui():
 
 
 def test_sky_youtube_panel():
-    """Dashboard shows YouTube-only Sky panel; no Sky Go settings or watch links."""
-    print("\nTesting Sky Sports YouTube panel...")
+    """Fixed Sky dock in base layout; persists on settings; hide via env."""
+    print("\nTesting Sky Sports YouTube dock...")
     try:
         from unittest.mock import patch
         from hibs_predictor.web import app
@@ -1618,37 +1618,49 @@ def test_sky_youtube_panel():
             client = app.test_client()
             settings = client.get("/settings")
             dashboard = client.get("/")
+            guide = client.get("/guide")
 
         assert settings.status_code == 200
         sbody = settings.get_data(as_text=True)
         assert 'data-hibs-setting-check="hasSkyAccess"' not in sbody
         assert "I have Sky / Sky Go" not in sbody
         assert "Sky Sports</h2>" not in sbody
+        assert "sky-dock" in sbody
+        assert "hibs-sky-dock-enabled" in sbody
+        assert "hibs_sky_dock_collapsed" in sbody
+        assert "sky-dock-collapse" in sbody
 
         assert dashboard.status_code == 200
         dbody = dashboard.get_data(as_text=True)
-        assert "sky-sports-news" in dbody
-        assert "Watch" in dbody
+        assert "sky-dock" in dbody
+        assert "sky-sports-news" not in dbody
         assert "sky-browser-url" in dbody
         assert "youtube.com/@SkySportsNews/live" in dbody
         assert "youtube.com/@SkySportsFootball" in dbody
-        assert "Open in browser" in dbody
+        assert "sky-tab-football" in dbody and "sky-tab-football" in dbody
+        assert 'data-sky-tab="sky-tab-football"' in dbody
         assert "youtube-nocookie.com/embed" in dbody
         assert "a-E_HJ7p1qg" in dbody
         assert "data-sky-when" not in dbody
         assert "skysports.com/watch" not in dbody
         assert "Watch on Sky" not in dbody
         assert "Sky Go" not in dbody
-        assert "Sky Sports News 24/7" in dbody and "Sky Sports Football" in dbody
+        assert "hibs-app-shell" in dbody
+        assert "--sky-dock-width:320px" in dbody
+
+        assert guide.status_code == 200
+        assert "sky-dock" in guide.get_data(as_text=True)
 
         with patch.dict("os.environ", {"HIBS_SHOW_SKY_PANEL": "0"}, clear=False):
             hidden = client.get("/")
         assert hidden.status_code == 200
-        assert "sky-sports-news" not in hidden.get_data(as_text=True)
-        print("  ✓ Sky Sports YouTube panel (hide via HIBS_SHOW_SKY_PANEL=0)")
+        hidden_body = hidden.get_data(as_text=True)
+        assert "sky-dock" not in hidden_body
+        assert "hibs-sky-dock-enabled" not in hidden_body
+        print("  ✓ Sky Sports fixed dock (hide via HIBS_SHOW_SKY_PANEL=0)")
         return True
     except Exception as e:
-        print(f"  ✗ Sky Sports YouTube panel test failed: {e}")
+        print(f"  ✗ Sky Sports YouTube dock test failed: {e}")
         return False
 
 

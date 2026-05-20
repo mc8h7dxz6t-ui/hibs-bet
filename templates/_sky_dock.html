@@ -1,0 +1,139 @@
+<aside class="sky-dock" id="sky-dock" aria-label="Sky Sports Football">
+    <div class="sky-dock-hd">
+        <span class="sky-dock-title"><span class="sky-dock-ico" aria-hidden="true">📺</span> Sky Football</span>
+        <button type="button" class="sky-dock-collapse" id="sky-dock-collapse" title="Hide Sky panel" aria-label="Hide Sky panel" aria-expanded="true">›</button>
+    </div>
+    <div class="sky-dock-body">
+        <div class="sky-browser sky-dock-browser" id="sky-browser">
+            <div class="sky-browser-toolbar" role="toolbar" aria-label="Preset YouTube browser">
+                <button type="button" class="sky-browser-back" id="sky-browser-back" title="Previous preset" aria-label="Previous preset">←</button>
+                <label class="visually-hidden" for="sky-browser-url">Current preset URL</label>
+                <input
+                    type="text"
+                    class="sky-browser-url"
+                    id="sky-browser-url"
+                    readonly
+                    value="{{ sky_sports_football_preset_url }}"
+                    aria-readonly="true"
+                />
+                <a
+                    href="{{ sky_sports_football_open_url }}"
+                    id="sky-browser-open"
+                    class="sky-browser-open"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >Open ↗</a>
+            </div>
+            <div class="sky-browser-tabs tab-row sky-dock-tabs" role="tablist" aria-label="Sky Sports YouTube presets">
+                <button
+                    type="button"
+                    class="tab-btn active"
+                    data-tab-group="sky-media"
+                    data-sky-tab="sky-tab-football"
+                    data-sky-preset-url="{{ sky_sports_football_preset_url }}"
+                    data-sky-open-url="{{ sky_sports_football_open_url }}"
+                    onclick="switchTab(event,'sky-tab-football','sky-media')"
+                >Football</button>
+                <button
+                    type="button"
+                    class="tab-btn sky-dock-tab-news"
+                    data-tab-group="sky-media"
+                    data-sky-tab="sky-tab-news"
+                    data-sky-preset-url="{{ sky_sports_news_preset_url }}"
+                    data-sky-open-url="{{ sky_sports_news_open_url }}"
+                    onclick="switchTab(event,'sky-tab-news','sky-media')"
+                >News</button>
+            </div>
+            <div id="sky-tab-football" class="tab-panel active sky-browser-viewport sky-dock-viewport" data-group="sky-media">
+                <iframe
+                    class="sky-browser-iframe sky-dock-iframe"
+                    title="Sky Sports Football — YouTube embed"
+                    src="{{ sky_sports_football_clips_embed_url }}"
+                    loading="lazy"
+                    referrerpolicy="strict-origin-when-cross-origin"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowfullscreen
+                ></iframe>
+            </div>
+            <div id="sky-tab-news" class="tab-panel sky-browser-viewport sky-dock-viewport" data-group="sky-media">
+                <iframe
+                    class="sky-browser-iframe sky-dock-iframe"
+                    title="Sky Sports News 24/7 — YouTube embed"
+                    src="{{ sky_sports_news_live_embed_url }}"
+                    loading="lazy"
+                    referrerpolicy="strict-origin-when-cross-origin"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowfullscreen
+                ></iframe>
+            </div>
+        </div>
+    </div>
+</aside>
+<button type="button" class="sky-dock-reveal" id="sky-dock-reveal" title="Show Sky Sports Football" aria-label="Show Sky Sports Football" hidden>📺 Sky</button>
+<script>
+(function () {
+    var DOCK_KEY = 'hibs_sky_dock_collapsed';
+    var root = document.documentElement;
+    var dock = document.getElementById('sky-dock');
+    var collapseBtn = document.getElementById('sky-dock-collapse');
+    var revealBtn = document.getElementById('sky-dock-reveal');
+    if (!dock) return;
+
+    function isCollapsed() {
+        try { return localStorage.getItem(DOCK_KEY) === '1'; } catch (e) { return false; }
+    }
+
+    function setCollapsed(collapsed) {
+        root.classList.toggle('sky-dock-collapsed', collapsed);
+        if (collapseBtn) {
+            collapseBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            collapseBtn.textContent = collapsed ? '‹' : '›';
+            collapseBtn.title = collapsed ? 'Show Sky panel' : 'Hide Sky panel';
+        }
+        if (revealBtn) revealBtn.hidden = !collapsed;
+        try { localStorage.setItem(DOCK_KEY, collapsed ? '1' : '0'); } catch (e) {}
+    }
+
+    setCollapsed(isCollapsed());
+
+    if (collapseBtn) {
+        collapseBtn.addEventListener('click', function () {
+            setCollapsed(!root.classList.contains('sky-dock-collapsed'));
+        });
+    }
+    if (revealBtn) {
+        revealBtn.addEventListener('click', function () {
+            setCollapsed(false);
+        });
+    }
+
+    var browser = document.getElementById('sky-browser');
+    if (!browser) return;
+    var urlEl = document.getElementById('sky-browser-url');
+    var openEl = document.getElementById('sky-browser-open');
+    var backBtn = document.getElementById('sky-browser-back');
+    var tabOrder = ['sky-tab-football', 'sky-tab-news'];
+
+    function applyPreset(btn) {
+        if (!btn) return;
+        if (urlEl && btn.dataset.skyPresetUrl) urlEl.value = btn.dataset.skyPresetUrl;
+        if (openEl && btn.dataset.skyOpenUrl) openEl.href = btn.dataset.skyOpenUrl;
+    }
+
+    document.addEventListener('hibs-tab-change', function (e) {
+        if (!e.detail || e.detail.groupId !== 'sky-media') return;
+        var btn = browser.querySelector('[data-sky-tab="' + e.detail.tabId + '"]');
+        applyPreset(btn);
+    });
+
+    if (backBtn) {
+        backBtn.addEventListener('click', function () {
+            var active = browser.querySelector('[data-tab-group="sky-media"].active');
+            var idx = active ? tabOrder.indexOf(active.dataset.skyTab) : 0;
+            var prev = tabOrder[(idx <= 0 ? tabOrder.length : idx) - 1];
+            var btn = browser.querySelector('[data-sky-tab="' + prev + '"]');
+            if (btn) btn.click();
+        });
+    }
+})();
+</script>

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en"{% if show_sky_panel %} class="hibs-sky-dock-enabled"{% endif %}>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -338,21 +338,69 @@
         .chip-lg:hover{color:var(--text);}
         .chip-lg.active{background:rgba(57,255,20,0.12);color:var(--neon-value);border-color:rgba(57,255,20,0.4);}
         .chip-hint{width:100%;font-size:0.65em;color:var(--muted);line-height:1.35;margin:-4px 0 2px;}
-        .sky-watch-card{border:1px solid var(--border);border-radius:12px;background:rgba(15,23,42,0.75);margin-bottom:14px;overflow:hidden;}
-        .sky-watch-sum{cursor:pointer;list-style:none;display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 14px;font-weight:700;font-size:0.82em;}
-        .sky-watch-sum::-webkit-details-marker{display:none;}
-        .sky-watch-ico{font-size:1.1em;}
-        .sky-watch-sub{margin-left:auto;color:var(--muted);font-weight:500;font-size:0.78em;}
-        .sky-watch-body{padding:0 14px 14px;}
-        .sky-watch-note{margin:0 0 10px;line-height:1.4;}
+        :root{--sky-dock-width:320px;}
+        .hibs-app-shell{min-width:0;transition:padding-right 0.22s ease;}
+        html.hibs-sky-dock-enabled:not(.sky-dock-collapsed) .hibs-app-shell{
+            padding-right:calc(var(--sky-dock-width) + 20px);
+        }
+        .sky-dock{
+            position:fixed;top:10px;right:10px;z-index:50;
+            width:var(--sky-dock-width);height:calc(100vh - 20px);
+            display:flex;flex-direction:column;
+            border:1px solid var(--border);border-radius:14px;
+            background:rgba(15,23,42,0.97);
+            box-shadow:0 16px 48px rgba(0,0,0,0.45);
+            overflow:hidden;
+            transition:transform 0.22s ease,opacity 0.22s ease;
+        }
+        html.sky-dock-collapsed .sky-dock{
+            transform:translateX(calc(100% + 24px));
+            opacity:0;pointer-events:none;
+        }
+        .sky-dock-hd{
+            display:flex;align-items:center;justify-content:space-between;gap:8px;
+            padding:10px 12px;border-bottom:1px solid var(--border);
+            background:rgba(2,6,23,0.65);flex-shrink:0;
+        }
+        .sky-dock-title{font-size:0.78em;font-weight:800;color:var(--hibs-neon);letter-spacing:0.06em;display:flex;align-items:center;gap:6px;}
+        .sky-dock-ico{font-size:1.05em;}
+        .sky-dock-collapse{
+            flex:0 0 auto;width:28px;height:28px;border:1px solid var(--border);border-radius:8px;
+            background:rgba(30,41,59,0.9);color:var(--muted);font-size:1.1em;line-height:1;cursor:pointer;
+        }
+        .sky-dock-collapse:hover{border-color:var(--blue);color:var(--blue);}
+        .sky-dock-body{flex:1;min-height:0;display:flex;flex-direction:column;padding:8px;}
+        .sky-dock-browser{flex:1;min-height:0;display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:rgba(2,6,23,0.6);}
+        .sky-dock-tabs .tab-btn{font-size:0.68em;padding:5px 10px;}
+        .sky-dock-tab-news{font-size:0.62em!important;opacity:0.9;}
+        .sky-dock-viewport{flex:1;min-height:0;display:flex;flex-direction:column;}
+        .sky-dock-viewport.tab-panel.active{display:flex;}
+        .sky-dock-iframe{flex:1;min-height:0;width:100%;height:100%;border:0;}
+        .sky-dock-reveal{
+            position:fixed;right:0;top:42%;z-index:49;
+            transform:translateY(-50%);
+            padding:10px 8px 10px 10px;border:1px solid var(--border);border-right:none;
+            border-radius:12px 0 0 12px;background:rgba(15,23,42,0.96);
+            color:var(--hibs-neon);font-size:0.68em;font-weight:800;cursor:pointer;
+            box-shadow:-8px 0 24px rgba(0,0,0,0.35);font-family:'Inter',sans-serif;
+        }
+        .sky-dock-reveal:hover{border-color:rgba(124,252,0,0.35);}
+        html.hibs-sky-dock-enabled:not(.sky-dock-collapsed) .hibs-assistant-fab{right:calc(var(--sky-dock-width) + 28px);}
+        html.hibs-sky-dock-enabled:not(.sky-dock-collapsed) .betslip-fab{right:calc(var(--sky-dock-width) + 90px);}
+        @media(max-width:1100px){
+            html.hibs-sky-dock-enabled .hibs-app-shell{padding-right:0!important;}
+            .sky-dock,.sky-dock-reveal{display:none!important;}
+            html.hibs-sky-dock-enabled .hibs-assistant-fab{right:20px;}
+            html.hibs-sky-dock-enabled .betslip-fab{right:82px;}
+        }
         .sky-browser{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:rgba(2,6,23,0.6);}
-        .sky-browser-toolbar{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border);background:rgba(15,23,42,0.9);}
+        .sky-browser-toolbar{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border);background:rgba(15,23,42,0.9);flex-shrink:0;}
         .sky-browser-back{flex:0 0 auto;width:32px;height:32px;border:1px solid var(--border);border-radius:8px;background:rgba(30,41,59,0.9);color:var(--text);font-size:1em;cursor:pointer;line-height:1;}
         .sky-browser-back:hover{border-color:var(--blue);color:var(--blue);}
         .sky-browser-url{flex:1;min-width:0;height:32px;border:1px solid var(--border);border-radius:8px;background:rgba(2,6,23,0.85);color:var(--muted);font-size:0.72em;font-family:ui-monospace,monospace;padding:0 10px;}
         .sky-browser-open{flex:0 0 auto;font-size:0.68em;font-weight:700;color:var(--blue);white-space:nowrap;text-decoration:none;padding:6px 8px;border-radius:8px;border:1px solid transparent;}
         .sky-browser-open:hover{border-color:rgba(96,165,250,0.35);background:rgba(96,165,250,0.08);}
-        .sky-browser-tabs{margin:0;padding:8px 10px 0;border-bottom:1px solid var(--border);}
+        .sky-browser-tabs{margin:0;padding:8px 10px 0;border-bottom:1px solid var(--border);flex-shrink:0;}
         .sky-browser-viewport{background:#000;}
         .sky-browser-iframe{display:block;width:100%;height:280px;border:0;}
         .visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
@@ -779,6 +827,15 @@
     <script>
         (function () {
             try {
+                if (localStorage.getItem('hibs_sky_dock_collapsed') === '1') {
+                    document.documentElement.classList.add('sky-dock-collapsed');
+                }
+            } catch (e) {}
+        })();
+    </script>
+    <script>
+        (function () {
+            try {
                 var raw = localStorage.getItem('hibs_user_settings_v1');
                 var s = raw ? JSON.parse(raw) : {};
                 var root = document.documentElement;
@@ -790,10 +847,13 @@
     </script>
 </head>
 <body>
-<div class="container{% block container_class %}{% endblock %}">
+<div class="hibs-app-shell container{% block container_class %}{% endblock %}{% if show_sky_panel %} hibs-sky-dock-shell{% endif %}">
     {% block content %}{% endblock %}
     <footer><p><span>hibs-bet</span> &mdash; Edinburgh Betting Intelligence &nbsp;|&nbsp; Gamble Responsibly &nbsp;|&nbsp; 18+</p></footer>
 </div>
+{% if show_sky_panel %}
+{% include '_sky_dock.html' %}
+{% endif %}
 {% include '_betslip_drawer.html' %}
 <script src="{{ url_for('static', filename='hibs_odds.js') }}"></script>
 <script src="{{ url_for('static', filename='hibs_betslip.js') }}"></script>

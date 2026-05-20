@@ -137,13 +137,30 @@ def _env_truthy(name: str) -> bool:
 
 
 def _show_sky_panel() -> bool:
-    """Dashboard Sky Sports YouTube panel (set HIBS_SHOW_SKY_PANEL=0 to hide)."""
+    """Global Sky Sports dock (set HIBS_SHOW_SKY_PANEL=0 to hide)."""
     return (os.getenv("HIBS_SHOW_SKY_PANEL") or "1").strip().lower() not in (
         "0",
         "false",
         "no",
         "off",
     )
+
+
+def _sky_dock_context() -> Dict[str, Any]:
+    return {
+        "show_sky_panel": _show_sky_panel(),
+        "sky_sports_news_live_embed_url": SKY_SPORTS_NEWS_YOUTUBE_LIVE_EMBED_URL,
+        "sky_sports_news_preset_url": SKY_SPORTS_NEWS_YOUTUBE_PRESET_DISPLAY,
+        "sky_sports_news_open_url": SKY_SPORTS_NEWS_YOUTUBE_LIVE_PAGE_URL,
+        "sky_sports_football_clips_embed_url": SKY_SPORTS_FOOTBALL_YOUTUBE_CLIPS_EMBED_URL,
+        "sky_sports_football_preset_url": SKY_SPORTS_FOOTBALL_YOUTUBE_PRESET_DISPLAY,
+        "sky_sports_football_open_url": SKY_SPORTS_FOOTBALL_YOUTUBE_CHANNEL_URL,
+    }
+
+
+@app.context_processor
+def inject_sky_dock():
+    return _sky_dock_context()
 
 
 def _fixture_key(fixture: Dict[str, Any]) -> str:
@@ -1363,13 +1380,6 @@ def index():
         leagues=LEAGUES,
         data_quality_ui_min=_ui_data_quality_min_pct(),
         assistant_packets=assistant_packets,
-        show_sky_panel=_show_sky_panel(),
-        sky_sports_news_live_embed_url=SKY_SPORTS_NEWS_YOUTUBE_LIVE_EMBED_URL,
-        sky_sports_news_preset_url=SKY_SPORTS_NEWS_YOUTUBE_PRESET_DISPLAY,
-        sky_sports_news_open_url=SKY_SPORTS_NEWS_YOUTUBE_LIVE_PAGE_URL,
-        sky_sports_football_clips_embed_url=SKY_SPORTS_FOOTBALL_YOUTUBE_CLIPS_EMBED_URL,
-        sky_sports_football_preset_url=SKY_SPORTS_FOOTBALL_YOUTUBE_PRESET_DISPLAY,
-        sky_sports_football_open_url=SKY_SPORTS_FOOTBALL_YOUTUBE_CHANNEL_URL,
         assistant_recommendations=assistant_bundle.get("recommendations"),
         sidebar_upcoming=data.get("sidebar_upcoming", []),
         display_tz_label=display_tz_label(),
