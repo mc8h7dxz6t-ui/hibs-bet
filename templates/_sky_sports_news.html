@@ -6,13 +6,18 @@
     </summary>
     <div class="sky-news-body">
         <p class="sky-news-note muted small">
-            Embedded via the official <strong>Sky Sports News</strong> YouTube channel when live.
-            Full TV player and regional rights are on Sky’s site — use the button if the embed is offline.
+            The YouTube <strong>live</strong> embed only works while Sky Sports News is broadcasting there.
+            For the full TV player, use Sky’s site — recent official clips play below when not live.
         </p>
+        <div class="sky-news-actions sky-news-actions-primary">
+            <a href="{{ sky_sports_news_watch_url }}" class="nav-btn sky-news-watch-live" target="_blank" rel="noopener noreferrer">
+                Watch live on Sky Sports
+            </a>
+        </div>
         <div class="sky-news-player-wrap">
             <iframe
                 class="sky-news-iframe"
-                title="Sky Sports News live (YouTube)"
+                title="Sky Sports News — official YouTube clips"
                 src="{{ sky_sports_news_embed_url }}"
                 loading="lazy"
                 referrerpolicy="strict-origin-when-cross-origin"
@@ -20,10 +25,8 @@
                 allowfullscreen
             ></iframe>
         </div>
-        <div class="sky-news-actions">
-            <a href="{{ sky_sports_news_watch_url }}" class="nav-btn sky-news-open" target="_blank" rel="noopener noreferrer">
-                Open Sky Sports News
-            </a>
-        </div>
+        <p class="sky-news-embed-hint muted small">
+            Official <strong>Sky Sports News</strong> YouTube uploads. If the player is blank, open Sky Sports above.
+        </p>
     </div>
 </details>

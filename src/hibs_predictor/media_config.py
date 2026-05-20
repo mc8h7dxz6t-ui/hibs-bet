@@ -3,8 +3,14 @@
 # Sky Sports News — free-to-air on UK TV; web player at skysports.com (not iframe-embeddable).
 SKY_SPORTS_NEWS_WATCH_URL = "https://www.skysports.com/watch/sky-sports-news"
 
-# Official @SkySportsNews YouTube — live embed when the channel is broadcasting.
+# Official @SkySportsNews YouTube (https://www.youtube.com/@SkySportsNews)
 SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_ID = "UCcw05gGzjLIs5dnxGkQHMvw"
+
+# Channel uploads playlist (UC… → UU…). Works when the channel is not live; live_stream embed shows "unavailable" offline.
+SKY_SPORTS_NEWS_YOUTUBE_UPLOADS_PLAYLIST_ID = "UU" + SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_ID[2:]
+
+# Primary dashboard embed: recent official clips (nocookie). Live 24/7 stream is on Sky’s site, not this iframe.
 SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL = (
-    f"https://www.youtube.com/embed/live_stream?channel={SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_ID}"
+    "https://www.youtube-nocookie.com/embed/videoseries"
+    f"?list={SKY_SPORTS_NEWS_YOUTUBE_UPLOADS_PLAYLIST_ID}"
 )

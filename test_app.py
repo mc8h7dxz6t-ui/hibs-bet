@@ -1417,13 +1417,16 @@ def test_sky_sports_news_media_config():
     try:
         from hibs_predictor.media_config import (
             SKY_SPORTS_NEWS_WATCH_URL,
-            SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL,
             SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_ID,
+            SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL,
+            SKY_SPORTS_NEWS_YOUTUBE_UPLOADS_PLAYLIST_ID,
         )
 
         assert "skysports.com" in SKY_SPORTS_NEWS_WATCH_URL
-        assert SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_ID in SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL
-        assert "youtube.com/embed/live_stream" in SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL
+        assert SKY_SPORTS_NEWS_YOUTUBE_UPLOADS_PLAYLIST_ID.startswith("UU")
+        assert SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_ID.replace("UC", "UU", 1) == SKY_SPORTS_NEWS_YOUTUBE_UPLOADS_PLAYLIST_ID
+        assert "youtube-nocookie.com/embed/videoseries" in SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL
+        assert SKY_SPORTS_NEWS_YOUTUBE_UPLOADS_PLAYLIST_ID in SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL
         print("  ✓ Sky Sports News official URLs configured")
         return True
     except Exception as e:
