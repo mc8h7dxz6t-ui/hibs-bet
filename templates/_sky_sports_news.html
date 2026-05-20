@@ -2,18 +2,12 @@
     <summary class="sky-news-sum">
         <span class="sky-news-ico" aria-hidden="true">📺</span>
         <span class="sky-news-txt">Sky Sports Football</span>
-        <span class="sky-news-sub">Official YouTube · Sky player</span>
+        <span class="sky-news-sub">Official YouTube · Sky optional</span>
     </summary>
     <div class="sky-news-body">
         <p class="sky-news-note muted small">
-            Recent official clips from <strong>Sky Sports Football</strong> on YouTube play below.
-            For the full Sky Sports News TV player, use Sky’s site.
+            Recent official clips from <strong>Sky Sports Football</strong> on YouTube play below — free for everyone.
         </p>
-        <div class="sky-news-actions sky-news-actions-primary">
-            <a href="{{ sky_sports_news_watch_url }}" class="nav-btn sky-news-watch-live" target="_blank" rel="noopener noreferrer">
-                Watch live on Sky Sports
-            </a>
-        </div>
         <div class="sky-news-player-wrap">
             <iframe
                 class="sky-news-iframe"
@@ -26,7 +20,39 @@
             ></iframe>
         </div>
         <p class="sky-news-embed-hint muted small">
-            Official <strong>Sky Sports Football</strong> YouTube uploads. If the player is blank, open Sky Sports above.
+            Official <strong>Sky Sports Football</strong> YouTube uploads. If the player is blank, try again later or refresh the page.
+        </p>
+        <div class="sky-news-sky-subscriber" data-sky-when="access" hidden>
+            <a
+                href="{{ sky_sports_news_watch_url }}"
+                class="sky-news-open-sky"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Optional: open in Sky if you have a subscription"
+            >Open Sky Sports News in Sky</a>
+            <span class="muted small" style="display:block;margin-top:4px;">Optional: open in Sky if you have a subscription (app or web).</span>
+        </div>
+        <p class="sky-news-sky-footer muted small" data-sky-when="no-access">
+            <a href="{{ sky_sports_news_watch_url }}" target="_blank" rel="noopener noreferrer">Watch on Sky (subscription)</a>
         </p>
     </div>
 </details>
+<script>
+(function () {
+    function applySkyPanelAccess() {
+        var has = !!(window.HibsSettings && window.HibsSettings.get().hasSkyAccess);
+        document.querySelectorAll('#sky-sports-news [data-sky-when="access"]').forEach(function (el) {
+            el.hidden = !has;
+        });
+        document.querySelectorAll('#sky-sports-news [data-sky-when="no-access"]').forEach(function (el) {
+            el.hidden = has;
+        });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', applySkyPanelAccess);
+    } else {
+        applySkyPanelAccess();
+    }
+    document.addEventListener('hibs-settings-change', applySkyPanelAccess);
+})();
+</script>

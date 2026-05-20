@@ -1605,23 +1605,27 @@ def test_settings_fixture_window_ui():
 
 
 def test_sky_sports_news_media_config():
-    """Sky Sports Football uses official YouTube embed + Sky watch link (no scraped streams)."""
-    print("\nTesting Sky Sports Football media config...")
+    """Sky Sports News 24/7 YouTube live video + Football clips (no scraped streams)."""
+    print("\nTesting Sky Sports News media config...")
     try:
         from hibs_predictor.media_config import (
+            SKY_SPORTS_FOOTBALL_YOUTUBE_CHANNEL_ID,
+            SKY_SPORTS_FOOTBALL_YOUTUBE_CLIPS_EMBED_URL,
             SKY_SPORTS_NEWS_WATCH_URL,
             SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_ID,
             SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL,
+            SKY_SPORTS_NEWS_YOUTUBE_LIVE_VIDEO_ID,
             SKY_SPORTS_NEWS_YOUTUBE_UPLOADS_PLAYLIST_ID,
         )
 
         assert "skysports.com" in SKY_SPORTS_NEWS_WATCH_URL
-        assert SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_ID == "UCZ7wY7MRDSygp63HIEfdQZA"
-        assert SKY_SPORTS_NEWS_YOUTUBE_UPLOADS_PLAYLIST_ID.startswith("UU")
-        assert SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_ID.replace("UC", "UU", 1) == SKY_SPORTS_NEWS_YOUTUBE_UPLOADS_PLAYLIST_ID
-        assert "youtube-nocookie.com/embed/videoseries" in SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL
-        assert SKY_SPORTS_NEWS_YOUTUBE_UPLOADS_PLAYLIST_ID in SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL
-        print("  ✓ Sky Sports Football official URLs configured")
+        assert SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_ID == "UCcw05gGzjLIs5dnxGkQHMvw"
+        assert SKY_SPORTS_FOOTBALL_YOUTUBE_CHANNEL_ID == "UCZ7wY7MRDSygp63HIEfdQZA"
+        assert SKY_SPORTS_NEWS_YOUTUBE_LIVE_VIDEO_ID == "a-E_HJ7p1qg"
+        assert SKY_SPORTS_NEWS_YOUTUBE_UPLOADS_PLAYLIST_ID == "UUcw05gGzjLIs5dnxGkQHMvw"
+        assert f"/embed/{SKY_SPORTS_NEWS_YOUTUBE_LIVE_VIDEO_ID}" in SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL
+        assert "youtube-nocookie.com/embed/videoseries" in SKY_SPORTS_FOOTBALL_YOUTUBE_CLIPS_EMBED_URL
+        print("  ✓ Sky Sports News 24/7 live + Football clips configured")
         return True
     except Exception as e:
         print(f"  ✗ Sky Sports News config test failed: {e}")
