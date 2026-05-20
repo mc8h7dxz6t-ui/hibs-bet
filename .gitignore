@@ -7,6 +7,9 @@ __pycache__/
 *.db
 *.log
 .DS_Store
+# Third-party app — belongs on Desktop / Applications (macOS), not this repo
+Sky Go.app/
+**/Sky Go.app/
 # Separate app — lives in ~/Projects/cheeky-monkeys-time
 cheeky-monkeys-time/
 .env.save
