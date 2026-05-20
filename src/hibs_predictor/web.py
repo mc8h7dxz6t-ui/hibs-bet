@@ -464,7 +464,7 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     window_start = fixture_window_start_utc(now)
     cutoff = fixture_window_end_utc(now, days)
     fetched: Dict[str, Dict] = {}
-    date_from = now.strftime("%Y-%m-%d")
+    date_from = window_start.strftime("%Y-%m-%d")
     date_to = cutoff.strftime("%Y-%m-%d")
     fdo_comp = league.get("football_data_org_id")
     season_candidates = _fixture_fetch_season_candidates(fdo_comp, date_from, date_to, now)
@@ -1092,11 +1092,10 @@ def fetch_all_fixtures() -> Dict:
             print(f"[AllFixtures] {league_code}: {e}")
 
     result = _finalize_fixture_bundle(all_fixtures)
-    cache.set(
-        ck,
-        result,
-        ttl_hours=ttl if result.get("total") else _EMPTY_FIXTURE_CACHE_TTL_HOURS,
-    )
+    if result.get("total"):
+        cache.set(ck, result, ttl_hours=ttl)
+    else:
+        _hibs_debug_log(f"not caching empty all_fixtures bundle key={ck}")
     return result
 
 
