@@ -9,19 +9,20 @@
 {% set lo = p.line_odds if p and p.line_odds is defined else {} %}
 {% set vb_list = p.value_bets_display if p and p.value_bets_display is defined and p.value_bets_display else [] %}
 {% set vb_multi = vb_list|length > 1 %}
-<details class="fixture-card fr-compact {% if fixture.has_value_bet %}value-card value-multi{% if vb_multi %} value-multi-many{% endif %}{% endif %}"
+<details class="fixture-card fr-compact {% if fixture.has_value_bet %}value-card value-multi{% if vb_multi %} value-multi-many{% endif %}{% endif %}{% if fixture.is_live %} fr-in-play{% endif %}"
      data-fid="{{ fixture.id }}"
      data-home="{{ fixture.home }}"
      data-away="{{ fixture.away }}"
      data-league="{{ fixture.league }}"
+     data-is-live="{% if fixture.is_live %}1{% else %}0{% endif %}"
      data-has-value="{% if fixture.has_value_bet %}1{% else %}0{% endif %}"
      data-data-q="{% if fixture.data_quality is defined and fixture.data_quality %}{{ fixture.data_quality.score_pct }}{% else %}0{% endif %}"
      data-search="{{ (fixture.home ~ ' ' ~ fixture.away)|lower }}"
      {% if fixture.id is not none %}id="fix-{{ fixture.id }}"{% endif %}>
 <summary class="fr-sum">
-    <span class="fr-ko" title="Kick-off {{ display_tz_label|default('UK') }} time">{% if fixture.kickoff_time is defined and fixture.kickoff_time %}{{ fixture.kickoff_time }}{% elif fixture.date and 'T' in fixture.date %}{{ fixture.date[11:16] }}{% else %}—{% endif %}</span>
+    <span class="fr-ko" title="Kick-off {{ display_tz_label|default('UK') }} time">{% if fixture.is_live and fixture.live_minute is not none %}<span class="fr-live-pill"><span class="live-dot"></span>{{ fixture.live_status or 'LIVE' }} {{ fixture.live_minute }}'</span>{% elif fixture.is_live %}<span class="fr-live-pill"><span class="live-dot"></span>{{ fixture.live_status or 'LIVE' }}</span>{% elif fixture.kickoff_time is defined and fixture.kickoff_time %}{{ fixture.kickoff_time }}{% elif fixture.date and 'T' in fixture.date %}{{ fixture.date[11:16] }}{% else %}—{% endif %}</span>
     <div class="fr-match">
-        <div class="fr-teams">{{ fixture.home }} <span class="fr-vs">v</span> {{ fixture.away }}</div>
+        <div class="fr-teams">{{ fixture.home }}{% if fixture.is_live and fixture.live_score %} <span class="fr-live-score" data-live-score>{{ fixture.live_score }}</span>{% endif %} <span class="fr-vs">v</span> {{ fixture.away }}</div>
         {% if fixture.has_value_bet and vb_list %}
         <div class="fr-value-strip" aria-label="Value bets in this match">
             {% for v in vb_list[:5] %}

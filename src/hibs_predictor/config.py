@@ -234,6 +234,26 @@ LEAGUES = {
         "sportsmonk_id": None,
         "strength_factor": 0.78,
     },
+    "NORWAY_ELITESERIEN": {
+        "name": "Eliteserien",
+        "country": "Norway",
+        "region": "European",
+        "flag": "🇳🇴",
+        "football_data_org_id": None,
+        "api_sports_id": 103,
+        "sportsmonk_id": None,
+        "strength_factor": 0.72,
+    },
+    "FINLAND_VEIKKAUSLIIGA": {
+        "name": "Veikkausliiga",
+        "country": "Finland",
+        "region": "European",
+        "flag": "🇫🇮",
+        "football_data_org_id": None,
+        "api_sports_id": 244,
+        "sportsmonk_id": None,
+        "strength_factor": 0.68,
+    },
     # International
     "WORLD_CUP": {
         "name": "FIFA World Cup",
@@ -292,6 +312,8 @@ ALL_LEAGUE_CODES = [
     "DENMARK_SL",
     "GREECE_SL",
     "AUSTRIA_BL",
+    "NORWAY_ELITESERIEN",
+    "FINLAND_VEIKKAUSLIIGA",
     "WORLD_CUP",
     "EUROS",
     "NATIONS_LEAGUE",
@@ -308,6 +330,7 @@ LEAGUE_REGIONS = {
     "🏆 European": [
         "LA_LIGA", "SERIE_A", "BUNDESLIGA", "LIGUE_1", "EREDIVISIE", "PRIMEIRA",
         "BELGIUM_FIRST", "DENMARK_SL", "GREECE_SL", "AUSTRIA_BL",
+        "NORWAY_ELITESERIEN", "FINLAND_VEIKKAUSLIIGA",
     ],
     "🌍 International": ["WORLD_CUP", "EUROS", "NATIONS_LEAGUE"],
     "🏆 UEFA club": ["UCL", "EUROPA_LEAGUE", "UECL"],

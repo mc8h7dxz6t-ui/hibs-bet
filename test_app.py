@@ -109,6 +109,7 @@ def test_flask_routes():
         required = {
             "/",
             "/api/fixtures",
+            "/api/fixtures/live",
             "/api/health",
             "/api/value-bets",
             "/api/assistant/snapshot",
@@ -1181,6 +1182,72 @@ def test_kickoff_display_tz():
         return False
 
 
+def test_nordic_leagues_configured():
+    """Norway Eliteserien and Finland Veikkausliiga are in dashboard league set."""
+    print("\nTesting Nordic league config...")
+    try:
+        from hibs_predictor.config import LEAGUES, ALL_LEAGUE_CODES, LEAGUE_REGIONS
+
+        assert "NORWAY_ELITESERIEN" in LEAGUES
+        assert LEAGUES["NORWAY_ELITESERIEN"]["api_sports_id"] == 103
+        assert "FINLAND_VEIKKAUSLIIGA" in LEAGUES
+        assert LEAGUES["FINLAND_VEIKKAUSLIIGA"]["api_sports_id"] == 244
+        assert "NORWAY_ELITESERIEN" in ALL_LEAGUE_CODES
+        assert "FINLAND_VEIKKAUSLIIGA" in ALL_LEAGUE_CODES
+        euro = LEAGUE_REGIONS.get("🏆 European", [])
+        assert "NORWAY_ELITESERIEN" in euro
+        assert "FINLAND_VEIKKAUSLIIGA" in euro
+        print("  ✓ Norway/Finland leagues configured")
+        return True
+    except Exception as e:
+        print(f"  ✗ Nordic league config failed: {e}")
+        return False
+
+
+def test_calendar_year_season_candidate():
+    """May calendar-year leagues try current year season (2026) before Jul-based id."""
+    print("\nTesting calendar-year season candidates...")
+    try:
+        from datetime import datetime, timezone
+        from hibs_predictor.web import _fixture_fetch_season_candidates
+
+        now = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc)
+        seasons = _fixture_fetch_season_candidates(None, "2026-05-20", "2026-05-25", now)
+        assert seasons[0] == 2026, seasons
+        print("  ✓ Calendar-year season candidate OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Season candidate test failed: {e}")
+        return False
+
+
+def test_live_scores_merge_mocked():
+    """Live snapshot fields merge onto dashboard fixture rows."""
+    print("\nTesting live scores merge...")
+    try:
+        from hibs_predictor.live_scores import merge_live_into_fixtures, parse_api_fixture_live
+
+        raw = {
+            "fixture": {"id": 99901, "status": {"short": "1H", "long": "First Half", "elapsed": 23}},
+            "goals": {"home": 2, "away": 1},
+            "teams": {"home": {"name": "A"}, "away": {"name": "B"}},
+        }
+        parsed = parse_api_fixture_live(raw)
+        assert parsed["is_live"] is True
+        assert parsed["live_score"] == "2-1"
+        assert parsed["live_minute"] == 23
+        fixtures = [{"id": 99901, "home": "A", "away": "B"}]
+        n = merge_live_into_fixtures(fixtures, {99901: parsed})
+        assert n == 1
+        assert fixtures[0]["live_score"] == "2-1"
+        assert fixtures[0]["live_status"] == "1H"
+        print("  ✓ Live merge OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Live scores test failed: {e}")
+        return False
+
+
 def test_fixture_window_includes_todays_kicked_off():
     """Today's cup finals stay in the fetch window after kick-off (UK calendar day)."""
     print("\nTesting fixture window (today after KO)...")
@@ -1550,6 +1617,9 @@ def main():
         test_competition_display_titles,
         test_kickoff_display_tz,
         test_fixture_window_includes_todays_kicked_off,
+        test_nordic_leagues_configured,
+        test_calendar_year_season_candidate,
+        test_live_scores_merge_mocked,
         test_sky_sports_news_media_config,
         test_fotmob_adapter_mocked,
         test_football_data_standings_mocked,

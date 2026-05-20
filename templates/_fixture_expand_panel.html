@@ -1,4 +1,37 @@
     <div class="expand-panel" data-fixture-id="{{ fixture.id }}">
+        {% if fixture.is_live %}
+        <div class="in-play-panel" data-in-play-panel>
+            <div class="section-title" style="margin-bottom:8px;"><span class="live-dot"></span> In play</div>
+            <div class="in-play-grid">
+                <div class="in-play-tile">
+                    <span class="rt-label">Score</span>
+                    <strong data-live-score>{% if fixture.live_score %}{{ fixture.live_score }}{% else %}—{% endif %}</strong>
+                </div>
+                <div class="in-play-tile">
+                    <span class="rt-label">Status</span>
+                    <strong data-live-status>{% if fixture.live_status %}{{ fixture.live_status }}{% if fixture.live_minute is not none %} · {{ fixture.live_minute }}'{% endif %}{% else %}Live{% endif %}</strong>
+                    {% if fixture.live_status_long %}<em data-live-status-long>{{ fixture.live_status_long }}</em>{% endif %}
+                </div>
+                {% if fixture.live_last_event and fixture.live_last_event.label %}
+                <div class="in-play-tile in-play-tile-wide">
+                    <span class="rt-label">Last event</span>
+                    <strong data-live-last-event>{{ fixture.live_last_event.label }}</strong>
+                </div>
+                {% else %}
+                <div class="in-play-tile in-play-tile-wide" data-live-last-event-wrap hidden>
+                    <span class="rt-label">Last event</span>
+                    <strong data-live-last-event></strong>
+                </div>
+                {% endif %}
+            </div>
+            {% if fixture.live_stats %}
+            <p class="in-play-stats-note" data-live-stats style="margin:8px 0 0;font-size:0.75em;color:var(--muted);">
+                xG {% if fixture.live_stats.home %}H {{ fixture.live_stats.home.xg }}{% endif %}{% if fixture.live_stats.away %} · A {{ fixture.live_stats.away.xg }}{% endif %}
+            </p>
+            {% endif %}
+            <p class="in-play-deferred" style="margin:8px 0 0;font-size:0.68em;color:var(--muted);">Player ratings deferred (no SofaScore scrape). Live xG only when API statistics include expected goals.</p>
+        </div>
+        {% endif %}
         {% set show_pred = p and not (p.prediction_unavailable | default(false)) %}
         {% set si = p.structured_insight if p and p.structured_insight is defined else none %}
         {% set tab_gid = 'fx-' ~ (fixture.id|string if fixture.id is not none else (fixture.home ~ '-' ~ fixture.away))|replace(' ','') %}

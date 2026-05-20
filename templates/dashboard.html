@@ -284,6 +284,65 @@
         });
     }
 
+    function applyLivePayload(payload) {
+        var map = (payload && payload.fixtures) || {};
+        Object.keys(map).forEach(function (fid) {
+            var live = map[fid];
+            var card = document.querySelector('.fixture-card[data-fid="' + fid + '"]');
+            if (!card || !live) return;
+            card.setAttribute('data-is-live', live.is_live ? '1' : '0');
+            if (live.is_live) card.classList.add('fr-in-play');
+            var scoreEls = card.querySelectorAll('[data-live-score]');
+            if (live.live_score && scoreEls.length) {
+                scoreEls.forEach(function (el) { el.textContent = live.live_score; });
+            }
+            var st = card.querySelector('[data-live-status]');
+            if (st && live.live_status) {
+                st.textContent = live.live_status + (live.live_minute != null ? ' · ' + live.live_minute + "'" : '');
+            }
+            var ev = card.querySelector('[data-live-last-event]');
+            var evWrap = card.querySelector('[data-live-last-event-wrap]');
+            if (live.live_last_event && live.live_last_event.label) {
+                if (ev) { ev.textContent = live.live_last_event.label; ev.closest('.in-play-tile, .in-play-tile-wide'); }
+                if (evWrap) evWrap.hidden = false;
+            }
+            var ko = card.querySelector('.fr-ko');
+            if (ko && live.is_live) {
+                var pill = live.live_status || 'LIVE';
+                if (live.live_minute != null) pill += ' ' + live.live_minute + "'";
+                ko.innerHTML = '<span class="fr-live-pill"><span class="live-dot"></span>' + pill + '</span>';
+            }
+        });
+    }
+
+    function wireLivePoll() {
+        var cards = document.querySelectorAll('.fixture-card[data-fid]');
+        if (!cards.length) return;
+        var ids = [];
+        cards.forEach(function (c) {
+            var id = c.getAttribute('data-fid');
+            if (id) ids.push(id);
+        });
+        if (!ids.length) return;
+        var pollMs = 60000;
+        var timer = null;
+        function poll() {
+            var q = ids.slice(0, 120).join(',');
+            fetch('/api/fixtures/live?ids=' + encodeURIComponent(q))
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    applyLivePayload(data);
+                    if (data && data.poll_after_sec) pollMs = Math.max(30000, data.poll_after_sec * 1000);
+                    if (timer) clearInterval(timer);
+                    timer = setInterval(poll, pollMs);
+                })
+                .catch(function () {});
+        }
+        var anyLive = document.querySelector('.fixture-card[data-is-live="1"]');
+        setTimeout(poll, anyLive ? 5000 : 15000);
+        timer = setInterval(poll, pollMs);
+    }
+
     function wireOddsToggle() {
         if (window.HibsOdds && typeof HibsOdds.bindToggles === 'function') {
             HibsOdds.bindToggles(document);
@@ -353,6 +412,7 @@
         wireOddsToggle();
         wireUpcomingNav();
         wireSlipButtons();
+        wireLivePoll();
         applyDashFilters();
     });
 })();

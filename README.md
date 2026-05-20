@@ -191,9 +191,9 @@ hibs-bet/
 ✅ Compare odds across bookmakers  
 ✅ Long-term data matters for accuracy  
 
-## Fixture cache (v18)
+## Fixture cache (v19)
 
-On-disk fixture cache keys use **v18**. After upgrading, delete or clear your local fixture cache directory (the `fixtures_*` JSON under the app cache path) so competition headings refresh; older cache files may show stale labels.
+On-disk fixture cache keys use **v19**. After upgrading, clear fixture caches (Refresh on the dashboard or delete `fixtures_*` / `all_fixtures_*` under `.cache`) so Norway/Finland leagues and live score fields load; older cache files may omit Nordic fixtures or in-play fields.
 
 ## Documentation
 

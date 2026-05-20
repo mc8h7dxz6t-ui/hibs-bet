@@ -77,7 +77,11 @@ def _fixture_fetch_season_candidates(
     """Season years to try for fixtures. Domestic leagues use Jul-based season id; WC/EC/UNL also use calendar years in the fetch window."""
     primary = _api_football_season_year(now)
     if not football_data_comp_id or football_data_comp_id not in _FDO_CALENDAR_COMPS:
-        return [primary, primary - 1]
+        out = [primary, primary - 1]
+        # Calendar-year leagues (Nordics, etc.): API season id is the calendar year (e.g. 2026 in May 2026).
+        if now.month < 7 and now.year not in out:
+            out.insert(0, now.year)
+        return out
     window_years = _years_touched_by_date_range(date_from_s, date_to_s)
     merged = set(window_years) | {primary, primary - 1}
     out: List[int] = []
@@ -132,7 +136,7 @@ def _ui_data_quality_min_pct() -> int:
 
 
 def _all_fixtures_cache_key() -> str:
-    return f"all_fixtures_{_fetch_window_days()}d_v18"
+    return f"all_fixtures_{_fetch_window_days()}d_v19"
 
 
 def _cache_ttl_hours(default: float = 1.0) -> float:
@@ -379,7 +383,7 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     prefer_fdo = _env_truthy("HIBS_PREFER_FOOTBALL_DATA_FIXTURES")
     skip_as_fx = _env_truthy("HIBS_SKIP_API_SPORTS_FIXTURES")
     ttl = _cache_ttl_hours(1.0)
-    cache_key = f"fixtures_{days}d_{league_code}_v18_{int(prefer_fdo)}{int(skip_as_fx)}"
+    cache_key = f"fixtures_{days}d_{league_code}_v19_{int(prefer_fdo)}{int(skip_as_fx)}"
     cached = cache.get(cache_key, ttl_hours=ttl)
     if cached:
         return cached
@@ -880,8 +884,13 @@ def _attach_table_snapshots(fixtures: List[Dict[str, Any]], tables: List[Dict[st
 
 def _finalize_fixture_bundle(all_fixtures: List[Dict[str, Any]]) -> Dict[str, Any]:
     from hibs_predictor.display_tz import enrich_fixtures_kickoff
+    from hibs_predictor.live_scores import attach_live_to_fixtures
 
     all_fixtures = enrich_fixtures_kickoff(all_fixtures)
+    try:
+        attach_live_to_fixtures(all_fixtures, aggregator, include_events=True)
+    except Exception as exc:
+        print(f"[Live scores] attach failed: {exc!r}")
     _ensure_fixture_data_quality(all_fixtures)
     _ensure_fixture_pick_menus(all_fixtures)
     all_fixtures.sort(key=lambda x: x.get("kickoff_sort") or x.get("date") or "")
@@ -1243,6 +1252,37 @@ def api_health():
     _health_cache["t"] = now
     _health_cache["payload"] = payload
     return jsonify(payload)
+
+
+@app.route("/api/fixtures/live")
+def api_fixtures_live():
+    """Lightweight in-play score poll for dashboard rows (cached live=all + optional events)."""
+    from hibs_predictor.live_scores import live_payload_for_ids
+
+    raw_ids = (request.args.get("ids") or "").strip()
+    fixture_ids: List[int] = []
+    for part in raw_ids.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            fixture_ids.append(int(part))
+        except ValueError:
+            continue
+    if not fixture_ids:
+        data = fetch_all_fixtures()
+        from hibs_predictor.live_scores import fixture_ids_likely_in_play
+
+        fixture_ids = fixture_ids_likely_in_play(data.get("all") or [])
+    include_stats = request.args.get("stats") == "1"
+    return jsonify(
+        live_payload_for_ids(
+            aggregator,
+            fixture_ids,
+            include_events=True,
+            include_stats=include_stats,
+        )
+    )
 
 
 @app.route("/api/fixtures")
