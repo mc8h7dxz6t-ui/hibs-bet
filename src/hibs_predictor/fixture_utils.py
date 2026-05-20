@@ -73,24 +73,32 @@ def display_competition_title(
     return _tidy(fb)
 
 
+def coerce_team_id(raw: Any) -> Optional[int]:
+    """Normalize API/FDO team ids for comparisons and cache keys."""
+    if raw is None or raw == "" or raw == 0:
+        return None
+    try:
+        tid = int(raw)
+        return tid if tid > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def fixture_team_id(fixture: Dict[str, Any], side: str) -> Optional[int]:
     """Numeric team id from teams block when present."""
     teams = fixture.get("teams")
     if isinstance(teams, dict):
         blk = teams.get(side)
         if isinstance(blk, dict):
-            tid = blk.get("id")
-            try:
-                return int(tid) if tid not in (None, "", 0) else None
-            except (TypeError, ValueError):
-                return None
+            tid = coerce_team_id(blk.get("id"))
+            if tid is not None:
+                return tid
     raw = fixture.get(side)
     if isinstance(raw, dict):
-        try:
-            tid = raw.get("id")
-            return int(tid) if tid not in (None, "", 0) else None
-        except (TypeError, ValueError):
-            return None
+        return coerce_team_id(raw.get("id"))
+    key = f"{side}_id"
+    if fixture.get(key) is not None:
+        return coerce_team_id(fixture.get(key))
     return None
 
 

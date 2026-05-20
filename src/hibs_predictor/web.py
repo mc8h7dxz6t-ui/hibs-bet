@@ -704,11 +704,17 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
             print(f"[Prediction] {league_code} {_fixture_key(fixture)}: {e!r}")
             prediction = prediction_unavailable_payload(enriched, "model_error")
 
-        home_id = fixture.get("teams", {}).get("home", {}).get("id")
-        away_id = fixture.get("teams", {}).get("away", {}).get("id")
+        from hibs_predictor.fixture_utils import fixture_team_id
+
+        home_id = fixture_team_id(fixture, "home") or fixture_team_id(enriched, "home")
+        away_id = fixture_team_id(fixture, "away") or fixture_team_id(enriched, "away")
         try:
-            home_last10 = TeamStrengthCalculator.parse_last_10_results(enriched.get("home_recent", []), home_id)
-            away_last10 = TeamStrengthCalculator.parse_last_10_results(enriched.get("away_recent", []), away_id)
+            home_last10 = TeamStrengthCalculator.parse_last_10_results(
+                enriched.get("home_recent", []), home_id
+            )
+            away_last10 = TeamStrengthCalculator.parse_last_10_results(
+                enriched.get("away_recent", []), away_id
+            )
         except Exception as e:
             print(f"[Fixture last10] {league_code} {_fixture_key(fixture)}: {e!r}")
             home_last10, away_last10 = [], []

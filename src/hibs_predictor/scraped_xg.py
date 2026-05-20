@@ -122,9 +122,10 @@ def resolve_scraped_xg(
     if current in ("api_fixture_xg", "stats_api_xg"):
         return None
 
-    home_id = (fixture.get("teams", {}) or {}).get("home", {}).get("id") or 0
-    away_id = (fixture.get("teams", {}) or {}).get("away", {}).get("id") or 0
-    from hibs_predictor.fixture_utils import fixture_team_name
+    from hibs_predictor.fixture_utils import fixture_team_id, fixture_team_name
+
+    home_id = fixture_team_id(fixture, "home") or fixture_team_id(enriched, "home") or 0
+    away_id = fixture_team_id(fixture, "away") or fixture_team_id(enriched, "away") or 0
 
     home_nm = fixture_team_name(fixture, "home")
     away_nm = fixture_team_name(fixture, "away")

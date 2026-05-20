@@ -20,7 +20,7 @@ from hibs_predictor.config import LEAGUES
 from hibs_predictor.cache import Cache
 from hibs_predictor.data_quality import compute_fixture_data_quality
 from hibs_predictor.scrapers.supplemental import collect_supplemental
-from hibs_predictor.fixture_utils import fixture_team_id, fixture_team_name
+from hibs_predictor.fixture_utils import coerce_team_id, fixture_team_id, fixture_team_name
 from hibs_predictor.scrapers import wikipedia_standings as wiki_standings
 from hibs_predictor.scrapers import soccerstats_standings as soccerstats_standings
 
@@ -160,7 +160,9 @@ def _recent_match_rates(matches: List[Dict[str, Any]], team_id: int) -> Dict[str
     for match in matches[:10]:
         teams = match.get("teams", {})
         goals = match.get("goals", {}) or {}
-        hid = teams.get("home", {}).get("id")
+        hid = coerce_team_id((teams.get("home") or {}).get("id"))
+        aid = coerce_team_id((teams.get("away") or {}).get("id"))
+        tid = coerce_team_id(team_id)
         home_g = goals.get("home")
         away_g = goals.get("away")
         if home_g is None or away_g is None:
@@ -170,9 +172,9 @@ def _recent_match_rates(matches: List[Dict[str, Any]], team_id: int) -> Dict[str
             ag = int(away_g)
         except (TypeError, ValueError):
             continue
-        if hid == team_id:
+        if tid is not None and hid == tid:
             gf, ga = hg, ag
-        elif teams.get("away", {}).get("id") == team_id:
+        elif tid is not None and aid == tid:
             gf, ga = ag, hg
         else:
             continue
@@ -539,12 +541,16 @@ class DataAggregator:
             enriched["away_stats"] = {}
 
         try:
-            enriched["home_form"] = TeamStrengthCalculator.calculate_form_strength(enriched["home_recent"])
+            enriched["home_form"] = TeamStrengthCalculator.calculate_form_strength(
+                enriched["home_recent"], home_id
+            )
         except Exception as exc:
             print(f"[enrich home_form] {league_code} fid={fixture_id_str}: {exc!r}")
             enriched["home_form"] = 0.5
         try:
-            enriched["away_form"] = TeamStrengthCalculator.calculate_form_strength(enriched["away_recent"])
+            enriched["away_form"] = TeamStrengthCalculator.calculate_form_strength(
+                enriched["away_recent"], away_id
+            )
         except Exception as exc:
             print(f"[enrich away_form] {league_code} fid={fixture_id_str}: {exc!r}")
             enriched["away_form"] = 0.5
@@ -846,7 +852,8 @@ class DataAggregator:
             except Exception:
                 pass
 
-        self.cache.set(cache_key, matches, ttl_hours=4)
+        if matches:
+            self.cache.set(cache_key, matches, ttl_hours=4)
         return matches
 
     def _fetch_expected_goals(

@@ -246,8 +246,13 @@ def compute_fixture_data_quality(enriched: Dict[str, Any]) -> Dict[str, Any]:
 
     n_h = float(enriched.get("home_recent_n") or 0)
     n_a = float(enriched.get("away_recent_n") or 0)
-    add("Home match history", "recent_home", 8.0, 8.0 * min(1.0, n_h / 8.0))
-    add("Away match history", "recent_away", 8.0, 8.0 * min(1.0, n_a / 8.0))
+    home_recent_pts = 8.0 * min(1.0, n_h / 8.0)
+    away_recent_pts = 8.0 * min(1.0, n_a / 8.0)
+    if n_h >= 5.0 and n_a >= 5.0:
+        home_recent_pts = min(8.0, home_recent_pts + 0.5)
+        away_recent_pts = min(8.0, away_recent_pts + 0.5)
+    add("Home match history", "recent_home", 8.0, home_recent_pts)
+    add("Away match history", "recent_away", 8.0, away_recent_pts)
 
     hs = enriched.get("home_stats") or {}
     aws = enriched.get("away_stats") or {}

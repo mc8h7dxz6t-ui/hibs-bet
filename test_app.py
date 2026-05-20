@@ -456,6 +456,73 @@ def test_bottom_top_underdog_not_home_value():
         return False
 
 
+def test_both_teams_form_and_strength():
+    """Both sides get last-10 rows and team-relative form ratings."""
+    print("\nTesting both teams form display...")
+    try:
+        from hibs_predictor.betting_engine import TeamStrengthCalculator
+
+        home_id = 502
+        away_id = 499
+        home_recent = [
+            {
+                "teams": {"home": {"id": home_id}, "away": {"id": away_id}},
+                "goals": {"home": 2, "away": 0},
+                "fixture": {"status": {"short": "FT"}, "date": "2026-05-01T12:00:00+00:00"},
+            },
+            {
+                "teams": {"home": {"id": 999}, "away": {"id": home_id}},
+                "goals": {"home": 1, "away": 2},
+                "fixture": {"status": {"short": "FT"}, "date": "2026-04-20T12:00:00+00:00"},
+            },
+        ]
+        away_recent = [
+            {
+                "teams": {"home": {"id": away_id}, "away": {"id": home_id}},
+                "goals": {"home": 3, "away": 1},
+                "fixture": {"status": {"short": "FT"}, "date": "2026-05-02T12:00:00+00:00"},
+            },
+            {
+                "teams": {"home": {"id": 888}, "away": {"id": away_id}},
+                "goals": {"home": 0, "away": 1},
+                "fixture": {"status": {"short": "FT"}, "date": "2026-04-18T12:00:00+00:00"},
+            },
+        ]
+        h10 = TeamStrengthCalculator.parse_last_10_results(home_recent, home_id)
+        a10 = TeamStrengthCalculator.parse_last_10_results(away_recent, away_id)
+        assert len(h10) == 2 and len(a10) == 2
+        assert h10[0]["result"] == "W" and a10[0]["result"] == "W"
+
+        home_form = TeamStrengthCalculator.calculate_form_strength(home_recent, home_id)
+        away_form = TeamStrengthCalculator.calculate_form_strength(away_recent, away_id)
+        assert home_form > away_form, (home_form, away_form)
+
+        from flask import Flask, render_template_string
+
+        app = Flask(__name__, template_folder="templates")
+        with app.app_context():
+            html = render_template_string(
+                "{% include '_fixture_row_compact.html' %}",
+                fixture={
+                    "id": 1,
+                    "home": "Fiorentina",
+                    "away": "Atalanta",
+                    "league": "SERIE_A",
+                    "home_last10": h10,
+                    "away_last10": a10,
+                    "prediction": {"bookmaker_odds": {}, "line_odds": {}},
+                },
+                display_tz_label="UK",
+            )
+        assert 'fr-l10-lbl">H</span>' in html
+        assert 'fr-l10-lbl">A</span>' in html
+        print("  ✓ Both teams form rows and ratings OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Both teams form test failed: {e}")
+        return False
+
+
 def test_pick_menu():
     """Per-fixture pick menu for summary dropdowns."""
     print("\nTesting pick menu...")
@@ -2009,6 +2076,7 @@ def main():
         test_structured_insight,
         test_value_edge_fields,
         test_bottom_top_underdog_not_home_value,
+        test_both_teams_form_and_strength,
         test_pick_menu,
         test_dashboard_days_grouping,
         test_competition_display_titles,

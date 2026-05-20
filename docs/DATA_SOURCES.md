@@ -24,6 +24,13 @@ Coverage scoring: `src/hibs_predictor/data_quality.py` (`full_scope` ≥ **85%**
 
 Transfermarkt, xGStat, BeSoccer, FootyStats (aggregates site), DataMB, UEFA direct, footballdata.io — **planned**, not production parsers.
 
+**Near-term (high ROI, &lt;30 min each):**
+
+| Item | Why | Notes |
+|------|-----|-------|
+| **FotMob team-id map** | FotMob fixtures often ship `id: 0`; away-side form/history stays empty until API-Football ids resolve | Fix `_normalize_fotmob` + optional name→API-Sports id lookup (no Selenium) |
+| **xGStat** | Extra xG for cups / leagues outside Understat | Registry stub only; wire like Understat light when HTML stable |
+
 ## Recommended implementation order (impact / effort)
 
 1. **Ops: `HIBS_MAX_DATA=1` + real keys** — enable Rapid stats xG, stop skipping heavy scrapers on “API strong” fixtures; largest xG uplift for top leagues with low code risk.

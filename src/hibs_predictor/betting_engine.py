@@ -204,24 +204,53 @@ class TeamStrengthCalculator:
             return 0.5
 
     @staticmethod
-    def calculate_form_strength(recent_results: List[Dict[str, Any]]) -> float:
+    def calculate_form_strength(
+        recent_results: List[Dict[str, Any]],
+        team_id: Optional[int] = None,
+    ) -> float:
         if not recent_results:
             return 0.5
+        from hibs_predictor.fixture_utils import coerce_team_id
+
+        tid = coerce_team_id(team_id)
         points = 0
         xg_diff = 0.0
+        used = 0
         for match in recent_results[:10]:
-            goals = match.get("goals", {})
-            home = float(goals.get("home", 0) or 0)
-            away = float(goals.get("away", 0) or 0)
-            if home > away:
+            goals = match.get("goals", {}) or {}
+            home_g = goals.get("home")
+            away_g = goals.get("away")
+            if home_g is None or away_g is None:
+                continue
+            try:
+                hg = int(home_g)
+                ag = int(away_g)
+            except (TypeError, ValueError):
+                continue
+            teams = match.get("teams", {}) or {}
+            hid = coerce_team_id((teams.get("home") or {}).get("id"))
+            aid = coerce_team_id((teams.get("away") or {}).get("id"))
+            if tid is not None:
+                if hid == tid:
+                    gf, ga = hg, ag
+                elif aid == tid:
+                    gf, ga = ag, hg
+                else:
+                    continue
+            else:
+                gf, ga = hg, ag
+            if gf > ga:
                 points += 3
-            elif home == away:
+            elif gf == ga:
                 points += 1
-            xg = match.get("statistics", [])
-            if xg and len(xg) >= 2:
-                xg_diff += float(xg[0].get("expected_goals", 0) or 0) - float(xg[1].get("expected_goals", 0) or 0)
-        form_score = points / 30.0
-        xg_bonus = max(-0.1, min(0.1, xg_diff / 20.0))
+            xgf = TeamStrengthCalculator._team_xg_from_fixture_statistics(match, tid or hid or 0)
+            if xgf is not None:
+                xg_diff += float(xgf) - max(0.04, (hg + ag) / 10.0)
+            used += 1
+        if used == 0:
+            return 0.5
+        form_score = points / (used * 3.0)
+        xg_bonus = max(-0.1, min(0.1, xg_diff / max(1.0, used * 2.0)))
         return max(0.0, min(1.0, form_score + xg_bonus))
 
     @staticmethod
@@ -248,7 +277,10 @@ class TeamStrengthCalculator:
     @staticmethod
     def parse_last_10_results(matches: List[Dict[str, Any]], team_id: Optional[int]) -> List[Dict[str, Any]]:
         """Parse last 10 matches into readable result rows for the UI."""
-        if not team_id:
+        from hibs_predictor.fixture_utils import coerce_team_id
+
+        tid = coerce_team_id(team_id)
+        if not tid:
             return []
         results = []
         for match in matches[:10]:
@@ -257,7 +289,8 @@ class TeamStrengthCalculator:
                 continue
             teams = match.get("teams", {})
             goals = match.get("goals", {}) or {}
-            home_id = teams.get("home", {}).get("id")
+            home_id = coerce_team_id((teams.get("home") or {}).get("id"))
+            away_id = coerce_team_id((teams.get("away") or {}).get("id"))
             home_name = teams.get("home", {}).get("name", "?")
             away_name = teams.get("away", {}).get("name", "?")
             gh, ga = goals.get("home"), goals.get("away")
@@ -265,13 +298,19 @@ class TeamStrengthCalculator:
                 continue
             home_goals = float(gh)
             away_goals = float(ga)
-            is_home = home_id == team_id
-            gf, ga = (home_goals, away_goals) if is_home else (away_goals, home_goals)
+            if home_id == tid:
+                is_home = True
+                gf, ga = home_goals, away_goals
+            elif away_id == tid:
+                is_home = False
+                gf, ga = away_goals, home_goals
+            else:
+                continue
             opponent = away_name if is_home else home_name
             result = "W" if gf > ga else ("L" if gf < ga else "D")
             fixture_date = match.get("fixture", {}).get("date", "") or ""
             tot = int(gf + ga)
-            xgf = TeamStrengthCalculator._team_xg_from_fixture_statistics(match, team_id)
+            xgf = TeamStrengthCalculator._team_xg_from_fixture_statistics(match, tid)
             results.append({
                 "result": result,
                 "score": f"{int(gf)}-{int(ga)}",
@@ -504,7 +543,7 @@ class BettingEngine:
     ) -> Tuple[Dict[str, Any], Dict[str, str]]:
         filtered: Dict[str, Any] = {}
         rejected: Dict[str, str] = {}
-        if dq_known and dq_pct < 65.0:
+        if dq_known and dq_pct < 68.0:
             return {}, {k: "data_quality_below_value_floor" for k in value_bets}
 
         for outcome, row in value_bets.items():
@@ -518,9 +557,9 @@ class BettingEngine:
 
             required_edge = max(margin, 0.05 if outcome in ("home", "draw", "away") else margin)
             if model_prob < 0.35:
-                required_edge += (0.35 - model_prob) * 0.18
-            if odds > 5.0:
-                required_edge += min(0.06, (odds - 5.0) * 0.012)
+                required_edge += (0.35 - model_prob) * 0.22
+            if odds > 4.5:
+                required_edge += min(0.08, (odds - 4.5) * 0.014)
             if dq_known and dq_pct < 80.0:
                 required_edge += (80.0 - dq_pct) * 0.001
             if edge < required_edge:
@@ -528,19 +567,19 @@ class BettingEngine:
                 continue
 
             if outcome in ("home", "draw", "away"):
-                if dq_known and dq_pct < 74.0:
+                if dq_known and dq_pct < 76.0:
                     rejected[outcome] = "data_quality_below_1x2_value_floor"
                     continue
                 if outcome == "draw":
-                    if odds > 5.5 or model_prob < 0.29:
+                    if odds > 5.0 or model_prob < 0.30:
                         rejected[outcome] = "draw_longshot_floor"
                         continue
                 else:
                     against_count, strong_against = cls._evidence_against_1x2(outcome, context)
-                    if odds > 7.0:
+                    if odds > 6.5:
                         rejected[outcome] = "1x2_longshot_odds_cap"
                         continue
-                    if odds > 5.5 and (dq_known and dq_pct < 85.0):
+                    if odds > 4.8 and (dq_known and dq_pct < 88.0):
                         rejected[outcome] = "longshot_requires_strong_data"
                         continue
                     if strong_against:
@@ -787,6 +826,17 @@ class BettingEngine:
                 fixture,
                 str(fixture.get("_hibs_prediction_block_reason") or "fixture_enrichment_failed"),
             )
+        dq_pre = fixture.get("data_quality") or {}
+        dq_pre_pct = float(dq_pre.get("score_pct") or 0)
+        try:
+            dq_abstain_floor = float(os.getenv("HIBS_ABSTAIN_DATA_PCT", "48"))
+        except ValueError:
+            dq_abstain_floor = 48.0
+        has_book_triplet = bool(fixture.get("odds_available")) or all(
+            float(fixture.get(k) or 0) > 1.0 for k in ("odds_home", "odds_draw", "odds_away")
+        )
+        if dq_pre_pct > 0 and dq_pre_pct < dq_abstain_floor and not has_book_triplet:
+            return prediction_unavailable_payload(fixture, "data_coverage_too_thin")
         features, metadata = self.build_advanced_features(fixture)
         xg_home = float(metadata["xg_home"])
         xg_away = float(metadata["xg_away"])
@@ -960,13 +1010,13 @@ class BettingEngine:
         dq_bundle = fixture.get("data_quality") or {}
         dq_pct = float(dq_bundle.get("score_pct") or 0)
         try:
-            dq_min_boost = float(os.getenv("HIBS_MIN_DATA_QUALITY_PCT", "0"))
+            dq_min_boost = float(os.getenv("HIBS_MIN_DATA_QUALITY_PCT", "58"))
         except ValueError:
-            dq_min_boost = 0.0
+            dq_min_boost = 58.0
         try:
-            dq_val_req = float(os.getenv("HIBS_VALUE_REQUIRE_DATA_PCT", "0"))
+            dq_val_req = float(os.getenv("HIBS_VALUE_REQUIRE_DATA_PCT", "72"))
         except ValueError:
-            dq_val_req = 0.0
+            dq_val_req = 72.0
         try:
             base_margin = float(os.getenv("HIBS_VALUE_EDGE_MARGIN", "0.04"))
         except ValueError:

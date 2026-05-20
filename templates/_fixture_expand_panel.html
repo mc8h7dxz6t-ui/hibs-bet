@@ -1,4 +1,9 @@
     <div class="expand-panel" data-fixture-id="{{ fixture.id }}">
+        {% set p = fixture.prediction %}
+        {% set hl10 = fixture.home_last10 %}
+        {% set al10 = fixture.away_last10 %}
+        {% set hp = fixture.home_position %}
+        {% set ap = fixture.away_position %}
         {% if fixture.is_live %}
         <div class="in-play-panel" data-in-play-panel>
             <div class="section-title" style="margin-bottom:8px;"><span class="live-dot"></span> In play</div>
@@ -408,6 +413,14 @@
         <div id="{{ tab_gid }}-mk" class="tab-panel" data-group="{{ tab_gid }}">
         {% if show_pred and p.value_bets_gated_by_data %}
         <p style="margin:0 0 12px;padding:8px 10px;border-radius:8px;border:1px solid rgba(148,163,184,0.35);background:rgba(30,41,59,0.35);font-size:0.78em;color:var(--muted);">Value alerts suppressed — data coverage below configured minimum. Model probabilities still shown.</p>
+        {% endif %}
+        {% if show_pred and p.value_bets_rejected is defined and p.value_bets_rejected %}
+        <div class="section-title" style="margin-top:4px;">Value filters (not shown)</div>
+        <div class="market-pills" style="margin-bottom:12px;">
+            {% for outcome, reason in p.value_bets_rejected.items() %}
+            <span class="mpill" title="{{ reason }}">{{ outcome }} · {{ reason|replace('_',' ') }}</span>
+            {% endfor %}
+        </div>
         {% endif %}
         {% if p and p.line_odds %}
         <div class="section-title" style="margin-top:4px;">📗 Book side markets</div>
