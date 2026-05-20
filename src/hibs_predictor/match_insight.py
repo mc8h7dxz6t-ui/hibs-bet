@@ -162,13 +162,306 @@ def _pick_conservative(
     return "avoid", _PICK_LABELS["avoid"], round(max(hdc, adc, hoa, ph, pa) * 100, 1)
 
 
+def _implied_prob_pct(odds: Any) -> Optional[float]:
+    try:
+        o = float(odds)
+    except (TypeError, ValueError):
+        return None
+    if o <= 1.0:
+        return None
+    return round(100.0 / o, 1)
+
+
+def _top_value_snapshot(prediction: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    vb = prediction.get("value_bets") or {}
+    if not vb:
+        return None
+    key = prediction.get("best_bet")
+    row = vb.get(key) if key and key in vb else None
+    if row is None:
+        key, row = max(
+            vb.items(),
+            key=lambda kv: float((kv[1] or {}).get("edge_pct") or 0),
+        )
+    if not row:
+        return None
+    return {
+        "key": key,
+        "market_label": row.get("market_label") or str(key).replace("_", " ").title(),
+        "model_probability_pct": row.get("model_probability_pct"),
+        "implied_probability_pct": row.get("implied_probability_pct"),
+        "edge_pct": row.get("edge_pct"),
+        "odds": row.get("odds"),
+    }
+
+
+def _build_rationale_metrics(
+    fixture: Dict[str, Any],
+    prediction: Dict[str, Any],
+    pick_key: str,
+    lam_h: float,
+    lam_a: float,
+    conf: float,
+) -> List[Dict[str, Any]]:
+    """Short labelled figures for rationale tiles (UI)."""
+    core: List[Dict[str, Any]] = []
+    optional: List[Dict[str, Any]] = []
+    probs = prediction.get("probabilities_pct") or {}
+    ph, pd, pa = probs.get("home"), probs.get("draw"), probs.get("away")
+    if ph is not None and pd is not None and pa is not None:
+        spread = max(ph, pd, pa) - sorted([ph, pd, pa])[1]
+        fav = "home" if ph >= pd and ph >= pa else ("away" if pa >= ph and pa >= pd else "draw")
+        core.append(
+            {
+                "label": "1X2 model",
+                "value": f"H {ph}% · D {pd}% · A {pa}%",
+                "note": f"Lean {fav} (+{spread:.0f} pts vs 2nd).",
+            }
+        )
+    xg_total = lam_h + lam_a
+    src = fixture.get("xg_source") or prediction.get("xg_source") or "source unknown"
+    core.append(
+        {
+            "label": "xG / source",
+            "value": f"{lam_h:.2f}–{lam_a:.2f} ({xg_total:.2f} total)",
+            "note": str(src),
+        }
+    )
+    btts_pct = prediction.get("btts_probability_pct")
+    o25 = prediction.get("over25_probability_pct")
+    o15 = prediction.get("over15_probability_pct")
+    if btts_pct is not None or o25 is not None:
+        parts = []
+        if btts_pct is not None:
+            parts.append(f"BTTS {btts_pct}%")
+        if o25 is not None:
+            parts.append(f"O2.5 {o25}%")
+        if o15 is not None:
+            parts.append(f"O1.5 {o15}%")
+        note = "High-scoring lean." if (o25 or 0) >= 58 else (
+            "Low-scoring lean." if (o25 or 100) <= 42 else "Balanced totals."
+        )
+        core.append({"label": "Goals signal", "value": " · ".join(parts), "note": note})
+    val = _top_value_snapshot(prediction)
+    if val and val.get("edge_pct") is not None:
+        core.append(
+            {
+                "label": "Value edge",
+                "value": f"+{val['edge_pct']}% {val.get('market_label', '')}".strip(),
+                "note": (
+                    f"Model {val.get('model_probability_pct')}% vs "
+                    f"implied {val.get('implied_probability_pct')}%"
+                    + (f" @ {val['odds']:.2f}" if val.get("odds") else "")
+                    + "."
+                ),
+            }
+        )
+    bo = prediction.get("bookmaker_odds") or {}
+    if bo.get("home") and not val:
+        ih = _implied_prob_pct(bo.get("home"))
+        id_ = _implied_prob_pct(bo.get("draw"))
+        ia = _implied_prob_pct(bo.get("away"))
+        if ih is not None and id_ is not None and ia is not None:
+            optional.append(
+                {
+                    "label": "Book implied",
+                    "value": f"H {ih}% · D {id_}% · A {ia}%",
+                    "note": (
+                        f"Prices {bo['home']:.2f} / {bo['draw']:.2f} / {bo['away']:.2f}."
+                        if bo.get("draw")
+                        else "From primary book line."
+                    ),
+                }
+            )
+    hp = fixture.get("home_position") or {}
+    ap = fixture.get("away_position") or {}
+    if hp.get("position") and ap.get("position"):
+        optional.append(
+            {
+                "label": "Table",
+                "value": f"{fixture.get('home', 'Home')} {hp['position']} · {fixture.get('away', 'Away')} {ap['position']}",
+                "note": f"{hp.get('points', '—')} vs {ap.get('points', '—')} pts.",
+            }
+        )
+    dq = fixture.get("data_quality") or prediction.get("data_quality") or {}
+    dq_pct = dq.get("score_pct")
+    if dq_pct is not None:
+        optional.append(
+            {
+                "label": "Data coverage",
+                "value": f"{dq_pct}% inputs",
+                "note": (
+                    "Full-scope — multi-market reads reliable."
+                    if dq.get("full_scope")
+                    else (
+                        "Strong — verify thin blocks."
+                        if dq.get("strong_scope")
+                        else "Below 80% — treat value edges cautiously."
+                    )
+                ),
+            }
+        )
+    pick_label = _PICK_LABELS.get(pick_key, pick_key)
+    if pick_key not in ("avoid", "odds_only"):
+        optional.append(
+            {
+                "label": "Structured pick",
+                "value": f"{pick_label} @ {conf}%",
+                "note": "Probability-first selection (not a stake tip).",
+            }
+        )
+    th = prediction.get("team_strength_home")
+    ta = prediction.get("team_strength_away")
+    fh = prediction.get("form_home")
+    fa = prediction.get("form_away")
+    if th is not None and ta is not None:
+        optional.append(
+            {
+                "label": "Strength / form",
+                "value": f"Str {th}% / {ta}%",
+                "note": (
+                    f"Form {fh}% / {fa}%."
+                    if fh is not None and fa is not None
+                    else "Model strength index."
+                ),
+            }
+        )
+    return (core + optional)[:6]
+
+
+def _build_rationale_summary(
+    fixture: Dict[str, Any],
+    prediction: Dict[str, Any],
+    pick_key: str,
+    pick_label: str,
+    conf: float,
+    lam_h: float,
+    lam_a: float,
+) -> str:
+    """One short paragraph tying figures to the pick."""
+    parts: List[str] = []
+    probs = prediction.get("probabilities_pct") or {}
+    ph, pd, pa = probs.get("home"), probs.get("draw"), probs.get("away")
+    if ph is not None and pd is not None and pa is not None:
+        fav = max([("home", ph), ("draw", pd), ("away", pa)], key=lambda x: x[1])
+        parts.append(
+            f"The model reads 1X2 as H {ph}% · D {pd}% · A {pa}% "
+            f"(favourite {fav[0]} {fav[1]}%) with xG {lam_h:.2f}–{lam_a:.2f} "
+            f"({lam_h + lam_a:.2f} goals expected)."
+        )
+    btts_pct = prediction.get("btts_probability_pct")
+    o25 = prediction.get("over25_probability_pct")
+    if btts_pct is not None and o25 is not None:
+        parts.append(f"Goals markets: BTTS {btts_pct}%, over 2.5 {o25}%.")
+    val = _top_value_snapshot(prediction)
+    if val and val.get("edge_pct") is not None:
+        parts.append(
+            f"Largest priced edge is {val.get('market_label')}: "
+            f"model {val.get('model_probability_pct')}% vs book implied "
+            f"{val.get('implied_probability_pct')}% (+{val['edge_pct']}% edge)."
+        )
+    n_h = int(fixture.get("home_recent_n") or 0)
+    n_a = int(fixture.get("away_recent_n") or 0)
+    if n_h >= 3 or n_a >= 3:
+        hb = float(fixture.get("home_btts_rate") or 0) * 100
+        ab = float(fixture.get("away_btts_rate") or 0) * 100
+        if hb or ab:
+            parts.append(
+                f"Recent samples (H {n_h} / A {n_a} games) show BTTS {hb:.0f}% / {ab:.0f}%."
+            )
+    if pick_key == "avoid":
+        parts.append("No outcome clears the conservative bar — we label this AVOID.")
+    else:
+        parts.append(f"Structured pick: {pick_label} at {conf}% model confidence.")
+    dq = fixture.get("data_quality") or prediction.get("data_quality") or {}
+    if dq.get("score_pct") is not None:
+        parts.append(f"Input coverage is {dq['score_pct']}%.")
+    return " ".join(parts)
+
+
+def _odds_only_metrics(fixture: Dict[str, Any], prediction: Dict[str, Any]) -> List[Dict[str, Any]]:
+    metrics: List[Dict[str, Any]] = []
+    bo = prediction.get("bookmaker_odds") or {}
+    if bo.get("home") and bo.get("draw") and bo.get("away"):
+        ih = _implied_prob_pct(bo["home"])
+        id_ = _implied_prob_pct(bo["draw"])
+        ia = _implied_prob_pct(bo["away"])
+        metrics.append(
+            {
+                "label": "Book 1X2",
+                "value": f"{bo['home']:.2f} / {bo['draw']:.2f} / {bo['away']:.2f}",
+                "note": (
+                    f"Implied H {ih}% · D {id_}% · A {ia}%."
+                    if ih is not None
+                    else "Model pick withheld."
+                ),
+            }
+        )
+    lo = prediction.get("line_odds") or {}
+    side = []
+    for k, label in (
+        ("btts_yes", "BTTS Y"),
+        ("over25", "O2.5"),
+        ("under25", "U2.5"),
+    ):
+        if lo.get(k):
+            side.append(f"{label} {lo[k]:.2f}")
+    if side:
+        metrics.append({"label": "Side markets", "value": ", ".join(side), "note": "Prices only — no model %."})
+    dq = fixture.get("data_quality") or {}
+    if dq.get("score_pct") is not None:
+        metrics.append(
+            {
+                "label": "Data coverage",
+                "value": f"{dq['score_pct']}% inputs",
+                "note": "Below threshold for structured picks.",
+            }
+        )
+    league = str(fixture.get("league") or "")
+    if league:
+        metrics.append({"label": "League mode", "value": "Odds only", "note": f"{league}: prices until coverage improves."})
+    return metrics[:4]
+
+
+def _odds_only_summary(fixture: Dict[str, Any], prediction: Dict[str, Any]) -> str:
+    bo = prediction.get("bookmaker_odds") or {}
+    parts: List[str] = []
+    if bo.get("home") and bo.get("draw") and bo.get("away"):
+        ih = _implied_prob_pct(bo["home"])
+        id_ = _implied_prob_pct(bo["draw"])
+        ia = _implied_prob_pct(bo["away"])
+        parts.append(
+            f"Book 1X2 is {bo['home']:.2f} / {bo['draw']:.2f} / {bo['away']:.2f}"
+            + (
+                f" (implied H {ih}% · D {id_}% · A {ia}%)."
+                if ih is not None
+                else "."
+            )
+        )
+        parts.append("We show prices only — the model pick is withheld because data is thin or restricted.")
+    lo = prediction.get("line_odds") or {}
+    side = []
+    for k, label in (("btts_yes", "BTTS Y"), ("over25", "O2.5"), ("under25", "U2.5")):
+        if lo.get(k):
+            side.append(f"{label} {lo[k]:.2f}")
+    if side:
+        parts.append("Side markets: " + ", ".join(side) + ".")
+    dq = fixture.get("data_quality") or {}
+    if dq.get("score_pct") is not None:
+        parts.append(f"Input coverage {dq['score_pct']}% — below our minimum for structured picks.")
+    return " ".join(parts)
+
+
 def _rationale_bullets(
     fixture: Dict[str, Any],
     prediction: Dict[str, Any],
     pick_key: str,
     lam_h: float,
     lam_a: float,
+    pick_label: str,
+    conf: float,
 ) -> List[str]:
+    """Numeric fact lines — mirror figures shown in rationale_metrics."""
     bullets: List[str] = []
     probs = prediction.get("probabilities_pct") or {}
     ph = probs.get("home")
@@ -176,45 +469,56 @@ def _rationale_bullets(
     pa = probs.get("away")
     if ph is not None and pd is not None and pa is not None:
         bullets.append(
-            f"Model 1X2: home {ph}%, draw {pd}%, away {pa}% "
-            f"(xG proxy {lam_h:.2f}–{lam_a:.2f})."
+            f"1X2 model: H {ph}% · D {pd}% · A {pa}% · xG {lam_h:.2f}–{lam_a:.2f}."
+        )
+    btts_pct = prediction.get("btts_probability_pct")
+    o25 = prediction.get("over25_probability_pct")
+    if btts_pct is not None and o25 is not None:
+        bullets.append(f"Goals: BTTS {btts_pct}% · over 2.5 {o25}%.")
+    val = _top_value_snapshot(prediction)
+    if val and val.get("edge_pct") is not None:
+        bullets.append(
+            f"Value: {val.get('market_label')} — model {val.get('model_probability_pct')}% "
+            f"vs implied {val.get('implied_probability_pct')}% (+{val['edge_pct']}% edge)."
         )
     n_h = int(fixture.get("home_recent_n") or 0)
     n_a = int(fixture.get("away_recent_n") or 0)
     if n_h >= 3 or n_a >= 3:
-        hb = float(fixture.get("home_btts_rate") or 0)
-        ab = float(fixture.get("away_btts_rate") or 0)
+        hb = float(fixture.get("home_btts_rate") or 0) * 100
+        ab = float(fixture.get("away_btts_rate") or 0) * 100
         if hb or ab:
-            bullets.append(
-                f"Recent form sample (H {n_h} / A {n_a} matches): "
-                f"BTTS rates {hb*100:.0f}% / {ab*100:.0f}%."
-            )
+            bullets.append(f"Form (last {n_h}/{n_a}): BTTS {hb:.0f}% / {ab:.0f}%.")
     hp = fixture.get("home_position") or {}
     ap = fixture.get("away_position") or {}
     if hp.get("position") and ap.get("position"):
         bullets.append(
-            f"Table: {fixture.get('home', 'Home')} {hp.get('position')}, "
+            f"Table: {fixture.get('home', 'Home')} {hp.get('position')} · "
             f"{fixture.get('away', 'Away')} {ap.get('position')}."
         )
-    btts_pct = prediction.get("btts_probability_pct")
-    o25 = prediction.get("over25_probability_pct")
-    if btts_pct is not None and o25 is not None and len(bullets) < 3:
-        bullets.append(f"Goals profile: BTTS {btts_pct}%, over 2.5 {o25}%.")
-    dq = fixture.get("data_quality") or {}
+    dq = fixture.get("data_quality") or prediction.get("data_quality") or {}
     if dq.get("score_pct") is not None:
-        bullets.append(f"Input coverage {dq.get('score_pct')}% — conservative stake sizing advised.")
+        bullets.append(f"Data coverage {dq.get('score_pct')}% — size stakes conservatively.")
     if pick_key == "avoid":
-        bullets.append("No single outcome clears our risk bar; pass or use book prices only.")
-    return bullets[:3]
+        bullets.append("AVOID: no outcome clears the conservative risk bar.")
+    elif pick_key != "odds_only":
+        bullets.append(f"Pick: {pick_label} @ {conf}% model confidence.")
+    return bullets[:4]
 
 
 def _odds_only_bullets(fixture: Dict[str, Any], prediction: Dict[str, Any]) -> List[str]:
     bo = prediction.get("bookmaker_odds") or {}
-    lines = []
+    lines: List[str] = []
     if bo.get("home") and bo.get("draw") and bo.get("away"):
+        ih = _implied_prob_pct(bo["home"])
+        id_ = _implied_prob_pct(bo["draw"])
+        ia = _implied_prob_pct(bo["away"])
         lines.append(
-            f"Book 1X2: {bo['home']:.2f} / {bo['draw']:.2f} / {bo['away']:.2f} — "
-            "model pick withheld (thin or restricted data)."
+            f"Book 1X2: {bo['home']:.2f} / {bo['draw']:.2f} / {bo['away']:.2f}"
+            + (
+                f" (implied H {ih}% · D {id_}% · A {ia}%)."
+                if ih is not None
+                else "."
+            )
         )
     lo = prediction.get("line_odds") or {}
     parts = []
@@ -224,16 +528,14 @@ def _odds_only_bullets(fixture: Dict[str, Any], prediction: Dict[str, Any]) -> L
         ("under25", "U2.5"),
     ):
         if lo.get(k):
-            parts.append(f"{label} {lo[k]}")
+            parts.append(f"{label} {lo[k]:.2f}")
     if parts:
         lines.append("Side markets: " + ", ".join(parts) + ".")
-    league = str(fixture.get("league") or "")
-    if league:
-        lines.append(f"League {league}: prices only until coverage improves.")
     dq = fixture.get("data_quality") or {}
     if dq.get("score_pct") is not None:
         lines.append(f"Data coverage {dq.get('score_pct')}% — below threshold for structured picks.")
-    return lines[:3]
+    lines.append("No model pick — prices only until coverage improves.")
+    return lines[:4]
 
 
 def build_structured_insight(
@@ -253,6 +555,8 @@ def build_structured_insight(
             "pick": _PICK_LABELS["odds_only"],
             "pick_key": "odds_only",
             "rationale": _odds_only_bullets(fixture, prediction),
+            "rationale_metrics": _odds_only_metrics(fixture, prediction),
+            "rationale_summary": _odds_only_summary(fixture, prediction),
             "confidence_pct": None,
             "predicted_scoreline": None,
             "mode": "odds_only",
@@ -278,7 +582,9 @@ def build_structured_insight(
 
     margin = _env_float("HIBS_INSIGHT_PICK_MARGIN", 0.08)
     pick_key, pick_label, conf = _pick_conservative(probs, btts, over25, lam_h, lam_a, margin)
-    rationale = _rationale_bullets(fixture, prediction, pick_key, lam_h, lam_a)
+    rationale = _rationale_bullets(
+        fixture, prediction, pick_key, lam_h, lam_a, pick_label, conf
+    )
     scoreline = _most_likely_scoreline(lam_h, lam_a)
 
     return {
@@ -286,6 +592,12 @@ def build_structured_insight(
         "pick": pick_label,
         "pick_key": pick_key,
         "rationale": rationale,
+        "rationale_metrics": _build_rationale_metrics(
+            fixture, prediction, pick_key, lam_h, lam_a, conf
+        ),
+        "rationale_summary": _build_rationale_summary(
+            fixture, prediction, pick_key, pick_label, conf, lam_h, lam_a
+        ),
         "confidence_pct": conf,
         "predicted_scoreline": scoreline,
         "mode": "prediction",

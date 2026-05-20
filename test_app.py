@@ -779,6 +779,51 @@ def test_dashboard_days_grouping():
         return False
 
 
+def test_competition_display_titles():
+    """Provider league/round maps to human headings (cup finals, playoffs)."""
+    print("\nTesting competition display titles...")
+    try:
+        from hibs_predictor.display_tz import attach_kickoff_display
+        from hibs_predictor.fixture_utils import display_competition_title
+        from hibs_predictor.web import _dashboard_days_groups
+
+        cup = display_competition_title(
+            fallback_name="Scottish Premiership",
+            api_league_name="Scottish Cup",
+            api_round="Final",
+        )
+        assert "scottish cup" in cup.lower()
+        assert "final" in cup.lower()
+
+        efl_po = display_competition_title(
+            fallback_name="Championship",
+            api_league_name="Championship",
+            api_round="Play-offs - Final",
+        )
+        assert "play" in efl_po.lower() or "final" in efl_po.lower()
+
+        raw = [
+            attach_kickoff_display(
+                {
+                    "id": 501,
+                    "home": "Hull City",
+                    "away": "Middlesbrough",
+                    "date": "2026-05-24T14:00:00+00:00",
+                    "league": "CHAMPIONSHIP",
+                    "league_name": "Championship — Play-offs - Final",
+                }
+            )
+        ]
+        days = _dashboard_days_groups(raw)
+        assert days[0]["leagues"][0]["name"] == "Championship — Play-offs - Final"
+
+        print("  ✓ Competition display titles OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Competition display titles failed: {e}")
+        return False
+
+
 def test_scottish_fbref_xg():
     """Scottish FBref schedule xG resolves without live HTTP."""
     print("\nTesting Scottish FBref xG...")
@@ -1399,6 +1444,7 @@ def main():
         test_bottom_top_underdog_not_home_value,
         test_pick_menu,
         test_dashboard_days_grouping,
+        test_competition_display_titles,
         test_kickoff_display_tz,
         test_fotmob_adapter_mocked,
         test_football_data_standings_mocked,

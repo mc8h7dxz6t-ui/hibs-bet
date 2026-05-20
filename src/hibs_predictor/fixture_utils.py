@@ -2,7 +2,75 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+import re
+from typing import Any, Dict, Optional
+
+
+def display_competition_title(
+    *,
+    fallback_name: str,
+    api_league_name: Optional[str] = None,
+    api_round: Optional[str] = None,
+    fotmob_league_name: Optional[str] = None,
+    fdo_competition_name: Optional[str] = None,
+) -> str:
+    """Human-readable competition heading: prefer provider league/round over our configured league name."""
+    fb = (fallback_name or "").strip() or "Fixture"
+    prov = (
+        (api_league_name or "").strip()
+        or (fdo_competition_name or "").strip()
+        or (fotmob_league_name or "").strip()
+    )
+    rnd = (api_round or "").strip()
+
+    def _tidy(s: str) -> str:
+        return " ".join(s.split()).replace(" - ", " — ")
+
+    def _round_is_boring(r: str) -> bool:
+        low = r.lower()
+        if "regular season" in low:
+            return True
+        if re.match(r"^round\s+\d+$", low):
+            return True
+        return False
+
+    def _round_is_special(r: str) -> bool:
+        if not r or _round_is_boring(r):
+            return False
+        low = r.lower()
+        return any(
+            k in low
+            for k in (
+                "final",
+                "semi",
+                "quarter",
+                "play-off",
+                "playoff",
+                "knockout",
+                "qualif",
+                "relegation",
+                "promotion",
+            )
+        )
+
+    # Knockout finals named by competition + final (e.g. Scottish Cup final).
+    if prov and rnd:
+        rlow = rnd.lower().strip()
+        if "cup" in prov.lower() and (rlow == "final" or rlow.endswith(" final")):
+            return _tidy(f"{prov} final")
+
+    if rnd and _round_is_special(rnd):
+        if prov and prov.lower() not in rnd.lower():
+            return _tidy(f"{prov} — {rnd}")
+        return _tidy(rnd)
+
+    if prov and prov.lower() != fb.lower():
+        return _tidy(prov)
+
+    if prov:
+        return _tidy(prov)
+
+    return _tidy(fb)
 
 
 def fixture_team_id(fixture: Dict[str, Any], side: str) -> Optional[int]:

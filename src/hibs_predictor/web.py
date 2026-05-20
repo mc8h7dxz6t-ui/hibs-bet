@@ -34,6 +34,7 @@ from hibs_predictor.betting_engine import (
 )
 from hibs_predictor.health_probe import gather_health
 from hibs_predictor.display_tz import display_tz_label
+from hibs_predictor.fixture_utils import display_competition_title
 
 TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -127,7 +128,7 @@ def _ui_data_quality_min_pct() -> int:
 
 
 def _all_fixtures_cache_key() -> str:
-    return f"all_fixtures_{_fetch_window_days()}d_v16"
+    return f"all_fixtures_{_fetch_window_days()}d_v17"
 
 
 def _cache_ttl_hours(default: float = 1.0) -> float:
@@ -242,12 +243,67 @@ def _safe_enrich(fixture: Dict[str, Any], league_code: str) -> Dict[str, Any]:
         return out
 
 
+def _competition_meta_from_api_sports(raw: Dict[str, Any]) -> Dict[str, Any]:
+    lg = raw.get("league")
+    if not isinstance(lg, dict):
+        return {}
+    meta: Dict[str, Any] = {}
+    name = (lg.get("name") or "").strip()
+    rnd = (lg.get("round") or "").strip()
+    if name:
+        meta["api_league_name"] = name
+    if rnd:
+        meta["api_round"] = rnd
+    return meta
+
+
+def _fdo_round_from_match(match: Dict[str, Any]) -> Optional[str]:
+    stage = match.get("stage")
+    if stage is None or stage == "":
+        return None
+    s = str(stage).strip().upper().replace("-", "_")
+    if s in ("REGULAR_SEASON", "GROUP_STAGE"):
+        return None
+    labels = {
+        "FINAL": "Final",
+        "SEMI_FINALS": "Semi-finals",
+        "QUARTER_FINALS": "Quarter-finals",
+        "LAST_16": "Round of 16",
+        "LAST_32": "Round of 32",
+        "ROUND_OF_16": "Round of 16",
+        "PLAYOFF_ROUND": "Play-offs",
+    }
+    return labels.get(s, str(stage).replace("_", " ").title())
+
+
+def _competition_meta_from_fdo(match: Dict[str, Any]) -> Dict[str, Any]:
+    comp = match.get("competition")
+    meta: Dict[str, Any] = {}
+    if isinstance(comp, dict):
+        cn = (comp.get("name") or "").strip()
+        if cn:
+            meta["fdo_competition_name"] = cn
+    rnd = _fdo_round_from_match(match)
+    if rnd:
+        meta["api_round"] = rnd
+    return meta
+
+
+def _competition_meta_from_fotmob(match: Dict[str, Any]) -> Dict[str, Any]:
+    fm = match.get("_fotmob_league")
+    if not isinstance(fm, dict):
+        return {}
+    nm = (fm.get("name") or "").strip()
+    return {"fotmob_league_name": nm} if nm else {}
+
+
 def _normalize_api_sports(fixture: Dict, league_code: str) -> Optional[Dict]:
     fm = fixture.get("fixture", {})
     home = fixture.get("teams", {}).get("home", {})
     away = fixture.get("teams", {}).get("away", {})
     if not fm or not home or not away:
         return None
+    comp_meta = _competition_meta_from_api_sports(fixture)
     return {
         "fixture": {"id": fm.get("id"), "date": fm.get("date"), "status": fm.get("status", {})},
         "teams": {
@@ -258,7 +314,7 @@ def _normalize_api_sports(fixture: Dict, league_code: str) -> Optional[Dict]:
         "away": {"id": away.get("id", 0), "name": away.get("name", "?")},
         "date": fm.get("date"),
         "league": league_code,
-        "league_name": LEAGUES.get(league_code, {}).get("name", ""),
+        "competition_meta": comp_meta,
     }
 
 
@@ -270,6 +326,7 @@ def _normalize_fdo(match: Dict, league_code: str) -> Optional[Dict]:
     date = match.get("utcDate")
     if not date or not home or not away:
         return None
+    comp_meta = _competition_meta_from_fdo(match)
     return {
         "fixture": {"id": match.get("id"), "date": date, "status": {"short": match.get("status", "")}},
         "teams": {
@@ -280,7 +337,7 @@ def _normalize_fdo(match: Dict, league_code: str) -> Optional[Dict]:
         "away": {"id": away.get("id", 0), "name": away.get("name", "?")},
         "date": date,
         "league": league_code,
-        "league_name": LEAGUES.get(league_code, {}).get("name", ""),
+        "competition_meta": comp_meta,
     }
 
 
@@ -296,6 +353,7 @@ def _normalize_fotmob(match: Dict, league_code: str) -> Optional[Dict]:
     mid = match.get("id") or match.get("matchId")
     if not home_name or not away_name or not date_s:
         return None
+    comp_meta = _competition_meta_from_fotmob(match)
     return {
         "fixture": {"id": f"fotmob_{mid}" if mid else None, "date": date_s, "status": {"short": match.get("status", {}).get("short") if isinstance(match.get("status"), dict) else match.get("status")}},
         "teams": {
@@ -306,7 +364,7 @@ def _normalize_fotmob(match: Dict, league_code: str) -> Optional[Dict]:
         "away": {"id": away.get("id", 0) if isinstance(away, dict) else 0, "name": away_name},
         "date": date_s,
         "league": league_code,
-        "league_name": LEAGUES.get(league_code, {}).get("name", ""),
+        "competition_meta": comp_meta,
         "source": "fotmob_public",
     }
 
@@ -317,7 +375,7 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     prefer_fdo = _env_truthy("HIBS_PREFER_FOOTBALL_DATA_FIXTURES")
     skip_as_fx = _env_truthy("HIBS_SKIP_API_SPORTS_FIXTURES")
     ttl = _cache_ttl_hours(1.0)
-    cache_key = f"fixtures_{days}d_{league_code}_v16_{int(prefer_fdo)}{int(skip_as_fx)}"
+    cache_key = f"fixtures_{days}d_{league_code}_v17_{int(prefer_fdo)}{int(skip_as_fx)}"
     cached = cache.get(cache_key, ttl_hours=ttl)
     if cached:
         return cached
@@ -455,6 +513,18 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
             print(f"[Fixture last10] {league_code} {_fixture_key(fixture)}: {e!r}")
             home_last10, away_last10 = [], []
 
+        comp_meta = enriched.get("competition_meta") if isinstance(enriched.get("competition_meta"), dict) else {}
+        if not comp_meta and isinstance(fixture.get("competition_meta"), dict):
+            comp_meta = fixture.get("competition_meta") or {}
+        fb_name = LEAGUES.get(league_code, {}).get("name", league_code)
+        title = display_competition_title(
+            fallback_name=fb_name,
+            api_league_name=comp_meta.get("api_league_name"),
+            api_round=comp_meta.get("api_round"),
+            fotmob_league_name=comp_meta.get("fotmob_league_name"),
+            fdo_competition_name=comp_meta.get("fdo_competition_name"),
+        )
+
         row = {
             "id": fixture.get("fixture", {}).get("id"),
             "home": fixture.get("home", {}).get("name", "?"),
@@ -463,7 +533,8 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
             "away_id": away_id,
             "date": fixture.get("date"),
             "league": league_code,
-            "league_name": LEAGUES.get(league_code, {}).get("name", ""),
+            "league_name": title,
+            "competition_meta": comp_meta,
             "league_flag": LEAGUES.get(league_code, {}).get("flag", ""),
             "prediction": prediction,
             "home_last10": home_last10,
@@ -955,6 +1026,15 @@ def _sidebar_upcoming(all_fixtures: List[Dict[str, Any]], limit: int = 80) -> Li
     return rows
 
 
+def _league_block_display_name(league_code: str, fixtures: List[Dict[str, Any]]) -> str:
+    """Section heading: shared per-fixture league_name when uniform, else configured league label."""
+    names = [(f.get("league_name") or "").strip() for f in fixtures]
+    names = [n for n in names if n]
+    if len(set(names)) == 1:
+        return names[0]
+    return LEAGUES.get(league_code, {}).get("name", league_code)
+
+
 def _dashboard_days_groups(all_fixtures: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Group fixtures by local calendar day, leagues in DASHBOARD_LEAGUE_ORDER, each league by KO time."""
     from collections import defaultdict
@@ -986,7 +1066,7 @@ def _dashboard_days_groups(all_fixtures: List[Dict[str, Any]]) -> List[Dict[str,
             leagues_block.append(
                 {
                     "code": lc,
-                    "name": LEAGUES.get(lc, {}).get("name", lc),
+                    "name": _league_block_display_name(lc, fl),
                     "fixtures": fl,
                 }
             )
