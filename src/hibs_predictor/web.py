@@ -47,7 +47,6 @@ from hibs_predictor.display_tz import display_tz_label, fixture_window_start_utc
 from hibs_predictor.fixture_utils import display_competition_title
 from hibs_predictor.media_config import (
     SKY_SPORTS_FOOTBALL_YOUTUBE_CLIPS_EMBED_URL,
-    SKY_SPORTS_NEWS_WATCH_URL,
     SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_URL,
     SKY_SPORTS_NEWS_YOUTUBE_LIVE_EMBED_URL,
     SKY_SPORTS_NEWS_YOUTUBE_LIVE_VIDEO_URL,
@@ -133,6 +132,16 @@ def _fixture_fetch_season_candidates(
 
 def _env_truthy(name: str) -> bool:
     return (os.getenv(name) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _show_sky_panel() -> bool:
+    """Dashboard Sky Sports YouTube panel (set HIBS_SHOW_SKY_PANEL=0 to hide)."""
+    return (os.getenv("HIBS_SHOW_SKY_PANEL") or "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
 
 
 def _fixture_key(fixture: Dict[str, Any]) -> str:
@@ -1352,8 +1361,8 @@ def index():
         leagues=LEAGUES,
         data_quality_ui_min=_ui_data_quality_min_pct(),
         assistant_packets=assistant_packets,
+        show_sky_panel=_show_sky_panel(),
         sky_sports_news_live_embed_url=SKY_SPORTS_NEWS_YOUTUBE_LIVE_EMBED_URL,
-        sky_sports_news_watch_url=SKY_SPORTS_NEWS_WATCH_URL,
         sky_sports_news_youtube_channel_url=SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_URL,
         sky_sports_news_youtube_live_video_url=SKY_SPORTS_NEWS_YOUTUBE_LIVE_VIDEO_URL,
         sky_sports_football_clips_embed_url=SKY_SPORTS_FOOTBALL_YOUTUBE_CLIPS_EMBED_URL,

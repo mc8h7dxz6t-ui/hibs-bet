@@ -1,7 +1,4 @@
-"""Official third-party media URLs (embed/link only — no scraped streams)."""
-
-# Sky Sports News TV — full 24/7 player at skysports.com (not iframe-embeddable from third parties).
-SKY_SPORTS_NEWS_WATCH_URL = "https://www.skysports.com/watch/sky-sports-news"
+"""Official third-party media URLs (YouTube embeds only — no scraped streams)."""
 
 # @SkySportsNews — rolling 24/7 news simulcast on YouTube (https://www.youtube.com/@SkySportsNews/live).
 SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_ID = "UCcw05gGzjLIs5dnxGkQHMvw"

@@ -1604,9 +1604,9 @@ def test_settings_fixture_window_ui():
         return False
 
 
-def test_sky_optional_subscriber_ui():
-    """Settings toggle and dashboard panel hide Sky CTA unless hasSkyAccess."""
-    print("\nTesting optional Sky subscriber UI...")
+def test_sky_youtube_panel():
+    """Dashboard shows YouTube-only Sky panel; no Sky Go settings or watch links."""
+    print("\nTesting Sky Sports YouTube panel...")
     try:
         from unittest.mock import patch
         from hibs_predictor.web import app
@@ -1621,23 +1621,30 @@ def test_sky_optional_subscriber_ui():
 
         assert settings.status_code == 200
         sbody = settings.get_data(as_text=True)
-        assert 'data-hibs-setting-check="hasSkyAccess"' in sbody
-        assert "I have Sky / Sky Go" in sbody
+        assert 'data-hibs-setting-check="hasSkyAccess"' not in sbody
+        assert "I have Sky / Sky Go" not in sbody
+        assert "Sky Sports</h2>" not in sbody
 
         assert dashboard.status_code == 200
         dbody = dashboard.get_data(as_text=True)
         assert "sky-sports-news" in dbody
-        assert 'data-sky-when="access"' in dbody
-        assert 'data-sky-when="no-access"' in dbody
+        assert "Sky Sports on YouTube (free)" in dbody
         assert "youtube-nocookie.com/embed" in dbody
-        assert "Watch on Sky (subscription)" in dbody
-        assert 'class="nav-btn sky-news-watch-live"' not in dbody
-        assert "Watch live on Sky Sports" not in dbody
-        assert "News 24/7" in dbody and "Football clips" in dbody
-        print("  ✓ Optional Sky subscriber settings + panel markup")
+        assert "a-E_HJ7p1qg" in dbody
+        assert "data-sky-when" not in dbody
+        assert "skysports.com/watch" not in dbody
+        assert "Watch on Sky" not in dbody
+        assert "Sky Go" not in dbody
+        assert "News live" in dbody and "Football clips" in dbody
+
+        with patch.dict("os.environ", {"HIBS_SHOW_SKY_PANEL": "0"}, clear=False):
+            hidden = client.get("/")
+        assert hidden.status_code == 200
+        assert "sky-sports-news" not in hidden.get_data(as_text=True)
+        print("  ✓ Sky Sports YouTube panel (hide via HIBS_SHOW_SKY_PANEL=0)")
         return True
     except Exception as e:
-        print(f"  ✗ Optional Sky subscriber UI test failed: {e}")
+        print(f"  ✗ Sky Sports YouTube panel test failed: {e}")
         return False
 
 
@@ -1648,14 +1655,12 @@ def test_sky_sports_news_media_config():
         from hibs_predictor.media_config import (
             SKY_SPORTS_FOOTBALL_YOUTUBE_CHANNEL_ID,
             SKY_SPORTS_FOOTBALL_YOUTUBE_CLIPS_EMBED_URL,
-            SKY_SPORTS_NEWS_WATCH_URL,
             SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_ID,
             SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL,
             SKY_SPORTS_NEWS_YOUTUBE_LIVE_VIDEO_ID,
             SKY_SPORTS_NEWS_YOUTUBE_UPLOADS_PLAYLIST_ID,
         )
 
-        assert "skysports.com" in SKY_SPORTS_NEWS_WATCH_URL
         assert SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_ID == "UCcw05gGzjLIs5dnxGkQHMvw"
         assert SKY_SPORTS_FOOTBALL_YOUTUBE_CHANNEL_ID == "UCZ7wY7MRDSygp63HIEfdQZA"
         assert SKY_SPORTS_NEWS_YOUTUBE_LIVE_VIDEO_ID == "a-E_HJ7p1qg"
@@ -2001,7 +2006,7 @@ def main():
         test_live_statistics_xg_mocked,
         test_europa_league_live_merge_freiburg_villa,
         test_live_merge_non_nordic_by_teams,
-        test_sky_optional_subscriber_ui,
+        test_sky_youtube_panel,
         test_sky_sports_news_media_config,
         test_fotmob_adapter_mocked,
         test_football_data_standings_mocked,

@@ -1,15 +1,15 @@
 <details class="sky-news-card" id="sky-sports-news" open>
     <summary class="sky-news-sum">
         <span class="sky-news-ico" aria-hidden="true">📺</span>
-        <span class="sky-news-txt">Sky Sports</span>
-        <span class="sky-news-sub">YouTube free · Sky optional</span>
+        <span class="sky-news-txt">Sky Sports on YouTube (free)</span>
+        <span class="sky-news-sub">News 24/7 · Football clips</span>
     </summary>
     <div class="sky-news-body">
         <p class="sky-news-note muted small">
-            Official <strong>Sky Sports News</strong> 24/7 and <strong>Sky Sports Football</strong> clips on YouTube — free for everyone.
+            Official <strong>Sky Sports News</strong> 24/7 and <strong>Sky Sports Football</strong> clips on YouTube — not Sky Go or a Sky subscription.
         </p>
-        <div class="sky-news-tabs tab-row" role="tablist" aria-label="Sky Sports media">
-            <button type="button" class="tab-btn active" data-tab-group="sky-media" onclick="switchTab(event,'sky-tab-news','sky-media')">News 24/7</button>
+        <div class="sky-news-tabs tab-row" role="tablist" aria-label="Sky Sports on YouTube">
+            <button type="button" class="tab-btn active" data-tab-group="sky-media" onclick="switchTab(event,'sky-tab-news','sky-media')">News live</button>
             <button type="button" class="tab-btn" data-tab-group="sky-media" onclick="switchTab(event,'sky-tab-football','sky-media')">Football clips</button>
         </div>
         <div id="sky-tab-news" class="tab-panel active sky-news-player-wrap" data-group="sky-media">
@@ -40,37 +40,5 @@
             ·
             <a href="{{ sky_sports_news_youtube_channel_url }}" target="_blank" rel="noopener noreferrer">@SkySportsNews</a>.
         </p>
-        <div class="sky-news-sky-subscriber" data-sky-when="access" hidden>
-            <a
-                href="{{ sky_sports_news_watch_url }}"
-                class="sky-news-open-sky"
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Optional: open in Sky if you have a subscription"
-            >Open Sky Sports News in Sky</a>
-            <span class="muted small" style="display:block;margin-top:4px;">Optional: open in Sky if you have a subscription (app or web).</span>
-        </div>
-        <p class="sky-news-sky-footer muted small" data-sky-when="no-access">
-            <a href="{{ sky_sports_news_watch_url }}" target="_blank" rel="noopener noreferrer">Watch on Sky (subscription)</a>
-        </p>
     </div>
 </details>
-<script>
-(function () {
-    function applySkyPanelAccess() {
-        var has = !!(window.HibsSettings && window.HibsSettings.get().hasSkyAccess);
-        document.querySelectorAll('#sky-sports-news [data-sky-when="access"]').forEach(function (el) {
-            el.hidden = !has;
-        });
-        document.querySelectorAll('#sky-sports-news [data-sky-when="no-access"]').forEach(function (el) {
-            el.hidden = has;
-        });
-    }
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', applySkyPanelAccess);
-    } else {
-        applySkyPanelAccess();
-    }
-    document.addEventListener('hibs-settings-change', applySkyPanelAccess);
-})();
-</script>
