@@ -56,14 +56,65 @@ def _supplemental_pts(sup: Any) -> float:
     return 3.0 if useful else 1.0
 
 
-def _xg_points(src: str, n_h: float, n_a: float) -> float:
+def _supplemental_understat_source(sup: Any) -> Optional[str]:
+    if not isinstance(sup, dict):
+        return None
+    for key in ("understat_light_source", "understat_source"):
+        tag = sup.get(key)
+        if isinstance(tag, str) and tag.strip():
+            return tag.strip().lower()
+    for key in ("understat_light", "understat"):
+        us = sup.get(key)
+        if not isinstance(us, dict):
+            continue
+        try:
+            uh = float(us.get("xg_home"))
+            ua = float(us.get("xg_away"))
+        except (TypeError, ValueError):
+            continue
+        if uh > 0.04 and ua > 0.04 and (uh + ua) < 6.5:
+            if sup.get("understat_light_team_rolling"):
+                return "understat_team_xg"
+            return "understat_xg"
+    return None
+
+
+def _effective_xg_source(enriched: Dict[str, Any]) -> str:
+    src = (enriched.get("xg_source") or "unknown").lower()
+    if src not in ("unknown", "goals_proxy", "mixed_api_goals_proxy", ""):
+        return src
+    from_sup = _supplemental_understat_source(enriched.get("supplemental"))
+    if from_sup:
+        return from_sup
+    meta = enriched.get("scraped_xg_meta") or {}
+    if meta.get("team_rolling"):
+        return "understat_team_xg"
+    return src
+
+
+def _xg_points(src: str, n_h: float, n_a: float, enriched: Optional[Dict[str, Any]] = None) -> float:
     s = (src or "unknown").lower()
+    meta = (enriched or {}).get("scraped_xg_meta") or {}
     if s == "api_fixture_xg":
         return 18.0
     if s == "stats_api_xg":
         return 15.0
+    if s == "understat_xg":
+        if meta.get("match_confident") or meta.get("understat_key"):
+            return 16.0
+        return 15.0
+    if s == "understat_team_xg":
+        try:
+            hn = int(meta.get("home_n") or 0)
+            an = int(meta.get("away_n") or 0)
+        except (TypeError, ValueError):
+            hn = an = 0
+        if hn >= 5 and an >= 5:
+            return 15.0
+        if hn >= 3 and an >= 3:
+            return 14.0
+        return 14.0
     if s in (
-        "understat_xg",
         "scraped_recent_xg",
         "scottish_fbref_xg",
         "scottish_fbref_avg_xg",
@@ -208,8 +259,8 @@ def compute_fixture_data_quality(enriched: Dict[str, Any]) -> Dict[str, Any]:
     add("Home league position", "stand_home", 5.0, _standings_pts(hp))
     add("Away league position", "stand_away", 5.0, _standings_pts(ap))
 
-    src = (enriched.get("xg_source") or "unknown").lower()
-    add("Expected goals (xG) source", "xg", 18.0, _xg_points(src, n_h, n_a))
+    src = _effective_xg_source(enriched)
+    add("Expected goals (xG) source", "xg", 18.0, _xg_points(src, n_h, n_a, enriched))
 
     book = bool(enriched.get("odds_available")) or all(
         enriched.get(k) is not None and float(enriched.get(k) or 0) > 1.0
@@ -324,4 +375,11 @@ def compute_fixture_data_quality_from_row(fixture_row: Dict[str, Any]) -> Dict[s
     mo = fixture_row.get("market_odds")
     if mo:
         enriched["market_odds"] = mo
+    sup = enriched.get("supplemental") or {}
+    if sup.get("understat_light_home_n") is not None or sup.get("understat_light_away_n") is not None:
+        enriched["scraped_xg_meta"] = {
+            "home_n": sup.get("understat_light_home_n"),
+            "away_n": sup.get("understat_light_away_n"),
+            "team_rolling": bool(sup.get("understat_light_team_rolling")),
+        }
     return compute_fixture_data_quality(enriched)

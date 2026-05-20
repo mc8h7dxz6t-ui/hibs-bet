@@ -11,7 +11,7 @@ Coverage scoring: `src/hibs_predictor/data_quality.py` (`full_scope` ≥ **85%**
 | Football-Data.org | Fixture + standings fallback | `FOOTBALL_DATA_ORG_KEY`, `HIBS_PREFER_FOOTBALL_DATA_FIXTURES` |
 | The Odds API | 1X2 + cross-book lines | `ODDS_API_KEY`; skip via `HIBS_SKIP_ODDS_API` |
 | RapidAPI stats (api-football.com host) | Fixture-level xG | `STATS_API_KEY` + `HIBS_MAX_DATA=1` (default skips Rapid xG) |
-| Understat | Match xG (12 league codes) via `/getLeagueData` AJAX | `HIBS_ENABLE_UNDERSTAT_LIGHT`, `HIBS_SCRAPE_XG` |
+| Understat | Per-match xG (`xg_home`/`xg_away`) for 12 `LEAGUE_SLUG` leagues via `/getLeagueData`; team rolling avg when the fixture row has no xG yet | `HIBS_ENABLE_UNDERSTAT_LIGHT`, `HIBS_SCRAPE_XG` |
 | FBref | Top-5 squad tables (heavy); SPFL schedule xG (Scottish) | `HIBS_ENABLE_HEAVY_SCRAPERS`, `HIBS_ENABLE_SCOTTISH_FBREF_XG` |
 | Wikipedia | Standings when API thin | `HIBS_PREFER_SCRAPED_STANDINGS` |
 | SofaScore | Rolling team xG averages → `sofascore_xg` when API reachable | `HIBS_ENABLE_SOFASCORE_XG` or `HIBS_MAX_DATA=1`; optional `pip install curl_cffi` |

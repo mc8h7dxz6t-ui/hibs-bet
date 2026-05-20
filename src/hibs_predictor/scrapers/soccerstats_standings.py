@@ -5,10 +5,11 @@ Public HTML tables; cached aggressively. Respect robots.txt and low request rate
 
 from __future__ import annotations
 
+import os
 import re
 import unicodedata
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from bs4 import BeautifulSoup
@@ -18,7 +19,7 @@ from hibs_predictor.cache import Cache
 _HEADERS = {"User-Agent": "hibs-bet/1.0 (standings enrichment; local)"}
 BASE = "https://www.soccerstats.com"
 
-# hibs league_code → soccerstats ``league`` query param
+# hibs league_code → soccerstats ``league`` query param (used on latest.asp)
 LEAGUE_PARAM: Dict[str, str] = {
     "EPL": "england",
     "CHAMPIONSHIP": "england2",
@@ -49,6 +50,119 @@ def _norm_name(s: str) -> str:
     return s
 
 
+def _debug(msg: str) -> None:
+    if os.getenv("HIBS_DEBUG", "0").lower() in ("1", "true", "yes"):
+        print(msg)
+
+
+def _header_row_index(trs: List[Any]) -> Tuple[int, List[str]]:
+    """Return (row_index, uppercased header cells) for a standings header row."""
+    for i, tr in enumerate(trs[:4]):
+        cells = [td.get_text(" ", strip=True).upper() for td in tr.find_all("td")]
+        if "GP" not in cells:
+            continue
+        if "TEAM" in cells or "CLUB" in cells or "PTS" in cells or "POINTS" in cells:
+            return i, cells
+    return -1, []
+
+
+def _col_index(header_cells: List[str], *names: str) -> int:
+    for name in names:
+        if name in header_cells:
+            return header_cells.index(name)
+    return -1
+
+
+def _parse_standings_table(table: Any) -> List[Dict[str, Any]]:
+    """Extract team rows from one SoccerStats standings table."""
+    trs = table.find_all("tr")
+    if len(trs) < 4:
+        return []
+
+    header_idx, header_cells = _header_row_index(trs)
+    if header_idx < 0:
+        return []
+
+    gp_i = _col_index(header_cells, "GP")
+    pts_i = _col_index(header_cells, "PTS", "POINTS")
+    gf_i = _col_index(header_cells, "GF")
+    ga_i = _col_index(header_cells, "GA")
+
+    rows_out: List[Dict[str, Any]] = []
+    for tr in trs[header_idx + 1 :]:
+        tds = tr.find_all("td")
+        if len(tds) < 4:
+            continue
+        texts = [td.get_text(" ", strip=True) for td in tds]
+        pos_raw = (texts[0] if texts else "").replace(".", "")
+        if not pos_raw.isdigit():
+            continue
+        pos = int(pos_raw)
+        team = texts[1] if len(texts) > 1 else ""
+        if not team or not re.search(r"[A-Za-z]", team):
+            continue
+
+        def _cell_int(idx: int, default: int = 0) -> int:
+            if idx < 0 or idx >= len(texts):
+                return default
+            try:
+                return int(re.sub(r"[^\d-]", "", texts[idx]) or default)
+            except ValueError:
+                return default
+
+        played = _cell_int(gp_i)
+        if played < 5:
+            continue
+        points = _cell_int(pts_i)
+        if points <= 0 and pts_i < 0:
+            nums = []
+            for t in texts[2:]:
+                try:
+                    nums.append(int(re.sub(r"[^\d-]", "", t) or 0))
+                except ValueError:
+                    pass
+            points = nums[-1] if nums else 0
+            gf = nums[-3] if len(nums) >= 4 else 0
+            ga = nums[-2] if len(nums) >= 4 else 0
+        else:
+            gf = _cell_int(gf_i)
+            ga = _cell_int(ga_i)
+
+        rows_out.append(
+            {
+                "position": pos,
+                "team": team,
+                "played": played,
+                "points": points,
+                "goals_for": gf,
+                "goals_against": ga,
+                "source": "soccerstats",
+            }
+        )
+    return rows_out
+
+
+def _pick_best_table(soup: BeautifulSoup) -> List[Dict[str, Any]]:
+    """Prefer the full-season table (highest games-played) over home/away splits."""
+    candidates: List[Tuple[int, int, List[Dict[str, Any]]]] = []
+    for table in soup.find_all("table"):
+        rows = _parse_standings_table(table)
+        if len(rows) < 3:
+            continue
+        max_played = max(int(r.get("played") or 0) for r in rows)
+        candidates.append((max_played, len(rows), rows))
+    if not candidates:
+        return []
+    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return candidates[0][2]
+
+
+def parse_latest_html(html: str) -> List[Dict[str, Any]]:
+    """Parse standings from a SoccerStats latest.asp page (for tests)."""
+    soup = BeautifulSoup(html, "html.parser")
+    return _pick_best_table(soup)
+
+
 def fetch_league_table(league_code: str, *, cache: Optional[Cache] = None) -> List[Dict[str, Any]]:
     """Parse SoccerStats overall table for a mapped league."""
     param = LEAGUE_PARAM.get((league_code or "").strip().upper())
@@ -60,60 +174,22 @@ def fetch_league_table(league_code: str, *, cache: Optional[Cache] = None) -> Li
     if isinstance(hit, list):
         return hit
 
-    url = f"{BASE}/tables.asp"
-    r = requests.get(url, params={"league": param, "tid": "r"}, headers=_HEADERS, timeout=25)
-    r.raise_for_status()
-    soup = BeautifulSoup(r.text, "html.parser")
-    rows_out: List[Dict[str, Any]] = []
+    url = f"{BASE}/latest.asp"
+    try:
+        r = requests.get(url, params={"league": param}, headers=_HEADERS, timeout=25)
+    except requests.RequestException as exc:
+        _debug(f"[soccerstats] {league_code}: request failed: {exc!r}")
+        return []
 
-    for table in soup.find_all("table"):
-        trs = table.find_all("tr")
-        if len(trs) < 8:
-            continue
-        header = " ".join(trs[0].get_text(" ", strip=True).lower())
-        if "team" not in header and "club" not in header:
-            continue
-        if "pts" not in header and "points" not in header:
-            continue
-        for tr in trs[1:]:
-            tds = tr.find_all("td")
-            if len(tds) < 4:
-                continue
-            texts = [td.get_text(" ", strip=True) for td in tds]
-            pos_raw = texts[0].replace(".", "")
-            try:
-                pos = int(re.sub(r"\D", "", pos_raw) or 0)
-            except ValueError:
-                pos = 0
-            if pos < 1:
-                continue
-            team_cell = tds[1] if len(tds) > 1 else tds[0]
-            team = team_cell.get_text(" ", strip=True)
-            if not team or len(team) < 2:
-                continue
-            nums = []
-            for t in texts[2:]:
-                try:
-                    nums.append(int(t))
-                except ValueError:
-                    pass
-            played = nums[0] if len(nums) >= 1 else 0
-            points = nums[-1] if nums else 0
-            gf = nums[-3] if len(nums) >= 4 else 0
-            ga = nums[-2] if len(nums) >= 4 else 0
-            rows_out.append(
-                {
-                    "position": pos,
-                    "team": team,
-                    "played": played,
-                    "points": points,
-                    "goals_for": gf,
-                    "goals_against": ga,
-                    "source": "soccerstats",
-                }
-            )
-        if rows_out:
-            break
+    if r.status_code == 404:
+        _debug(f"[soccerstats] {league_code}: 404 for {r.url}")
+        return []
+    if r.status_code != 200:
+        _debug(f"[soccerstats] {league_code}: HTTP {r.status_code} for {r.url}")
+        return []
+
+    soup = BeautifulSoup(r.content, "html.parser", from_encoding=r.apparent_encoding or "utf-8")
+    rows_out = _pick_best_table(soup)
 
     c.set(key, rows_out, ttl_hours=12.0)
     return rows_out

@@ -925,10 +925,64 @@ def test_understat_serie_a_name_match():
         assert _names_match("ACF Fiorentina", "Fiorentina")
         assert _names_match("FC Internazionale Milano", "Inter")
         assert _names_match("Atalanta BC", "Atalanta")
+        assert not _names_match("Manchester United", "Manchester City")
         print("  ✓ Understat name aliases")
         return True
     except Exception as e:
         print(f"  ✗ Understat names failed: {e}")
+        return False
+
+
+def test_understat_scraped_xg_coverage():
+    """Understat match or team rolling xG upgrades goals_proxy and data_quality."""
+    print("\nTesting Understat scraped xG coverage...")
+    try:
+        from unittest.mock import patch
+
+        from hibs_predictor.data_quality import compute_fixture_data_quality
+        from hibs_predictor.scraped_xg import apply_scraped_xg_to_enriched
+
+        fixture = {
+            "fixture": {"id": 501, "date": "2026-05-24T15:00:00+00:00"},
+            "date": "2026-05-24T15:00:00+00:00",
+            "teams": {"home": {"id": 1, "name": "Brighton"}, "away": {"id": 2, "name": "Manchester United"}},
+        }
+        enriched = {
+            "fixture": {"id": 501},
+            "teams": fixture["teams"],
+            "home_recent_n": 6,
+            "away_recent_n": 6,
+            "home_stats": {"played": 15, "goals_for": 22, "goals_against": 20},
+            "away_stats": {"played": 15, "goals_for": 24, "goals_against": 18},
+            "home_position": {"position": 8},
+            "away_position": {"position": 6},
+            "xg_home": 1.2,
+            "xg_away": 1.1,
+            "xg_source": "goals_proxy",
+            "odds_available": True,
+            "odds_home": 2.1,
+            "odds_draw": 3.4,
+            "odds_away": 3.5,
+            "supplemental": {},
+            "fixture_injuries": [],
+        }
+        before = compute_fixture_data_quality(enriched)["score_pct"]
+        mock_payload = {"xg_home": 1.55, "xg_away": 1.42}
+        with patch(
+            "hibs_predictor.scrapers.understat_client.resolve_understat_xg",
+            return_value=(mock_payload, "understat_team_xg", {"team_rolling": True, "home_n": 5, "away_n": 4}),
+        ):
+            out = apply_scraped_xg_to_enriched(fixture, "EPL", enriched)
+        assert out["xg_source"] == "understat_team_xg", out.get("xg_source")
+        after = compute_fixture_data_quality(out)["score_pct"]
+        assert after > before
+        out_dq = compute_fixture_data_quality(out)
+        xg_block = next(b for b in out_dq["blocks"] if b["key"] == "xg")
+        assert xg_block["earned"] >= 14.0
+        print(f"  ✓ Understat xG coverage {before}% -> {after}%")
+        return True
+    except Exception as e:
+        print(f"  ✗ Understat scraped xG coverage failed: {e}")
         return False
 
 
@@ -1124,6 +1178,55 @@ def test_kickoff_display_tz():
         return True
     except Exception as e:
         print(f"  ✗ Kick-off TZ test failed: {e}")
+        return False
+
+
+def test_fixture_window_includes_todays_kicked_off():
+    """Today's cup finals stay in the fetch window after kick-off (UK calendar day)."""
+    print("\nTesting fixture window (today after KO)...")
+    try:
+        from datetime import datetime, timezone, timedelta
+
+        from hibs_predictor.display_tz import fixture_window_start_utc, fixture_window_end_utc
+
+        now = datetime(2026, 5, 20, 20, 30, tzinfo=timezone.utc)
+        ko = datetime(2026, 5, 20, 19, 0, tzinfo=timezone.utc)
+        start = fixture_window_start_utc(now)
+        cutoff = fixture_window_end_utc(now, 5)
+        assert start <= ko <= cutoff, "Europa final KO should remain visible on final day"
+        uecl_final = datetime(2026, 5, 27, 19, 0, tzinfo=timezone.utc)
+        cutoff7 = fixture_window_end_utc(now, 7)
+        assert start <= uecl_final <= cutoff7, "late KO on last window day should be included"
+        assert now > ko, "sanity: after kick-off"
+        from hibs_predictor.config import LEAGUES, ALL_LEAGUE_CODES
+
+        assert "EUROPA_LEAGUE" in LEAGUES
+        assert LEAGUES["EUROPA_LEAGUE"].get("api_sports_id") == 3
+        assert "EUROPA_LEAGUE" in ALL_LEAGUE_CODES
+        print("  ✓ Fixture window + Europa League mapping OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Fixture window test failed: {e}")
+        return False
+
+
+def test_sky_sports_news_media_config():
+    """Sky Sports News uses official YouTube embed + Sky watch link (no scraped streams)."""
+    print("\nTesting Sky Sports News media config...")
+    try:
+        from hibs_predictor.media_config import (
+            SKY_SPORTS_NEWS_WATCH_URL,
+            SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL,
+            SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_ID,
+        )
+
+        assert "skysports.com" in SKY_SPORTS_NEWS_WATCH_URL
+        assert SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_ID in SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL
+        assert "youtube.com/embed/live_stream" in SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL
+        print("  ✓ Sky Sports News official URLs configured")
+        return True
+    except Exception as e:
+        print(f"  ✗ Sky Sports News config test failed: {e}")
         return False
 
 
@@ -1446,12 +1549,15 @@ def main():
         test_dashboard_days_grouping,
         test_competition_display_titles,
         test_kickoff_display_tz,
+        test_fixture_window_includes_todays_kicked_off,
+        test_sky_sports_news_media_config,
         test_fotmob_adapter_mocked,
         test_football_data_standings_mocked,
         test_table_rows_use_previous_season_standings,
         test_scottish_fbref_xg,
         test_fdo_recent_matches_for_serie_a_shape,
         test_understat_serie_a_name_match,
+        test_understat_scraped_xg_coverage,
         test_fbref_schedule_xg_championship,
         test_soccerstats_standings_parse,
         test_scraped_xg_resolution,

@@ -70,6 +70,29 @@ def local_today() -> date:
     return datetime.now(display_timezone()).date()
 
 
+def fixture_window_start_utc(now: Optional[datetime] = None) -> datetime:
+    """Start of the display-TZ calendar day in UTC — keeps today's kick-offs visible after KO."""
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    local = now.astimezone(display_timezone())
+    start_local = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    return start_local.astimezone(timezone.utc)
+
+
+def fixture_window_end_utc(now: Optional[datetime] = None, days: int = 5) -> datetime:
+    """End of the display-TZ calendar day `days` ahead — includes late kick-offs on the last day."""
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    local = now.astimezone(display_timezone())
+    end_day = local.date() + timedelta(days=max(0, int(days)))
+    end_local = datetime(
+        end_day.year, end_day.month, end_day.day, 23, 59, 59, tzinfo=local.tzinfo
+    )
+    return end_local.astimezone(timezone.utc)
+
+
 def day_heading_for_local_date(day_iso: str, fixture_count: int, today_local: Optional[date] = None) -> str:
     today_local = today_local or local_today()
     try:

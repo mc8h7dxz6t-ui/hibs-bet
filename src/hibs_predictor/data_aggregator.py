@@ -628,7 +628,8 @@ class DataAggregator:
                             if sr_a:
                                 ap = soccerstats_standings.row_to_position_shape(sr_a)
             except Exception as exc:
-                print(f"[enrich soccerstats_positions] {league_code} fid={fixture_id_str}: {exc!r}")
+                if os.getenv("HIBS_DEBUG", "0").lower() in ("1", "true", "yes"):
+                    print(f"[enrich soccerstats_positions] {league_code} fid={fixture_id_str}: {exc!r}")
 
         enriched["home_position"] = hp
         enriched["away_position"] = ap

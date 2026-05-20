@@ -72,6 +72,17 @@ class FootballDataOrgClient(BaseApiClient):
     def __init__(self, api_key: str) -> None:
         super().__init__(api_key, "https://api.football-data.org/v4", "X-Auth-Token", "football_data_org")
 
+    def _get_json(self, endpoint: str, params: Optional[Dict[str, Any]] = None, use_cache: bool = True) -> Dict[str, Any]:
+        """Fail-soft on quota/forbidden so enrichment rows still render from API-Sports/scrapers."""
+        try:
+            return super()._get_json(endpoint, params=params, use_cache=use_cache)
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            if status in (403, 429):
+                print(f"[Football-Data.org HTTP {status}] {endpoint}: {exc}")
+                return {"errorCode": status, "message": str(exc), "matches": [], "standings": []}
+            raise
+
     def fetch_fixtures(
         self,
         competition_code: str,

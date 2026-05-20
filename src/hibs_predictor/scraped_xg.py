@@ -87,20 +87,21 @@ def _fetch_understat_row(
     fixture: Dict[str, Any],
     home_name: str,
     away_name: str,
-) -> Optional[Dict[str, float]]:
+) -> Optional[Tuple[Dict[str, float], str, Dict[str, Any]]]:
     try:
         from hibs_predictor.scrapers import understat_client as us
         from hibs_predictor.scrapers.supplemental import _understat_season_years_for_fixture
-        from hibs_predictor.scrapers.understat_client import extract_xg_from_row
 
         if league_code not in us.LEAGUE_SLUG:
             return None
         for sy in _understat_season_years_for_fixture(fixture):
-            row = us.find_fixture_row(league_code, sy, home_name, away_name)
-            if row:
-                xg = extract_xg_from_row(row)
-                if _understat_pair_from_dict(xg):
-                    return xg
+            payload, tag, meta = us.resolve_understat_xg(
+                league_code, sy, home_name, away_name, fixture=fixture
+            )
+            if payload and _understat_pair_from_dict(payload):
+                meta["understat_fetch"] = "direct"
+                meta["season_year"] = sy
+                return payload, tag, meta
     except Exception:
         return None
     return None
@@ -136,15 +137,21 @@ def resolve_scraped_xg(
             pair = _understat_pair_from_dict(us)
             if pair:
                 meta["understat_key"] = key
-                return pair[0], pair[1], "understat_xg", meta
+                meta["match_confident"] = not bool(sup.get("understat_light_team_rolling"))
+                tag = str(sup.get(f"{key}_source") or sup.get("understat_light_source") or "understat_xg")
+                if sup.get("understat_light_team_rolling"):
+                    tag = "understat_team_xg"
+                    meta["team_rolling"] = True
+                return pair[0], pair[1], tag, meta
 
     if _env_on("HIBS_ENABLE_UNDERSTAT_LIGHT", "1"):
-        us = _fetch_understat_row(league_code, fixture, home_nm, away_nm)
-        if us:
+        fetched = _fetch_understat_row(league_code, fixture, home_nm, away_nm)
+        if fetched:
+            us, tag, fmeta = fetched
             pair = _understat_pair_from_dict(us)
             if pair:
-                meta["understat_fetch"] = "direct"
-                return pair[0], pair[1], "understat_xg", meta
+                meta.update(fmeta)
+                return pair[0], pair[1], tag, meta
 
     ss_block = sup.get("sofascore_xg") if isinstance(sup, dict) else None
     if isinstance(ss_block, dict):

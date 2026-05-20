@@ -56,16 +56,20 @@ def _skip_heavy_when_api_strong(enriched: Dict[str, Any]) -> tuple:
 
 
 def _understat_season_years_for_fixture(fixture: Dict[str, Any]) -> List[int]:
+    """Understat league URLs use the season end year (2025/26 → 2026). Avoid futile y+1 probes mid-season."""
     from hibs_predictor.data_source_policy import parse_fixture_datetime_utc
 
     dt = parse_fixture_datetime_utc(fixture)
     if not dt:
-        y = datetime.now().year
-        return [y, y + 1, y - 1]
-    y = dt.year
-    if dt.month >= 7:
-        return [y + 1, y, y - 1]
-    return [y, y + 1, y - 1]
+        now = datetime.now()
+        end_year = now.year + 1 if now.month >= 7 else now.year
+        return [end_year, end_year - 1]
+    end_year = dt.year + 1 if dt.month >= 7 else dt.year
+    out: List[int] = []
+    for y in (end_year, end_year - 1, end_year + 1):
+        if y not in out:
+            out.append(y)
+    return out
 
 
 def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Dict[str, Any]) -> Dict[str, Any]:
@@ -102,16 +106,24 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
     light_us = os.getenv("HIBS_ENABLE_UNDERSTAT_LIGHT", "1").lower() not in ("0", "false", "no", "off")
     if light_us:
         try:
-            from hibs_predictor.data_source_policy import fixture_in_policy_window
             from hibs_predictor.scrapers import understat_client as us
 
-            if fixture_in_policy_window(fixture) and league_code in us.LEAGUE_SLUG:
+            if league_code in us.LEAGUE_SLUG:
                 away_nm = fixture_team_name(fixture, "away")
                 for sy in _understat_season_years_for_fixture(fixture):
-                    row = us.find_fixture_row(league_code, sy, home, away_nm)
-                    if row:
-                        out["understat_light"] = us.extract_xg_from_row(row)
+                    payload, tag, umeta = us.resolve_understat_xg(
+                        league_code, sy, home, away_nm, fixture=fixture
+                    )
+                    if payload and (payload.get("xg_home") or payload.get("xg_away")):
+                        out["understat_light"] = payload
                         out["understat_light_season_year"] = sy
+                        out["understat_light_source"] = tag
+                        if umeta.get("team_rolling"):
+                            out["understat_light_team_rolling"] = True
+                            if umeta.get("home_n") is not None:
+                                out["understat_light_home_n"] = umeta.get("home_n")
+                            if umeta.get("away_n") is not None:
+                                out["understat_light_away_n"] = umeta.get("away_n")
                         break
         except Exception as exc:
             out["understat_light_error"] = str(exc)
@@ -146,13 +158,14 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
             from hibs_predictor.scrapers import understat_client as us
 
             away_nm = fixture_team_name(fixture, "away")
-            row = None
             for sy in _understat_season_years_for_fixture(fixture):
-                row = us.find_fixture_row(league_code, sy, home, away_nm)
-                if row:
+                payload, tag, _ = us.resolve_understat_xg(
+                    league_code, sy, home, away_nm, fixture=fixture
+                )
+                if payload:
+                    out["understat"] = payload
+                    out["understat_source"] = tag
                     break
-            if row:
-                out["understat"] = us.extract_xg_from_row(row)
         except Exception as exc:
             out["understat_error"] = str(exc)
 

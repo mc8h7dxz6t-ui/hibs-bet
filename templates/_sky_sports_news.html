@@ -1,0 +1,29 @@
+<details class="sky-news-card" id="sky-sports-news">
+    <summary class="sky-news-sum">
+        <span class="sky-news-ico" aria-hidden="true">📺</span>
+        <span class="sky-news-txt">Sky Sports News</span>
+        <span class="sky-news-sub">Free-to-air · official streams</span>
+    </summary>
+    <div class="sky-news-body">
+        <p class="sky-news-note muted small">
+            Embedded via the official <strong>Sky Sports News</strong> YouTube channel when live.
+            Full TV player and regional rights are on Sky’s site — use the button if the embed is offline.
+        </p>
+        <div class="sky-news-player-wrap">
+            <iframe
+                class="sky-news-iframe"
+                title="Sky Sports News live (YouTube)"
+                src="{{ sky_sports_news_embed_url }}"
+                loading="lazy"
+                referrerpolicy="strict-origin-when-cross-origin"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowfullscreen
+            ></iframe>
+        </div>
+        <div class="sky-news-actions">
+            <a href="{{ sky_sports_news_watch_url }}" class="nav-btn sky-news-open" target="_blank" rel="noopener noreferrer">
+                Open Sky Sports News
+            </a>
+        </div>
+    </div>
+</details>

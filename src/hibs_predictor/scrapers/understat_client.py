@@ -6,7 +6,8 @@ session cookie is set. Legacy HTML ``datesData`` embeds are kept as a fallback o
 
 import json
 import re
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -124,6 +125,7 @@ def _norm_match_name(name: str) -> str:
 
 
 def _names_match(a: str, b: str) -> bool:
+    """Loose match without conflating e.g. Manchester United vs Manchester City."""
     na, nb = _norm_match_name(a), _norm_match_name(b)
     if not na or not nb:
         return False
@@ -131,7 +133,35 @@ def _names_match(a: str, b: str) -> bool:
         return True
     pa = [p for p in na.split() if len(p) > 2]
     pb = [p for p in nb.split() if len(p) > 2]
-    return bool(pa and pb and pa[0] == pb[0])
+    if not pa or not pb:
+        return False
+    overlap = set(pa) & set(pb)
+    if len(overlap) >= 2:
+        return True
+    if len(overlap) == 1 and (len(pa) == 1 or len(pb) == 1):
+        return True
+    if len(pa) >= 2 and len(pb) >= 2 and pa[-1] == pb[-1] and pa[0] == pb[0]:
+        return True
+    return False
+
+
+def _row_datetime_utc(row: Dict[str, Any]) -> Optional[datetime]:
+    raw = row.get("datetime")
+    if not raw or not isinstance(raw, str):
+        return None
+    try:
+        dt = datetime.strptime(raw.strip(), "%Y-%m-%d %H:%M:%S")
+        return dt.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def _fixture_kickoff_utc(fixture: Optional[Dict[str, Any]]) -> Optional[datetime]:
+    if not fixture:
+        return None
+    from hibs_predictor.data_source_policy import parse_fixture_datetime_utc
+
+    return parse_fixture_datetime_utc(fixture)
 
 
 def find_fixture_row(
@@ -139,16 +169,113 @@ def find_fixture_row(
     season_year: int,
     home_name: str,
     away_name: str,
+    fixture: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
+    """Best Understat league row for this fixture (prefer kickoff date, then finished xG)."""
     rows = fetch_league_matches(league_code, season_year)
+    kickoff = _fixture_kickoff_utc(fixture)
+    candidates: List[Dict[str, Any]] = []
     for row in rows:
         ho = row.get("h") or {}
         ao = row.get("a") or {}
         rh = ho.get("title") if isinstance(ho, dict) else str(ho)
         ra = ao.get("title") if isinstance(ao, dict) else str(ao)
         if _names_match(home_name, rh) and _names_match(away_name, ra):
+            candidates.append(row)
+    if not candidates:
+        return None
+    if kickoff is not None:
+        dated = [
+            row
+            for row in candidates
+            if (_row_datetime_utc(row) and abs((_row_datetime_utc(row) - kickoff).total_seconds()) < 36 * 3600)
+        ]
+        if dated:
+            for row in dated:
+                if extract_xg_from_row(row):
+                    return row
+            return dated[0]
+    for row in candidates:
+        if extract_xg_from_row(row):
             return row
-    return None
+    return candidates[0]
+
+
+def team_rolling_xg(
+    league_code: str,
+    season_year: int,
+    team_name: str,
+    *,
+    min_samples: int = 3,
+    limit: int = 8,
+) -> Optional[Tuple[float, float, int]]:
+    """Rolling avg (xg_for, xg_against) from recent finished Understat league matches."""
+    rows = fetch_league_matches(league_code, season_year)
+    xg_for: List[float] = []
+    xg_against: List[float] = []
+    for row in reversed(rows):
+        if not row.get("isResult"):
+            continue
+        xg = row.get("xG")
+        if not isinstance(xg, dict):
+            continue
+        ho = row.get("h") or {}
+        ao = row.get("a") or {}
+        rh = ho.get("title") if isinstance(ho, dict) else str(ho)
+        ra = ao.get("title") if isinstance(ao, dict) else str(ao)
+        try:
+            if _names_match(team_name, rh):
+                xf = float(xg.get("h"))
+                xa = float(xg.get("a"))
+            elif _names_match(team_name, ra):
+                xf = float(xg.get("a"))
+                xa = float(xg.get("h"))
+            else:
+                continue
+        except (TypeError, ValueError):
+            continue
+        if xf <= 0.04 or xa < 0:
+            continue
+        xg_for.append(xf)
+        xg_against.append(xa)
+        if len(xg_for) >= limit:
+            break
+    if len(xg_for) < min_samples:
+        return None
+    return sum(xg_for) / len(xg_for), sum(xg_against) / len(xg_against), len(xg_for)
+
+
+def resolve_understat_xg(
+    league_code: str,
+    season_year: int,
+    home_name: str,
+    away_name: str,
+    fixture: Optional[Dict[str, Any]] = None,
+) -> Tuple[Optional[Dict[str, float]], str, Dict[str, Any]]:
+    """
+    Match-level xG when the Understat row has values; else team rolling averages.
+
+    Returns (payload, source_tag, meta). payload is None when nothing usable.
+    """
+    meta: Dict[str, Any] = {"season_year": season_year}
+    row = find_fixture_row(league_code, season_year, home_name, away_name, fixture=fixture)
+    if row:
+        xg = extract_xg_from_row(row)
+        if xg.get("xg_home") and xg.get("xg_away"):
+            meta["match_confident"] = True
+            meta["understat_row_id"] = row.get("id")
+            return xg, "understat_xg", meta
+        meta["row_without_xg"] = True
+    home_roll = team_rolling_xg(league_code, season_year, home_name)
+    away_roll = team_rolling_xg(league_code, season_year, away_name)
+    if home_roll and away_roll:
+        h_for, _, h_n = home_roll
+        a_for, _, a_n = away_roll
+        meta["home_n"] = h_n
+        meta["away_n"] = a_n
+        meta["team_rolling"] = True
+        return {"xg_home": h_for, "xg_away": a_for}, "understat_team_xg", meta
+    return None, "", meta
 
 
 def extract_xg_from_row(row: Dict[str, Any]) -> Dict[str, float]:

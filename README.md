@@ -191,9 +191,9 @@ hibs-bet/
 ✅ Compare odds across bookmakers  
 ✅ Long-term data matters for accuracy  
 
-## Fixture cache (v17)
+## Fixture cache (v18)
 
-On-disk fixture cache keys use **v17**. After upgrading, delete or clear your local fixture cache directory (the `fixtures_*` JSON under the app cache path) so competition headings refresh; older cache files may show stale labels.
+On-disk fixture cache keys use **v18**. After upgrading, delete or clear your local fixture cache directory (the `fixtures_*` JSON under the app cache path) so competition headings refresh; older cache files may show stale labels.
 
 ## Documentation
 

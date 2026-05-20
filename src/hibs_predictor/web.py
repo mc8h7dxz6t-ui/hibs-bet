@@ -33,8 +33,12 @@ from hibs_predictor.betting_engine import (
     prediction_unavailable_payload,
 )
 from hibs_predictor.health_probe import gather_health
-from hibs_predictor.display_tz import display_tz_label
+from hibs_predictor.display_tz import display_tz_label, fixture_window_start_utc, fixture_window_end_utc
 from hibs_predictor.fixture_utils import display_competition_title
+from hibs_predictor.media_config import (
+    SKY_SPORTS_NEWS_WATCH_URL,
+    SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL,
+)
 
 TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -56,7 +60,7 @@ def _api_football_season_year(now: datetime) -> int:
     return now.year if now.month >= 7 else now.year - 1
 
 
-_FDO_CALENDAR_COMPS = frozenset({"WC", "EC", "UNL"})
+_FDO_CALENDAR_COMPS = frozenset({"WC", "EC", "UNL", "CL", "EL", "UECL"})
 
 
 def _years_touched_by_date_range(date_from_s: str, date_to_s: str) -> List[int]:
@@ -128,7 +132,7 @@ def _ui_data_quality_min_pct() -> int:
 
 
 def _all_fixtures_cache_key() -> str:
-    return f"all_fixtures_{_fetch_window_days()}d_v17"
+    return f"all_fixtures_{_fetch_window_days()}d_v18"
 
 
 def _cache_ttl_hours(default: float = 1.0) -> float:
@@ -375,14 +379,15 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     prefer_fdo = _env_truthy("HIBS_PREFER_FOOTBALL_DATA_FIXTURES")
     skip_as_fx = _env_truthy("HIBS_SKIP_API_SPORTS_FIXTURES")
     ttl = _cache_ttl_hours(1.0)
-    cache_key = f"fixtures_{days}d_{league_code}_v17_{int(prefer_fdo)}{int(skip_as_fx)}"
+    cache_key = f"fixtures_{days}d_{league_code}_v18_{int(prefer_fdo)}{int(skip_as_fx)}"
     cached = cache.get(cache_key, ttl_hours=ttl)
     if cached:
         return cached
 
     league = LEAGUES.get(league_code, {})
     now = datetime.now(timezone.utc)
-    cutoff = now + timedelta(days=days)
+    window_start = fixture_window_start_utc(now)
+    cutoff = fixture_window_end_utc(now, days)
     fetched: Dict[str, Dict] = {}
     date_from = now.strftime("%Y-%m-%d")
     date_to = cutoff.strftime("%Y-%m-%d")
@@ -414,7 +419,7 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
                     try:
                         raw_date = norm.get("date") or ""
                         fd = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
-                        if now <= fd <= cutoff:
+                        if window_start <= fd <= cutoff:
                             norm["date"] = fd.isoformat()
                             add(norm)
                     except (TypeError, ValueError, OSError) as parse_err:
@@ -445,18 +450,20 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
                 )
                 for m in raw or []:
                     st = str(m.get("status") or "").upper()
-                    if st in ("FINISHED", "AWARDED", "CANCELLED", "POSTPONED", "ABANDONED", "SUSPENDED"):
-                        continue
                     norm = _normalize_fdo(m, league_code)
                     if not norm:
                         continue
                     try:
                         fd = datetime.fromisoformat(norm["date"].replace("Z", "+00:00"))
-                        if now <= fd <= cutoff:
-                            norm["date"] = fd.isoformat()
-                            add(norm)
                     except Exception:
                         continue
+                    if st in ("CANCELLED", "POSTPONED", "ABANDONED", "SUSPENDED"):
+                        continue
+                    if st in ("FINISHED", "AWARDED") and fd < window_start:
+                        continue
+                    if window_start <= fd <= cutoff:
+                        norm["date"] = fd.isoformat()
+                        add(norm)
                 if fetched:
                     break
             except Exception as ex:
@@ -476,7 +483,7 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
                     continue
                 try:
                     fd = datetime.fromisoformat(str(norm["date"]).replace("Z", "+00:00"))
-                    if now <= fd <= cutoff:
+                    if window_start <= fd <= cutoff:
                         norm["date"] = fd.isoformat()
                         add(norm)
                 except Exception:
@@ -1149,6 +1156,8 @@ def index():
         leagues=LEAGUES,
         data_quality_ui_min=_ui_data_quality_min_pct(),
         assistant_packets=assistant_packets,
+        sky_sports_news_embed_url=SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL,
+        sky_sports_news_watch_url=SKY_SPORTS_NEWS_WATCH_URL,
         assistant_recommendations=assistant_bundle.get("recommendations"),
         sidebar_upcoming=data.get("sidebar_upcoming", []),
         display_tz_label=display_tz_label(),
