@@ -14,8 +14,8 @@ from hibs_predictor.cache import Cache
 
 OPEN_BASE = "https://raw.githubusercontent.com/statsbomb/open-data/master/data"
 
-# (substring of StatsBomb competition_name, country_name filter)
-STATSBOMB_LEAGUE_OPEN: Dict[str, Tuple[str, str]] = {
+# (substring of StatsBomb competition_name, country_name filter or None for any country)
+STATSBOMB_LEAGUE_OPEN: Dict[str, Tuple[str, Optional[str]]] = {
     "EPL": ("Premier League", "England"),
     "LA_LIGA": ("La Liga", "Spain"),
     "SERIE_A": ("Serie A", "Italy"),
@@ -25,7 +25,14 @@ STATSBOMB_LEAGUE_OPEN: Dict[str, Tuple[str, str]] = {
     "EREDIVISIE": ("Eredivisie", "Netherlands"),
     "PRIMEIRA": ("Primeira Liga", "Portugal"),
     "BELGIUM_FIRST": ("Pro League", "Belgium"),
+    "UCL": ("Champions League", "Europe"),
+    "EUROPA_LEAGUE": ("Europa League", "Europe"),
+    "EUROS": ("UEFA Euro", "Europe"),
+    "WORLD_CUP": ("FIFA World Cup", "International"),
 }
+
+# Cups / internationals: enable goals-proxy supplemental by default (opt-out via env).
+STATSBOMB_CUP_LEAGUES = frozenset({"UCL", "EUROPA_LEAGUE", "UECL", "WORLD_CUP", "EUROS", "NATIONS_LEAGUE"})
 
 
 def _season_sort_key(row: Dict[str, Any]) -> Tuple[int, int]:
@@ -90,7 +97,7 @@ def latest_open_season_meta(league_code: str) -> Dict[str, Any]:
         c
         for c in comps
         if name_sub.lower() in str(c.get("competition_name") or "").lower()
-        and str(c.get("country_name") or "") == country
+        and (country is None or str(c.get("country_name") or "") == country)
         and c.get("competition_gender") == "male"
         and not c.get("competition_youth")
     ]

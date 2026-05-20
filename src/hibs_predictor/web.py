@@ -544,21 +544,37 @@ def _normalize_fotmob(match: Dict, league_code: str) -> Optional[Dict]:
         return None
     home = match.get("home") or {}
     away = match.get("away") or {}
-    home_name = home.get("name") if isinstance(home, dict) else None
-    away_name = away.get("name") if isinstance(away, dict) else None
-    date_s = match.get("utcTime") or match.get("time") or match.get("date")
+    home_name = (home.get("longName") or home.get("name")) if isinstance(home, dict) else None
+    away_name = (away.get("longName") or away.get("name")) if isinstance(away, dict) else None
+    status = match.get("status") if isinstance(match.get("status"), dict) else {}
+    date_s = (
+        match.get("utcTime")
+        or status.get("utcTime")
+        or match.get("time")
+        or match.get("date")
+    )
     mid = match.get("id") or match.get("matchId")
+    hid = home.get("id") if isinstance(home, dict) else 0
+    aid = away.get("id") if isinstance(away, dict) else 0
     if not home_name or not away_name or not date_s:
         return None
     comp_meta = _competition_meta_from_fotmob(match)
     return {
-        "fixture": {"id": f"fotmob_{mid}" if mid else None, "date": date_s, "status": {"short": match.get("status", {}).get("short") if isinstance(match.get("status"), dict) else match.get("status")}},
-        "teams": {
-            "home": {"id": home.get("id", 0) if isinstance(home, dict) else 0, "name": home_name},
-            "away": {"id": away.get("id", 0) if isinstance(away, dict) else 0, "name": away_name},
+        "fixture": {
+            "id": f"fotmob_{mid}" if mid else None,
+            "date": date_s,
+            "status": {
+                "short": status.get("reason", {}).get("short")
+                if isinstance(status.get("reason"), dict)
+                else match.get("status")
+            },
         },
-        "home": {"id": home.get("id", 0) if isinstance(home, dict) else 0, "name": home_name},
-        "away": {"id": away.get("id", 0) if isinstance(away, dict) else 0, "name": away_name},
+        "teams": {
+            "home": {"id": hid or 0, "name": home_name},
+            "away": {"id": aid or 0, "name": away_name},
+        },
+        "home": {"id": hid or 0, "name": home_name},
+        "away": {"id": aid or 0, "name": away_name},
         "date": date_s,
         "league": league_code,
         "competition_meta": comp_meta,

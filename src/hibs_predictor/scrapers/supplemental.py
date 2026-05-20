@@ -128,15 +128,24 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
         except Exception as exc:
             out["understat_light_error"] = str(exc)
 
-    def _statsbomb_team_proxy_on() -> bool:
+    def _statsbomb_team_proxy_on(lc: str) -> bool:
+        from hibs_predictor.scrapers import statsbomb_open as sb_mod
+
         raw = os.getenv("HIBS_ENABLE_STATSBOMB_OPEN_MATCHES", "").strip().lower()
         if raw in ("0", "false", "no", "off"):
             return False
         if raw in ("1", "true", "yes", "on"):
             return True
+        light = os.getenv("HIBS_ENABLE_STATSBOMB_LIGHT", "").strip().lower()
+        if light in ("1", "true", "yes", "on"):
+            return True
+        if light in ("0", "false", "no", "off"):
+            return False
+        if lc in sb_mod.STATSBOMB_CUP_LEAGUES:
+            return True
         return os.getenv("HIBS_MAX_DATA", "").strip().lower() in ("1", "true", "yes", "on")
 
-    sb_matches = _statsbomb_team_proxy_on()
+    sb_matches = _statsbomb_team_proxy_on(league_code)
     if sb_matches:
         try:
             from hibs_predictor.data_source_policy import fixture_in_policy_window, policy_window_utc
@@ -185,14 +194,44 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
 
         if league_code in wps.WP_SUFFIX:
             out["wikipedia_league_supported"] = True
-    except Exception:
-        pass
+            if os.getenv("HIBS_PREFER_SCRAPED_STANDINGS", "1").lower() in ("1", "true", "yes"):
+                rows = wps.fetch_league_table(league_code)
+                if rows:
+                    out["wikipedia_table_rows"] = len(rows)
+                    wr = wps.find_team_row(rows, home)
+                    ar = wps.find_team_row(rows, fixture_team_name(fixture, "away"))
+                    if wr or ar:
+                        out["wikipedia_positions"] = {
+                            "home": bool(wr),
+                            "away": bool(ar),
+                        }
+    except Exception as exc:
+        out["wikipedia_error"] = str(exc)[:120]
 
     try:
         from hibs_predictor.scrapers import soccerstats_standings as sstats
 
         if league_code in sstats.LEAGUE_PARAM:
             out["soccerstats_league_supported"] = True
+            if os.getenv("HIBS_PREFER_SCRAPED_STANDINGS", "1").lower() in ("1", "true", "yes"):
+                ss_rows = sstats.fetch_league_table(league_code, cache=cache)
+                if ss_rows:
+                    out["soccerstats_table_rows"] = len(ss_rows)
+                    sr_h = sstats.find_team_row(ss_rows, home)
+                    sr_a = sstats.find_team_row(ss_rows, fixture_team_name(fixture, "away"))
+                    if sr_h or sr_a:
+                        out["soccerstats_positions"] = {
+                            "home": bool(sr_h),
+                            "away": bool(sr_a),
+                        }
+    except Exception as exc:
+        out["soccerstats_error"] = str(exc)[:120]
+
+    try:
+        from hibs_predictor.scrapers import fotmob_client as fm
+
+        if league_code in fm.FOTMOB_LEAGUE_IDS:
+            out["fotmob_league_supported"] = True
     except Exception:
         pass
 

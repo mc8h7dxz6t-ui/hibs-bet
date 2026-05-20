@@ -53,7 +53,21 @@ def _supplemental_pts(sup: Any) -> float:
         and k not in ("heavy_skipped",)
         and sup.get(k) not in (None, "", [], {})
     ]
-    return 3.0 if useful else 1.0
+    high_value = any(
+        sup.get(k)
+        for k in (
+            "understat_light",
+            "understat",
+            "fbref_schedule",
+            "statsbomb_open_team_proxy",
+            "sofascore_xg",
+            "wikipedia_positions",
+            "soccerstats_positions",
+        )
+    )
+    if high_value:
+        return 3.0
+    return 3.0 if len(useful) >= 3 else (2.0 if useful else 1.0)
 
 
 def _supplemental_understat_source(sup: Any) -> Optional[str]:

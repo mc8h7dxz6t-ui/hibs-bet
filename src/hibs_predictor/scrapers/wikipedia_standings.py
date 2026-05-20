@@ -44,6 +44,10 @@ WP_SUFFIX: Dict[str, str] = {
     "WORLD_CUP": "FIFA_World_Cup",
     "EUROS": "UEFA_European_Championship",
     "NATIONS_LEAGUE": "UEFA_Nations_League",
+    "NORWAY_ELITESERIEN": "Eliteserien",
+    "FINLAND_VEIKKAUSLIIGA": "Veikkausliiga",
+    "SCOTTISH_CUP": "Scottish_Cup",
+    "FA_CUP": "FA_Cup",
 }
 
 

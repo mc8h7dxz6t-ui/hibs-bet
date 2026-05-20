@@ -322,6 +322,132 @@ def gather_health() -> Dict[str, Any]:
             }
         )
 
+    # --- FotMob daily matches (date + timezone) ---
+    t0 = time.perf_counter()
+    try:
+        from hibs_predictor.scrapers.fotmob_client import probe_matches_api
+
+        pr = probe_matches_api()
+        ms = _ms_since(t0)
+        ok = bool(pr.get("ok"))
+        scrapers.append(
+            {
+                "id": "fotmob",
+                "label": "FotMob",
+                "ms": ms,
+                "ok": ok,
+                "error_code": None if ok else "LAYOUT_BROKEN",
+                "error": None if ok else pr.get("error") or f"leagues={pr.get('league_count', 0)}",
+            }
+        )
+    except Exception as exc:
+        scrapers.append(
+            {
+                "id": "fotmob",
+                "label": "FotMob",
+                "ms": _ms_since(t0),
+                "ok": False,
+                "error_code": "ERROR",
+                "error": str(exc)[:160],
+            }
+        )
+
+    # --- Wikipedia standings (EPL table sample) ---
+    t0 = time.perf_counter()
+    try:
+        from hibs_predictor.scrapers.wikipedia_standings import fetch_league_table
+
+        rows = fetch_league_table("EPL")
+        ms = _ms_since(t0)
+        ok = len(rows) >= 10
+        scrapers.append(
+            {
+                "id": "wikipedia",
+                "label": "Wikipedia",
+                "ms": ms,
+                "ok": ok,
+                "error_code": None if ok else "LAYOUT_BROKEN",
+                "error": None if ok else f"rows={len(rows)}",
+            }
+        )
+    except Exception as exc:
+        scrapers.append(
+            {
+                "id": "wikipedia",
+                "label": "Wikipedia",
+                "ms": _ms_since(t0),
+                "ok": False,
+                "error_code": "ERROR",
+                "error": str(exc)[:160],
+            }
+        )
+
+    # --- SoccerStats latest.asp ---
+    t0 = time.perf_counter()
+    try:
+        from hibs_predictor.scrapers.soccerstats_standings import fetch_league_table
+
+        rows = fetch_league_table("EPL")
+        ms = _ms_since(t0)
+        ok = len(rows) >= 10
+        scrapers.append(
+            {
+                "id": "soccerstats",
+                "label": "SoccerStats",
+                "ms": ms,
+                "ok": ok,
+                "error_code": None if ok else "LAYOUT_BROKEN",
+                "error": None if ok else f"rows={len(rows)}",
+            }
+        )
+    except Exception as exc:
+        scrapers.append(
+            {
+                "id": "soccerstats",
+                "label": "SoccerStats",
+                "ms": _ms_since(t0),
+                "ok": False,
+                "error_code": "ERROR",
+                "error": str(exc)[:160],
+            }
+        )
+
+    # --- Deferred / probe-only sources ---
+    for sid, label, mod_path, fn in (
+        ("transfermarkt", "Transfermarkt", "hibs_predictor.scrapers.transfermarkt_client", "probe_availability"),
+        ("xgstat", "xGStat", "hibs_predictor.scrapers.xgstat_client", "probe_public_api"),
+        ("besoccer", "BeSoccer", "hibs_predictor.scrapers.besoccer_client", "probe_public_api"),
+    ):
+        t0 = time.perf_counter()
+        try:
+            import importlib
+
+            mod = importlib.import_module(mod_path)
+            pr = getattr(mod, fn)()
+            ms = _ms_since(t0)
+            deferred = str(pr.get("status") or "") == "deferred" or str(pr.get("status") or "") == "not_available"
+            scrapers.append(
+                {
+                    "id": sid,
+                    "label": label,
+                    "ms": ms,
+                    "ok": bool(pr.get("ok")) if not deferred else False,
+                    "error_code": "DEFERRED" if deferred else (None if pr.get("ok") else "ERROR"),
+                    "error": pr.get("note") or pr.get("error"),
+                }
+            )
+        except Exception as exc:
+            scrapers.append(
+                {
+                    "id": sid,
+                    "label": label,
+                    "ms": _ms_since(t0),
+                    "ok": False,
+                    "error_code": "ERROR",
+                    "error": str(exc)[:160],
+                }
+            )
+
     return {
         "apis": apis,
         "scrapers": scrapers,

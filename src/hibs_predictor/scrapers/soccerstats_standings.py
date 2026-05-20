@@ -37,6 +37,10 @@ LEAGUE_PARAM: Dict[str, str] = {
     "DENMARK_SL": "denmark",
     "GREECE_SL": "greece",
     "AUSTRIA_BL": "austria",
+    "NORWAY_ELITESERIEN": "norway",
+    "FINLAND_VEIKKAUSLIIGA": "finland",
+    "SCOTLAND_L1": "scotland3",
+    "SCOTLAND_L2": "scotland4",
 }
 
 

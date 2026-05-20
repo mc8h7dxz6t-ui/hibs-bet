@@ -30,6 +30,9 @@ FBREF_SCOTTISH_LEAGUE: Dict[str, Tuple[str, str]] = {
 
 # Additional comps with schedule-level xG on FBref (no Understat or thin API xG).
 FBREF_SCHEDULE_EXTRA: Dict[str, Tuple[str, str]] = {
+    "LA_LIGA": ("12", "La-Liga"),
+    "BUNDESLIGA": ("20", "Bundesliga"),
+    "LIGUE_1": ("13", "Ligue-1"),
     "SERIE_A": ("11", "Serie-A"),
     "CHAMPIONSHIP": ("10", "EFL-Championship"),
     "LEAGUE_ONE": ("15", "EFL-League-One"),
