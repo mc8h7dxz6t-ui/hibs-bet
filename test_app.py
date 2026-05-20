@@ -1559,8 +1559,8 @@ def test_settings_fixture_window_ui():
 
 
 def test_sky_sports_news_media_config():
-    """Sky Sports News uses official YouTube embed + Sky watch link (no scraped streams)."""
-    print("\nTesting Sky Sports News media config...")
+    """Sky Sports Football uses official YouTube embed + Sky watch link (no scraped streams)."""
+    print("\nTesting Sky Sports Football media config...")
     try:
         from hibs_predictor.media_config import (
             SKY_SPORTS_NEWS_WATCH_URL,
@@ -1570,11 +1570,12 @@ def test_sky_sports_news_media_config():
         )
 
         assert "skysports.com" in SKY_SPORTS_NEWS_WATCH_URL
+        assert SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_ID == "UCZ7wY7MRDSygp63HIEfdQZA"
         assert SKY_SPORTS_NEWS_YOUTUBE_UPLOADS_PLAYLIST_ID.startswith("UU")
         assert SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_ID.replace("UC", "UU", 1) == SKY_SPORTS_NEWS_YOUTUBE_UPLOADS_PLAYLIST_ID
         assert "youtube-nocookie.com/embed/videoseries" in SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL
         assert SKY_SPORTS_NEWS_YOUTUBE_UPLOADS_PLAYLIST_ID in SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL
-        print("  ✓ Sky Sports News official URLs configured")
+        print("  ✓ Sky Sports Football official URLs configured")
         return True
     except Exception as e:
         print(f"  ✗ Sky Sports News config test failed: {e}")
