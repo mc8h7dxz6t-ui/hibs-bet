@@ -1628,14 +1628,18 @@ def test_sky_youtube_panel():
         assert dashboard.status_code == 200
         dbody = dashboard.get_data(as_text=True)
         assert "sky-sports-news" in dbody
-        assert "Sky Sports on YouTube (free)" in dbody
+        assert "Watch" in dbody
+        assert "sky-browser-url" in dbody
+        assert "youtube.com/@SkySportsNews/live" in dbody
+        assert "youtube.com/@SkySportsFootball" in dbody
+        assert "Open in browser" in dbody
         assert "youtube-nocookie.com/embed" in dbody
         assert "a-E_HJ7p1qg" in dbody
         assert "data-sky-when" not in dbody
         assert "skysports.com/watch" not in dbody
         assert "Watch on Sky" not in dbody
         assert "Sky Go" not in dbody
-        assert "News live" in dbody and "Football clips" in dbody
+        assert "Sky Sports News 24/7" in dbody and "Sky Sports Football" in dbody
 
         with patch.dict("os.environ", {"HIBS_SHOW_SKY_PANEL": "0"}, clear=False):
             hidden = client.get("/")
@@ -1655,9 +1659,11 @@ def test_sky_sports_news_media_config():
         from hibs_predictor.media_config import (
             SKY_SPORTS_FOOTBALL_YOUTUBE_CHANNEL_ID,
             SKY_SPORTS_FOOTBALL_YOUTUBE_CLIPS_EMBED_URL,
+            SKY_SPORTS_FOOTBALL_YOUTUBE_PRESET_DISPLAY,
             SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_ID,
             SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL,
             SKY_SPORTS_NEWS_YOUTUBE_LIVE_VIDEO_ID,
+            SKY_SPORTS_NEWS_YOUTUBE_PRESET_DISPLAY,
             SKY_SPORTS_NEWS_YOUTUBE_UPLOADS_PLAYLIST_ID,
         )
 
@@ -1665,6 +1671,8 @@ def test_sky_sports_news_media_config():
         assert SKY_SPORTS_FOOTBALL_YOUTUBE_CHANNEL_ID == "UCZ7wY7MRDSygp63HIEfdQZA"
         assert SKY_SPORTS_NEWS_YOUTUBE_LIVE_VIDEO_ID == "a-E_HJ7p1qg"
         assert SKY_SPORTS_NEWS_YOUTUBE_UPLOADS_PLAYLIST_ID == "UUcw05gGzjLIs5dnxGkQHMvw"
+        assert SKY_SPORTS_NEWS_YOUTUBE_PRESET_DISPLAY == "youtube.com/@SkySportsNews/live"
+        assert SKY_SPORTS_FOOTBALL_YOUTUBE_PRESET_DISPLAY == "youtube.com/@SkySportsFootball"
         assert f"/embed/{SKY_SPORTS_NEWS_YOUTUBE_LIVE_VIDEO_ID}" in SKY_SPORTS_NEWS_YOUTUBE_EMBED_URL
         assert "youtube-nocookie.com/embed/videoseries" in SKY_SPORTS_FOOTBALL_YOUTUBE_CLIPS_EMBED_URL
         print("  ✓ Sky Sports News 24/7 live + Football clips configured")

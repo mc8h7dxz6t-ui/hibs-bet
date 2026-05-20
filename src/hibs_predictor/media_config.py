@@ -3,6 +3,8 @@
 # @SkySportsNews — rolling 24/7 news simulcast on YouTube (https://www.youtube.com/@SkySportsNews/live).
 SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_ID = "UCcw05gGzjLIs5dnxGkQHMvw"
 SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_URL = "https://www.youtube.com/@SkySportsNews"
+SKY_SPORTS_NEWS_YOUTUBE_LIVE_PAGE_URL = "https://www.youtube.com/@SkySportsNews/live"
+SKY_SPORTS_NEWS_YOUTUBE_PRESET_DISPLAY = "youtube.com/@SkySportsNews/live"
 
 # Stable live broadcast video on the News channel (program title rotates; same stream URL).
 # Verified via @SkySportsNews/live (isLiveNow). Sky may rotate this ID — update if embed goes offline.
@@ -15,6 +17,7 @@ SKY_SPORTS_NEWS_YOUTUBE_UPLOADS_PLAYLIST_ID = "UU" + SKY_SPORTS_NEWS_YOUTUBE_CHA
 # @SkySportsFootball — match highlights and football clips (not the Sky Sports News wire).
 SKY_SPORTS_FOOTBALL_YOUTUBE_CHANNEL_ID = "UCZ7wY7MRDSygp63HIEfdQZA"
 SKY_SPORTS_FOOTBALL_YOUTUBE_CHANNEL_URL = "https://www.youtube.com/@SkySportsFootball"
+SKY_SPORTS_FOOTBALL_YOUTUBE_PRESET_DISPLAY = "youtube.com/@SkySportsFootball"
 SKY_SPORTS_FOOTBALL_YOUTUBE_UPLOADS_PLAYLIST_ID = "UU" + SKY_SPORTS_FOOTBALL_YOUTUBE_CHANNEL_ID[2:]
 
 _NOCOOKIE_EMBED = "https://www.youtube-nocookie.com/embed"

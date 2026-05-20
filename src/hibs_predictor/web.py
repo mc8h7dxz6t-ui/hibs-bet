@@ -46,10 +46,12 @@ from hibs_predictor.health_probe import gather_health
 from hibs_predictor.display_tz import display_tz_label, fixture_window_start_utc, fixture_window_end_utc
 from hibs_predictor.fixture_utils import display_competition_title
 from hibs_predictor.media_config import (
+    SKY_SPORTS_FOOTBALL_YOUTUBE_CHANNEL_URL,
     SKY_SPORTS_FOOTBALL_YOUTUBE_CLIPS_EMBED_URL,
-    SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_URL,
+    SKY_SPORTS_FOOTBALL_YOUTUBE_PRESET_DISPLAY,
     SKY_SPORTS_NEWS_YOUTUBE_LIVE_EMBED_URL,
-    SKY_SPORTS_NEWS_YOUTUBE_LIVE_VIDEO_URL,
+    SKY_SPORTS_NEWS_YOUTUBE_LIVE_PAGE_URL,
+    SKY_SPORTS_NEWS_YOUTUBE_PRESET_DISPLAY,
 )
 
 TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
@@ -1363,9 +1365,11 @@ def index():
         assistant_packets=assistant_packets,
         show_sky_panel=_show_sky_panel(),
         sky_sports_news_live_embed_url=SKY_SPORTS_NEWS_YOUTUBE_LIVE_EMBED_URL,
-        sky_sports_news_youtube_channel_url=SKY_SPORTS_NEWS_YOUTUBE_CHANNEL_URL,
-        sky_sports_news_youtube_live_video_url=SKY_SPORTS_NEWS_YOUTUBE_LIVE_VIDEO_URL,
+        sky_sports_news_preset_url=SKY_SPORTS_NEWS_YOUTUBE_PRESET_DISPLAY,
+        sky_sports_news_open_url=SKY_SPORTS_NEWS_YOUTUBE_LIVE_PAGE_URL,
         sky_sports_football_clips_embed_url=SKY_SPORTS_FOOTBALL_YOUTUBE_CLIPS_EMBED_URL,
+        sky_sports_football_preset_url=SKY_SPORTS_FOOTBALL_YOUTUBE_PRESET_DISPLAY,
+        sky_sports_football_open_url=SKY_SPORTS_FOOTBALL_YOUTUBE_CHANNEL_URL,
         assistant_recommendations=assistant_bundle.get("recommendations"),
         sidebar_upcoming=data.get("sidebar_upcoming", []),
         display_tz_label=display_tz_label(),
