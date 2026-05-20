@@ -74,6 +74,7 @@
         var dotClass = 'dot ';
         if (item.ok && item.ms != null && item.ms < okMs) dotClass += 'dot-pulse';
         else if (item.ok) dotClass += 'dot-warn';
+        else if (item.error_code === 'BLOCKED' || item.error_code === 'NOT_CONFIGURED') dotClass += 'dot-warn';
         else dotClass += 'dot-bad';
         var ms = item.ms != null ? '<span class="health-ms">' + item.ms + 'ms</span>' : '<span class="health-ms">—</span>';
         var err = item.error || item.error_code || '';

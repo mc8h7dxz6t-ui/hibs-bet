@@ -51,7 +51,7 @@ SOURCE_CATALOG: List[Dict[str, Any]] = [
         "focus": "Shot-level xG and league JSON embedded in public pages",
         "status": "wired",
         "module": "hibs_predictor.scrapers.understat_client",
-        "notes": "Light + heavy modes; limited league set; respect low request rate.",
+        "notes": "Light + heavy modes via /getLeagueData AJAX (session cookie); limited league set; respect low request rate.",
     },
     {
         "id": "sofascore",
@@ -59,7 +59,7 @@ SOURCE_CATALOG: List[Dict[str, Any]] = [
         "focus": "Live + historical team feeds, ratings-style summaries",
         "status": "wired",
         "module": "hibs_predictor.scrapers.sofascore_client",
-        "notes": "Best-effort public JSON endpoints; shape changes — fail-soft in supplemental.",
+        "notes": "Best-effort public JSON endpoints; often HTTP 403 off server/datacenter IPs — fail-soft, optional rolling xG.",
     },
     {
         "id": "wikipedia",

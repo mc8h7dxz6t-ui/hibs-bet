@@ -1,4 +1,8 @@
-"""Understat.com embedded league JSON (public pages; respect robots & low rate)."""
+"""Understat.com league match xG (public pages + AJAX; respect robots & low rate).
+
+Since late 2025, league rows are served from ``/getLeagueData/{slug}/{season}`` after a
+session cookie is set. Legacy HTML ``datesData`` embeds are kept as a fallback only.
+"""
 
 import json
 import re
@@ -22,7 +26,40 @@ LEAGUE_SLUG = {
     "AUSTRIA_BL": "Austrian_Bundesliga",
 }
 
-_HEADERS = {"User-Agent": "hibs-bet/1.0 (stats enrichment; contact: local)"}
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "en-GB,en;q=0.9",
+}
+_AJAX_HEADERS = {**_HEADERS, "X-Requested-With": "XMLHttpRequest"}
+
+_session: Optional[requests.Session] = None
+
+
+def _session_get() -> requests.Session:
+    global _session
+    if _session is None:
+        _session = requests.Session()
+        _session.headers.update(_HEADERS)
+    return _session
+
+
+def _warm_session(slug: str, season_year: int) -> None:
+    """Visit league page so PHPSESSID is set before AJAX league data."""
+    url = f"https://understat.com/league/{slug}/{season_year}"
+    _session_get().get(url, timeout=25)
+
+
+def _fetch_league_dates_api(slug: str, season_year: int) -> List[Dict[str, Any]]:
+    _warm_session(slug, season_year)
+    api_url = f"https://understat.com/getLeagueData/{slug}/{season_year}"
+    r = _session_get().get(api_url, headers=_AJAX_HEADERS, timeout=25)
+    r.raise_for_status()
+    data = r.json()
+    if not isinstance(data, dict):
+        return []
+    dates = data.get("dates")
+    return dates if isinstance(dates, list) else []
 
 
 def _extract_json_array(html: str) -> Optional[List[Dict[str, Any]]]:
@@ -50,8 +87,15 @@ def fetch_league_matches(league_code: str, season_year: int) -> List[Dict[str, A
     slug = LEAGUE_SLUG.get(league_code)
     if not slug:
         return []
+    try:
+        rows = _fetch_league_dates_api(slug, season_year)
+        if rows:
+            return rows
+    except (requests.RequestException, json.JSONDecodeError, TypeError, ValueError):
+        pass
+    # Legacy embed fallback (pre-2025 layout)
     url = f"https://understat.com/league/{slug}/{season_year}"
-    r = requests.get(url, headers=_HEADERS, timeout=25)
+    r = _session_get().get(url, timeout=25)
     r.raise_for_status()
     arr = _extract_json_array(r.text)
     return arr or []

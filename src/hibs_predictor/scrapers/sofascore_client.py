@@ -39,11 +39,29 @@ def _http_get_json(url: str, *, params: Optional[Dict[str, Any]] = None, timeout
         r = session.get(url, params=params, headers=_HEADERS, timeout=timeout)
     except ImportError:
         r = requests.get(url, params=params, headers=_HEADERS, timeout=timeout)
+    if r.status_code == 403:
+        return {"_hibs_blocked": True, "_hibs_status": 403}
     r.raise_for_status()
     if not (r.headers.get("content-type") or "").startswith("application/json"):
         return {}
     data = r.json()
     return data if isinstance(data, dict) else {}
+
+
+def probe_team_search(query: str) -> Tuple[Optional[Dict[str, Any]], bool]:
+    """Return (team_entity, blocked_403) for health probes without raising."""
+    data = _http_get_json("https://api.sofascore.com/api/v1/search/all", params={"q": query})
+    if data.get("_hibs_blocked"):
+        return None, True
+    hit = None
+    for block in data.get("results") or []:
+        if block.get("type") != "team":
+            continue
+        entity = block.get("entity") or {}
+        if entity.get("name"):
+            hit = entity
+            break
+    return hit, False
 
 
 def search_all(query: str, limit: int = 8) -> Dict[str, Any]:
@@ -55,15 +73,8 @@ def search_all(query: str, limit: int = 8) -> Dict[str, Any]:
 
 
 def first_team_hit(query: str) -> Optional[Dict[str, Any]]:
-    data = search_all(query, limit=5)
-    res = data.get("results") or []
-    for block in res:
-        if block.get("type") != "team":
-            continue
-        entity = block.get("entity") or {}
-        if entity.get("name"):
-            return entity
-    return None
+    hit, _blocked = probe_team_search(query)
+    return hit
 
 
 def _parse_float(val: Any) -> Optional[float]:

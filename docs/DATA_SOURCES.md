@@ -11,7 +11,7 @@ Coverage scoring: `src/hibs_predictor/data_quality.py` (`full_scope` ≥ **85%**
 | Football-Data.org | Fixture + standings fallback | `FOOTBALL_DATA_ORG_KEY`, `HIBS_PREFER_FOOTBALL_DATA_FIXTURES` |
 | The Odds API | 1X2 + cross-book lines | `ODDS_API_KEY`; skip via `HIBS_SKIP_ODDS_API` |
 | RapidAPI stats (api-football.com host) | Fixture-level xG | `STATS_API_KEY` + `HIBS_MAX_DATA=1` (default skips Rapid xG) |
-| Understat | Match xG (12 league codes) | `HIBS_ENABLE_UNDERSTAT_LIGHT`, `HIBS_SCRAPE_XG` |
+| Understat | Match xG (12 league codes) via `/getLeagueData` AJAX | `HIBS_ENABLE_UNDERSTAT_LIGHT`, `HIBS_SCRAPE_XG` |
 | FBref | Top-5 squad tables (heavy); SPFL schedule xG (Scottish) | `HIBS_ENABLE_HEAVY_SCRAPERS`, `HIBS_ENABLE_SCOTTISH_FBREF_XG` |
 | Wikipedia | Standings when API thin | `HIBS_PREFER_SCRAPED_STANDINGS` |
 | SofaScore | Rolling team xG averages → `sofascore_xg` when API reachable | `HIBS_ENABLE_SOFASCORE_XG` or `HIBS_MAX_DATA=1`; optional `pip install curl_cffi` |
@@ -27,7 +27,7 @@ Transfermarkt, xGStat, BeSoccer, FootyStats (aggregates site), DataMB, UEFA dire
 ## Recommended implementation order (impact / effort)
 
 1. **Ops: `HIBS_MAX_DATA=1` + real keys** — enable Rapid stats xG, stop skipping heavy scrapers on “API strong” fixtures; largest xG uplift for top leagues with low code risk.
-2. **SofaScore → `scraped_xg`** — **wired** (`sofascore_client.team_xg_profile` + `scraped_xg`); enable with `HIBS_MAX_DATA=1` or `HIBS_ENABLE_SOFASCORE_XG=1`. Install `curl_cffi` if endpoints return 403.
+2. **SofaScore → `scraped_xg`** — **wired** (`sofascore_client.team_xg_profile` + `scraped_xg`); enable with `HIBS_MAX_DATA=1` or `HIBS_ENABLE_SOFASCORE_XG=1`. Often returns **HTTP 403** from server/datacenter IPs; status UI shows **amber (blocked)** — optional rolling xG only.
 3. **Expand Understat `LEAGUE_SLUG`** — only where Understat actually publishes (verify slugs); low effort per league.
 4. **FBref schedule xG for EFL + mid-tier Europe** — **wired** for Championship, L1/L2, Eredivisie, Primeira, Belgium, Denmark, Greece, Austria (plus Scottish tiers).
 5. **Defer Selenium stacks** (FotMob lineups, WhoScored, full SofaScore UI) — high maintenance; prefer APIs (Sportmonks xG add-on, API-Football premium) for production xG.

@@ -61,34 +61,26 @@ def run_all_probes() -> Dict[str, Any]:
         sb_row["error"] = str(exc)[:200]
     rows.append(sb_row)
 
-    # --- Understat (EPL page + JSON extract) ---
+    # --- Understat (AJAX league data) ---
     t0 = time.perf_counter()
     us_row: Dict[str, Any] = {"id": "understat", "kind": "scrape", "ok": False, "ms": None, "detail": {}}
     try:
-        from hibs_predictor.scrapers.understat_client import _extract_json_array
+        from hibs_predictor.scrapers.understat_client import fetch_league_matches
 
-        headers = {"User-Agent": "hibs-bet/1.0 (reliability probe)"}
-        ok_any = False
-        best_url = ""
         best_n = 0
+        best_y = None
         for y in (date.today().year, date.today().year - 1):
-            url = f"https://understat.com/league/EPL/{y}"
-            r = requests.get(url, headers=headers, timeout=22)
-            if not r.ok:
-                continue
-            parsed = _extract_json_array(r.text)
-            n = len(parsed) if parsed else 0
+            parsed = fetch_league_matches("EPL", y)
+            n = len(parsed)
             if n > best_n:
                 best_n = n
-                best_url = url
-            if parsed:
-                ok_any = True
+                best_y = y
         us_row["ms"] = _ms(t0)
-        us_row["ok"] = ok_any
-        us_row["detail"]["best_url"] = best_url
-        us_row["detail"]["embedded_rows"] = best_n
-        if not ok_any:
-            us_row["detail"]["parse"] = "no_embedded_json_in_tried_years"
+        us_row["ok"] = best_n > 20
+        us_row["detail"]["season_year"] = best_y
+        us_row["detail"]["ajax_rows"] = best_n
+        if not us_row["ok"]:
+            us_row["detail"]["parse"] = "getLeagueData returned too few rows"
     except Exception as exc:
         us_row["ms"] = _ms(t0)
         us_row["error"] = str(exc)[:200]
@@ -116,10 +108,13 @@ def run_all_probes() -> Dict[str, Any]:
     try:
         from hibs_predictor.scrapers import sofascore_client as ss
 
-        hit = ss.first_team_hit("Celtic")
+        hit, blocked = ss.probe_team_search("Celtic")
         ss_row["ms"] = _ms(t0)
         ss_row["ok"] = bool(hit and hit.get("id"))
         ss_row["detail"]["team_id"] = (hit or {}).get("id")
+        if blocked:
+            ss_row["detail"]["blocked"] = True
+            ss_row["detail"]["note"] = "HTTP 403 from api.sofascore.com"
     except Exception as exc:
         ss_row["ms"] = _ms(t0)
         ss_row["error"] = str(exc)[:200]

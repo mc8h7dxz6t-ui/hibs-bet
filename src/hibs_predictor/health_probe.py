@@ -230,49 +230,30 @@ def gather_health() -> Dict[str, Any]:
             }
         )
 
-    # --- Understat (optional: detect HTML without embedded JSON) ---
+    # --- Understat (AJAX league data; try current + previous season) ---
     t0 = time.perf_counter()
     try:
-        from hibs_predictor.scrapers.understat_client import _extract_json_array
+        from datetime import date
 
-        headers = {"User-Agent": "hibs-bet/1.0 (health probe)"}
-        r = requests.get("https://understat.com/league/EPL/2025", headers=headers, timeout=18)
+        from hibs_predictor.scrapers.understat_client import fetch_league_matches
+
+        rows: List[Dict[str, Any]] = []
+        for y in (date.today().year, date.today().year - 1):
+            rows = fetch_league_matches("EPL", y)
+            if len(rows) > 20:
+                break
         ms = _ms_since(t0)
-        if r.status_code != 200:
-            scrapers.append(
-                {
-                    "id": "understat",
-                    "label": "Understat",
-                    "ms": ms,
-                    "ok": False,
-                    "error_code": "ERROR",
-                    "error": f"HTTP {r.status_code}",
-                }
-            )
-        else:
-            parsed = _extract_json_array(r.text)
-            if parsed is None and len(r.text) > 5000:
-                scrapers.append(
-                    {
-                        "id": "understat",
-                        "label": "Understat",
-                        "ms": ms,
-                        "ok": False,
-                        "error_code": "LAYOUT_BROKEN",
-                        "error": "No embedded matches JSON (page layout may have changed)",
-                    }
-                )
-            else:
-                scrapers.append(
-                    {
-                        "id": "understat",
-                        "label": "Understat",
-                        "ms": ms,
-                        "ok": True,
-                        "error_code": None,
-                        "error": None,
-                    }
-                )
+        ok = len(rows) > 20
+        scrapers.append(
+            {
+                "id": "understat",
+                "label": "Understat",
+                "ms": ms,
+                "ok": ok,
+                "error_code": None if ok else "LAYOUT_BROKEN",
+                "error": None if ok else f"League AJAX returned {len(rows)} rows (expected 20+)",
+            }
+        )
     except Exception as exc:
         msg = str(exc)
         code = "LAYOUT_BROKEN" if "LAYOUT_BROKEN" in msg.upper() else "ERROR"
@@ -280,30 +261,53 @@ def gather_health() -> Dict[str, Any]:
             {
                 "id": "understat",
                 "label": "Understat",
-                "ms": None,
+                "ms": _ms_since(t0),
                 "ok": False,
                 "error_code": code,
                 "error": msg[:160],
             }
         )
 
-    # --- Sofascore public search (light) ---
+    # --- Sofascore public search (light; often 403 off residential IP too) ---
     t0 = time.perf_counter()
     try:
         from hibs_predictor.scrapers import sofascore_client as ss
 
-        hit = ss.first_team_hit("Arsenal")
+        hit, blocked = ss.probe_team_search("Arsenal")
         ms = _ms_since(t0)
-        scrapers.append(
-            {
-                "id": "sofascore",
-                "label": "Sofascore",
-                "ms": ms,
-                "ok": bool(hit),
-                "error_code": None if hit else "ERROR",
-                "error": None if hit else "empty search result",
-            }
-        )
+        if hit:
+            scrapers.append(
+                {
+                    "id": "sofascore",
+                    "label": "Sofascore",
+                    "ms": ms,
+                    "ok": True,
+                    "error_code": None,
+                    "error": None,
+                }
+            )
+        elif blocked:
+            scrapers.append(
+                {
+                    "id": "sofascore",
+                    "label": "Sofascore",
+                    "ms": ms,
+                    "ok": False,
+                    "error_code": "BLOCKED",
+                    "error": "HTTP 403 — API blocked from this network (optional; core 1X2 unaffected)",
+                }
+            )
+        else:
+            scrapers.append(
+                {
+                    "id": "sofascore",
+                    "label": "Sofascore",
+                    "ms": ms,
+                    "ok": False,
+                    "error_code": "ERROR",
+                    "error": "empty search result",
+                }
+            )
     except Exception as exc:
         msg = str(exc)
         code = "LAYOUT_BROKEN" if "LAYOUT_BROKEN" in msg.upper() else "ERROR"
@@ -311,7 +315,7 @@ def gather_health() -> Dict[str, Any]:
             {
                 "id": "sofascore",
                 "label": "Sofascore",
-                "ms": None,
+                "ms": _ms_since(t0),
                 "ok": False,
                 "error_code": code,
                 "error": msg[:160],
