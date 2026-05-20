@@ -24,12 +24,59 @@
                 </div>
                 {% endif %}
             </div>
-            {% if fixture.live_stats %}
-            <p class="in-play-stats-note" data-live-stats style="margin:8px 0 0;font-size:0.75em;color:var(--muted);">
-                xG {% if fixture.live_stats.home %}H {{ fixture.live_stats.home.xg }}{% endif %}{% if fixture.live_stats.away %} · A {{ fixture.live_stats.away.xg }}{% endif %}
-            </p>
-            {% endif %}
-            <p class="in-play-deferred" style="margin:8px 0 0;font-size:0.68em;color:var(--muted);">Player ratings deferred (no SofaScore scrape). Live xG only when API statistics include expected goals.</p>
+            <div class="in-play-stats-block" data-live-stats-block>
+                {% if fixture.live_xg_home is not none or fixture.live_xg_away is not none %}
+                <div class="in-play-xg-bar" data-live-xg-bar>
+                    <span class="rt-label">Live xG</span>
+                    <div class="in-play-xg-values">
+                        <strong data-live-xg-home>{% if fixture.live_xg_home is not none %}{{ "%.2f"|format(fixture.live_xg_home) }}{% else %}—{% endif %}</strong>
+                        <span class="in-play-xg-vs">vs</span>
+                        <strong data-live-xg-away>{% if fixture.live_xg_away is not none %}{{ "%.2f"|format(fixture.live_xg_away) }}{% else %}—{% endif %}</strong>
+                    </div>
+                    <div class="in-play-xg-track" aria-hidden="true">
+                        {% set xg_h = fixture.live_xg_home or 0 %}
+                        {% set xg_a = fixture.live_xg_away or 0 %}
+                        {% set xg_sum = xg_h + xg_a %}
+                        {% if xg_sum > 0 %}
+                        <span class="in-play-xg-fill in-play-xg-fill-h" data-live-xg-fill-h style="width:{{ (100 * xg_h / xg_sum)|round(1) }}%;"></span>
+                        <span class="in-play-xg-fill in-play-xg-fill-a" data-live-xg-fill-a style="width:{{ (100 * xg_a / xg_sum)|round(1) }}%;"></span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% else %}
+                <div class="in-play-xg-bar" data-live-xg-bar hidden>
+                    <span class="rt-label">Live xG</span>
+                    <div class="in-play-xg-values">
+                        <strong data-live-xg-home>—</strong>
+                        <span class="in-play-xg-vs">vs</span>
+                        <strong data-live-xg-away>—</strong>
+                    </div>
+                    <div class="in-play-xg-track" aria-hidden="true">
+                        <span class="in-play-xg-fill in-play-xg-fill-h" data-live-xg-fill-h style="width:50%;"></span>
+                        <span class="in-play-xg-fill in-play-xg-fill-a" data-live-xg-fill-a style="width:50%;"></span>
+                    </div>
+                </div>
+                {% endif %}
+                {% if fixture.live_stats and fixture.live_stats.rows %}
+                <table class="data-table in-play-stats-table" data-live-stats-table style="margin-top:8px;font-size:0.72em;">
+                    <tr><th></th><th>{{ fixture.home }}</th><th>{{ fixture.away }}</th></tr>
+                    {% for r in fixture.live_stats.rows %}
+                    <tr>
+                        <td style="color:var(--muted);">{{ r.label }}</td>
+                        <td class="home-row" data-live-stat-home="{{ loop.index0 }}">{{ r.home if r.home is not none else '—' }}</td>
+                        <td class="away-row" data-live-stat-away="{{ loop.index0 }}">{{ r.away if r.away is not none else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+                {% else %}
+                <table class="data-table in-play-stats-table" data-live-stats-table hidden style="margin-top:8px;font-size:0.72em;">
+                    <tr><th></th><th>{{ fixture.home }}</th><th>{{ fixture.away }}</th></tr>
+                    <tbody data-live-stats-body></tbody>
+                </table>
+                {% endif %}
+                <p class="in-play-stats-empty" data-live-stats-empty style="margin:8px 0 0;font-size:0.72em;color:var(--muted);{% if fixture.live_stats and fixture.live_stats.rows %}display:none;{% endif %}">Live match statistics not available yet — API often publishes after kick-off.</p>
+            </div>
+            <p class="in-play-deferred" style="margin:8px 0 0;font-size:0.68em;color:var(--muted);">Player ratings deferred (no SofaScore scrape). Live xG when API statistics include Expected Goals.</p>
         </div>
         {% endif %}
         {% set show_pred = p and not (p.prediction_unavailable | default(false)) %}

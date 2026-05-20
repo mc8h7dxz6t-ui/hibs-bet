@@ -1231,12 +1231,13 @@ def test_live_scores_merge_mocked():
             "fixture": {"id": 99901, "status": {"short": "1H", "long": "First Half", "elapsed": 23}},
             "goals": {"home": 2, "away": 1},
             "teams": {"home": {"name": "A"}, "away": {"name": "B"}},
+            "league": {"id": 39, "name": "Premier League"},
         }
         parsed = parse_api_fixture_live(raw)
         assert parsed["is_live"] is True
         assert parsed["live_score"] == "2-1"
         assert parsed["live_minute"] == 23
-        fixtures = [{"id": 99901, "home": "A", "away": "B"}]
+        fixtures = [{"id": 99901, "home": "A", "away": "B", "league": "EPL"}]
         n = merge_live_into_fixtures(fixtures, {99901: parsed})
         assert n == 1
         assert fixtures[0]["live_score"] == "2-1"
@@ -1245,6 +1246,99 @@ def test_live_scores_merge_mocked():
         return True
     except Exception as e:
         print(f"  ✗ Live scores test failed: {e}")
+        return False
+
+
+def test_live_statistics_xg_mocked():
+    """fixtures/statistics Expected Goals parse into live_stats and live_xg_*."""
+    print("\nTesting live statistics xG parse...")
+    try:
+        from hibs_predictor.live_scores import parse_live_statistics
+
+        stats_response = [
+            {
+                "team": {"name": "Arsenal"},
+                "statistics": [
+                    {"type": "Shots on Goal", "value": 4},
+                    {"type": "Ball Possession", "value": "62%"},
+                    {"type": "Corner Kicks", "value": 5},
+                    {"type": "Expected Goals", "value": "1.42"},
+                ],
+            },
+            {
+                "team": {"name": "Chelsea"},
+                "statistics": [
+                    {"type": "Shots on Goal", "value": 2},
+                    {"type": "Ball Possession", "value": "38%"},
+                    {"type": "Corner Kicks", "value": 1},
+                    {"type": "Expected Goals", "value": "0.88"},
+                ],
+            },
+        ]
+        live_stats, xg_h, xg_a = parse_live_statistics(
+            stats_response, home_name="Arsenal", away_name="Chelsea"
+        )
+        assert live_stats is not None
+        assert xg_h == 1.42
+        assert xg_a == 0.88
+        assert live_stats["home"]["xg"] == "1.42"
+        assert live_stats["away"]["corners"] == 1
+        labels = [r["label"] for r in live_stats["rows"]]
+        assert "Expected goals (xG)" in labels
+        print("  ✓ Live statistics xG parse OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Live statistics xG test failed: {e}")
+        return False
+
+
+def test_live_merge_non_nordic_by_teams():
+    """Live merge matches EPL (and other leagues) by home/away + league when ids align."""
+    print("\nTesting live merge (non-Nordic, team+league)...")
+    try:
+        from hibs_predictor.live_scores import merge_live_into_fixtures, parse_api_fixture_live
+
+        raw = {
+            "fixture": {"id": 88001, "status": {"short": "2H", "elapsed": 67}},
+            "goals": {"home": 1, "away": 0},
+            "teams": {"home": {"name": "Liverpool"}, "away": {"name": "Everton"}},
+            "league": {"id": 39, "name": "Premier League"},
+        }
+        parsed = parse_api_fixture_live(raw)
+        live_by_id = {88001: parsed}
+        fixtures = [
+            {
+                "id": 88001,
+                "home": "Liverpool",
+                "away": "Everton",
+                "league": "EPL",
+            }
+        ]
+        n = merge_live_into_fixtures(fixtures, live_by_id)
+        assert n == 1
+        assert fixtures[0]["live_score"] == "1-0"
+        assert fixtures[0]["live_status"] == "2H"
+        assert fixtures[0]["live_minute"] == 67
+
+        # Fallback: dashboard id differs but teams + league match live=all row
+        parsed2 = dict(parsed)
+        parsed2["fixture_id"] = 88002
+        live_alt = {88002: parsed2}
+        fixtures2 = [
+            {
+                "id": 99999,
+                "home": "Liverpool",
+                "away": "Everton",
+                "league": "EPL",
+            }
+        ]
+        n2 = merge_live_into_fixtures(fixtures2, live_alt)
+        assert n2 == 1
+        assert fixtures2[0]["live_score"] == "1-0"
+        print("  ✓ Live merge non-Nordic OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Live merge non-Nordic test failed: {e}")
         return False
 
 
@@ -1620,6 +1714,8 @@ def main():
         test_nordic_leagues_configured,
         test_calendar_year_season_candidate,
         test_live_scores_merge_mocked,
+        test_live_statistics_xg_mocked,
+        test_live_merge_non_nordic_by_teams,
         test_sky_sports_news_media_config,
         test_fotmob_adapter_mocked,
         test_football_data_standings_mocked,

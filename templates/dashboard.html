@@ -284,6 +284,57 @@
         });
     }
 
+    function formatLiveXg(v) {
+        if (v == null || v === '') return '—';
+        var n = Number(v);
+        return isNaN(n) ? String(v) : n.toFixed(2);
+    }
+
+    function applyLiveXgBar(card, live) {
+        var bar = card.querySelector('[data-live-xg-bar]');
+        if (!bar) return;
+        var hasXg = live.live_xg_home != null || live.live_xg_away != null;
+        bar.hidden = !hasXg;
+        if (!hasXg) return;
+        var hEl = bar.querySelector('[data-live-xg-home]');
+        var aEl = bar.querySelector('[data-live-xg-away]');
+        var hFill = bar.querySelector('[data-live-xg-fill-h]');
+        var aFill = bar.querySelector('[data-live-xg-fill-a]');
+        var xh = Number(live.live_xg_home) || 0;
+        var xa = Number(live.live_xg_away) || 0;
+        if (hEl) hEl.textContent = formatLiveXg(live.live_xg_home);
+        if (aEl) aEl.textContent = formatLiveXg(live.live_xg_away);
+        var sum = xh + xa;
+        if (sum > 0 && hFill && aFill) {
+            hFill.style.width = (100 * xh / sum).toFixed(1) + '%';
+            aFill.style.width = (100 * xa / sum).toFixed(1) + '%';
+        }
+    }
+
+    function applyLiveStatsTable(card, live) {
+        var table = card.querySelector('[data-live-stats-table]');
+        var empty = card.querySelector('[data-live-stats-empty]');
+        var rows = live.live_stats && live.live_stats.rows;
+        if (!rows || !rows.length) {
+            if (table) table.hidden = true;
+            if (empty) empty.style.display = '';
+            return;
+        }
+        if (empty) empty.style.display = 'none';
+        if (!table) return;
+        table.hidden = false;
+        var tbody = table.querySelector('[data-live-stats-body]') || table.tBodies[0];
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        rows.forEach(function (r) {
+            var tr = document.createElement('tr');
+            tr.innerHTML = '<td style="color:var(--muted);">' + (r.label || '') + '</td>'
+                + '<td class="home-row">' + (r.home != null ? r.home : '—') + '</td>'
+                + '<td class="away-row">' + (r.away != null ? r.away : '—') + '</td>';
+            tbody.appendChild(tr);
+        });
+    }
+
     function applyLivePayload(payload) {
         var map = (payload && payload.fixtures) || {};
         Object.keys(map).forEach(function (fid) {
@@ -303,7 +354,7 @@
             var ev = card.querySelector('[data-live-last-event]');
             var evWrap = card.querySelector('[data-live-last-event-wrap]');
             if (live.live_last_event && live.live_last_event.label) {
-                if (ev) { ev.textContent = live.live_last_event.label; ev.closest('.in-play-tile, .in-play-tile-wide'); }
+                if (ev) { ev.textContent = live.live_last_event.label; }
                 if (evWrap) evWrap.hidden = false;
             }
             var ko = card.querySelector('.fr-ko');
@@ -312,6 +363,8 @@
                 if (live.live_minute != null) pill += ' ' + live.live_minute + "'";
                 ko.innerHTML = '<span class="fr-live-pill"><span class="live-dot"></span>' + pill + '</span>';
             }
+            applyLiveXgBar(card, live);
+            applyLiveStatsTable(card, live);
         });
     }
 
@@ -328,7 +381,7 @@
         var timer = null;
         function poll() {
             var q = ids.slice(0, 120).join(',');
-            fetch('/api/fixtures/live?ids=' + encodeURIComponent(q))
+            fetch('/api/fixtures/live?ids=' + encodeURIComponent(q) + '&stats=1')
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     applyLivePayload(data);

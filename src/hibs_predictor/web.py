@@ -136,7 +136,7 @@ def _ui_data_quality_min_pct() -> int:
 
 
 def _all_fixtures_cache_key() -> str:
-    return f"all_fixtures_{_fetch_window_days()}d_v19"
+    return f"all_fixtures_{_fetch_window_days()}d_v20"
 
 
 def _cache_ttl_hours(default: float = 1.0) -> float:
@@ -383,7 +383,7 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     prefer_fdo = _env_truthy("HIBS_PREFER_FOOTBALL_DATA_FIXTURES")
     skip_as_fx = _env_truthy("HIBS_SKIP_API_SPORTS_FIXTURES")
     ttl = _cache_ttl_hours(1.0)
-    cache_key = f"fixtures_{days}d_{league_code}_v19_{int(prefer_fdo)}{int(skip_as_fx)}"
+    cache_key = f"fixtures_{days}d_{league_code}_v20_{int(prefer_fdo)}{int(skip_as_fx)}"
     cached = cache.get(cache_key, ttl_hours=ttl)
     if cached:
         return cached
@@ -888,7 +888,7 @@ def _finalize_fixture_bundle(all_fixtures: List[Dict[str, Any]]) -> Dict[str, An
 
     all_fixtures = enrich_fixtures_kickoff(all_fixtures)
     try:
-        attach_live_to_fixtures(all_fixtures, aggregator, include_events=True)
+        attach_live_to_fixtures(all_fixtures, aggregator, include_events=True, include_stats=True)
     except Exception as exc:
         print(f"[Live scores] attach failed: {exc!r}")
     _ensure_fixture_data_quality(all_fixtures)
@@ -1274,7 +1274,7 @@ def api_fixtures_live():
         from hibs_predictor.live_scores import fixture_ids_likely_in_play
 
         fixture_ids = fixture_ids_likely_in_play(data.get("all") or [])
-    include_stats = request.args.get("stats") == "1"
+    include_stats = request.args.get("stats", "1") != "0"
     return jsonify(
         live_payload_for_ids(
             aggregator,
