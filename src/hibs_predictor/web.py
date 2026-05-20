@@ -1,9 +1,12 @@
 """Flask web dashboard for hibs-bet."""
 
+import hashlib
 import os
 import sys
+import time as _time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone, date
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(BASE_DIR, "src"))
@@ -22,7 +25,7 @@ try:
 except Exception as exc:
     print(f"M5 optimizations skipped: {exc}")
 
-from flask import Flask, render_template, jsonify, request, abort, g, has_request_context
+from flask import Flask, render_template, jsonify, request, abort, g, has_request_context, make_response
 from hibs_predictor.config import (
     LEAGUES,
     ALL_LEAGUE_CODES,
@@ -56,7 +59,10 @@ app.config["JSON_SORT_KEYS"] = False
 
 @app.after_request
 def _persist_fetch_days_cookie(response):
-    return _set_fetch_days_cookie_if_requested(response)
+    response = _set_fetch_days_cookie_if_requested(response)
+    if request.path.startswith("/static/") and response.status_code == 200:
+        response.headers.setdefault("Cache-Control", "public, max-age=86400")
+    return response
 
 
 aggregator = DataAggregator()
@@ -66,6 +72,11 @@ _health_cache: Dict[str, Any] = {"t": 0.0, "payload": None}
 _HEALTH_TTL_SEC = 90.0
 _cache_prune_last: float = 0.0
 _CACHE_PRUNE_INTERVAL_SEC = 300.0
+_dashboard_page_cache: Dict[str, Any] = {"t": 0.0, "etag": "", "body": None, "fetch_days": None}
+_DASHBOARD_PAGE_TTL_SEC = 30.0
+_BUNDLE_DISK_KEYS = frozenset(
+    {"all", "by_region", "by_league", "dashboard_days", "value_bets", "total", "fixture_coverage"}
+)
 
 
 def _api_football_season_year(now: datetime) -> int:
@@ -237,9 +248,80 @@ def _clear_health_cache() -> None:
     _health_cache["payload"] = None
 
 
+def _clear_dashboard_page_cache() -> None:
+    _dashboard_page_cache["t"] = 0.0
+    _dashboard_page_cache["etag"] = ""
+    _dashboard_page_cache["body"] = None
+    _dashboard_page_cache["fetch_days"] = None
+
+
+def _is_complete_fixture_bundle(cached: Any) -> bool:
+    """Disk bundle written by fetch_all_fixtures (not a legacy list-only payload)."""
+    return isinstance(cached, dict) and bool(cached.get("all")) and _BUNDLE_DISK_KEYS.issubset(cached.keys())
+
+
+def _dashboard_page_cache_get() -> Optional[Tuple[bytes, str]]:
+    now = _time.monotonic()
+    body = _dashboard_page_cache.get("body")
+    etag = _dashboard_page_cache.get("etag") or ""
+    if body is None or not etag:
+        return None
+    if (now - float(_dashboard_page_cache.get("t") or 0)) > _DASHBOARD_PAGE_TTL_SEC:
+        return None
+    if _dashboard_page_cache.get("fetch_days") != _fetch_window_days():
+        return None
+    return body, etag
+
+
+def _dashboard_page_cache_set(body: bytes) -> str:
+    etag = hashlib.md5(body, usedforsecurity=False).hexdigest()[:16]
+    _dashboard_page_cache["t"] = _time.monotonic()
+    _dashboard_page_cache["etag"] = etag
+    _dashboard_page_cache["body"] = body
+    _dashboard_page_cache["fetch_days"] = _fetch_window_days()
+    return etag
+
+
+def _fixture_fetch_workers() -> int:
+    try:
+        n = int(os.getenv("HIBS_FIXTURE_FETCH_WORKERS", "6"))
+    except ValueError:
+        n = 6
+    return max(1, min(12, n))
+
+
+def _fetch_all_league_fixtures_parallel() -> List[Dict]:
+    """Fetch per-league fixture rows concurrently (each league uses its own disk cache)."""
+    workers = min(_fixture_fetch_workers(), len(ALL_LEAGUE_CODES))
+    out: List[Dict] = []
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(fetch_next_48h_fixtures, code): code for code in ALL_LEAGUE_CODES}
+        for fut in as_completed(futures):
+            league_code = futures[fut]
+            try:
+                out.extend(fut.result())
+            except Exception as e:
+                print(f"[AllFixtures] {league_code}: {e}")
+    return out
+
+
+def _refresh_live_on_bundle(bundle: Dict[str, Any]) -> None:
+    """Lightweight in-play merge for dashboard; avoids full re-finalize on disk cache hit."""
+    from hibs_predictor.live_scores import attach_live_to_fixtures
+
+    all_f = bundle.get("all") or []
+    if not all_f:
+        return
+    try:
+        attach_live_to_fixtures(all_f, aggregator, include_events=True, include_stats=True)
+    except Exception as exc:
+        print(f"[Live scores] refresh failed: {exc!r}")
+
+
 def clear_application_caches(*, all_disk: bool = False) -> int:
     """Clear in-memory health cache and on-disk fixture caches (or all JSON when all_disk)."""
     _clear_health_cache()
+    _clear_dashboard_page_cache()
     cache = Cache()
     if all_disk:
         return cache.clear_all()
@@ -962,17 +1044,14 @@ def _attach_table_snapshots(fixtures: List[Dict[str, Any]], tables: List[Dict[st
         fixture["away_table_snapshot"] = _snapshot_for_team(rows, str(fixture.get("away") or ""))
 
 
-def _finalize_fixture_bundle(all_fixtures: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _finalize_fixture_bundle(all_fixtures: List[Dict[str, Any]], *, attach_live: bool = False) -> Dict[str, Any]:
     from hibs_predictor.display_tz import enrich_fixtures_kickoff
-    from hibs_predictor.live_scores import attach_live_to_fixtures
 
     all_fixtures = enrich_fixtures_kickoff(all_fixtures)
     for row in all_fixtures:
         row["dashboard_region"] = league_dashboard_region(str(row.get("league") or ""))
-    try:
-        attach_live_to_fixtures(all_fixtures, aggregator, include_events=True, include_stats=True)
-    except Exception as exc:
-        print(f"[Live scores] attach failed: {exc!r}")
+    if attach_live:
+        _refresh_live_on_bundle({"all": all_fixtures})
     _ensure_fixture_data_quality(all_fixtures)
     _ensure_fixture_pick_menus(all_fixtures)
     all_fixtures.sort(key=lambda x: x.get("kickoff_sort") or x.get("date") or "")
@@ -1071,27 +1150,31 @@ def _dashboard_info_box(fixture_coverage: Dict[str, Any], total: int) -> Dict[st
     }
 
 
-def fetch_all_fixtures() -> Dict:
+def fetch_all_fixtures(*, attach_live: bool = False) -> Dict:
     cache = Cache()
     _maybe_prune_cache(cache)
     ttl = _cache_ttl_hours(1.0)
     ck = _all_fixtures_cache_key()
     cached = cache.get(ck, ttl_hours=ttl)
     if cached:
-        all_f = cached.get("all") or []
+        if _is_complete_fixture_bundle(cached):
+            bundle = dict(cached)
+            bundle["fetch_days"] = _fetch_window_days()
+            if attach_live:
+                _refresh_live_on_bundle(bundle)
+            return bundle
+        all_f = cached.get("all") if isinstance(cached, dict) else None
+        if not all_f and isinstance(cached, list):
+            all_f = cached
         if all_f:
-            return _finalize_fixture_bundle(all_f)
+            bundle = _finalize_fixture_bundle(all_f, attach_live=attach_live)
+            if bundle.get("total"):
+                cache.set(ck, bundle, ttl_hours=ttl)
+            return bundle
         _hibs_debug_log(f"skip empty all_fixtures cache key={ck}")
 
-    all_fixtures: List[Dict] = []
-
-    for league_code in ALL_LEAGUE_CODES:
-        try:
-            all_fixtures.extend(fetch_next_48h_fixtures(league_code))
-        except Exception as e:
-            print(f"[AllFixtures] {league_code}: {e}")
-
-    result = _finalize_fixture_bundle(all_fixtures)
+    all_fixtures = _fetch_all_league_fixtures_parallel()
+    result = _finalize_fixture_bundle(all_fixtures, attach_live=attach_live)
     if result.get("total"):
         cache.set(ck, result, ttl_hours=ttl)
     else:
@@ -1225,11 +1308,24 @@ def _assistant_bundle(fixtures: List[Dict[str, Any]]) -> Dict[str, Any]:
 def index():
     if request.args.get("refresh") == "1":
         clear_application_caches(all_disk=request.args.get("all") == "1")
-    data = fetch_all_fixtures()
+    else:
+        cached_page = _dashboard_page_cache_get()
+        if cached_page is not None:
+            body, etag = cached_page
+            if request.headers.get("If-None-Match") == etag:
+                resp = make_response("", 304)
+            else:
+                resp = make_response(body)
+            resp.mimetype = "text/html; charset=utf-8"
+            resp.headers["ETag"] = etag
+            resp.headers["Cache-Control"] = "private, max-age=30"
+            return _set_fetch_days_cookie_if_requested(resp)
+
+    data = fetch_all_fixtures(attach_live=True)
     assistant_bundle = _assistant_bundle(data["all"])
     assistant_packets = assistant_bundle["packets"]
     fixture_coverage = data.get("fixture_coverage", {})
-    return render_template(
+    html = render_template(
         "dashboard.html",
         all_fixtures=data["all"],
         by_region=data["by_region"],
@@ -1259,6 +1355,13 @@ def index():
         sidebar_upcoming=data.get("sidebar_upcoming", []),
         display_tz_label=display_tz_label(),
     )
+    body = html.encode("utf-8")
+    etag = _dashboard_page_cache_set(body)
+    resp = make_response(body)
+    resp.mimetype = "text/html; charset=utf-8"
+    resp.headers["ETag"] = etag
+    resp.headers["Cache-Control"] = "private, max-age=30"
+    return _set_fetch_days_cookie_if_requested(resp)
 
 
 @app.route("/api/assistant/snapshot")

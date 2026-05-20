@@ -1246,6 +1246,52 @@ def test_uefa_season_candidates_api_primary_first():
         return False
 
 
+def test_fetch_all_disk_bundle_skips_refinalize():
+    """Warm all_fixtures disk bundle returns without full _finalize_fixture_bundle."""
+    print("\nTesting fetch_all disk bundle fast path...")
+    try:
+        import tempfile
+        from unittest.mock import patch
+
+        from hibs_predictor.cache import Cache
+        from hibs_predictor.web import _all_fixtures_cache_key, fetch_all_fixtures
+
+        bundle = {
+            "all": [{"id": 1, "home": "A", "away": "B", "league": "EPL", "date": "2026-05-21T15:00:00+00:00"}],
+            "by_region": {"UK & Ireland": []},
+            "by_league": {"EPL": []},
+            "dashboard_days": [],
+            "value_bets": [],
+            "total": 1,
+            "value_bet_count": 0,
+            "fixture_coverage": {"has_any_fixtures": True},
+            "fetch_days": 5,
+            "has_api_clients": True,
+            "sidebar_upcoming": [],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            c = Cache(cache_dir=tmp)
+            c.set(_all_fixtures_cache_key(), bundle, ttl_hours=1.0)
+            with patch("hibs_predictor.web.Cache", return_value=c), patch(
+                "hibs_predictor.web._finalize_fixture_bundle"
+            ) as fin, patch("hibs_predictor.web._refresh_live_on_bundle") as live:
+                out = fetch_all_fixtures(attach_live=False)
+        assert fin.call_count == 0
+        assert live.call_count == 0
+        assert out.get("total") == 1
+        with patch("hibs_predictor.web.Cache", return_value=c), patch(
+            "hibs_predictor.web._finalize_fixture_bundle"
+        ) as fin2, patch("hibs_predictor.web._refresh_live_on_bundle") as live2:
+            fetch_all_fixtures(attach_live=True)
+        assert fin2.call_count == 0
+        assert live2.call_count == 1
+        print("  ✓ Disk bundle fast path OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Disk bundle fast path test failed: {e}")
+        return False
+
+
 def test_empty_fixture_cache_not_reused():
     """Empty per-league fixture lists are not served from cache for a full hour."""
     print("\nTesting empty fixture cache bypass...")
@@ -1908,6 +1954,7 @@ def main():
         test_nordic_leagues_configured,
         test_calendar_year_season_candidate,
         test_uefa_season_candidates_api_primary_first,
+        test_fetch_all_disk_bundle_skips_refinalize,
         test_empty_fixture_cache_not_reused,
         test_live_scores_merge_mocked,
         test_live_statistics_xg_mocked,
