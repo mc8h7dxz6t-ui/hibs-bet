@@ -1,18 +1,33 @@
 <details class="sky-news-card" id="sky-sports-news" open>
     <summary class="sky-news-sum">
         <span class="sky-news-ico" aria-hidden="true">📺</span>
-        <span class="sky-news-txt">Sky Sports Football</span>
-        <span class="sky-news-sub">Official YouTube · Sky optional</span>
+        <span class="sky-news-txt">Sky Sports</span>
+        <span class="sky-news-sub">YouTube free · Sky optional</span>
     </summary>
     <div class="sky-news-body">
         <p class="sky-news-note muted small">
-            Recent official clips from <strong>Sky Sports Football</strong> on YouTube play below — free for everyone.
+            Official <strong>Sky Sports News</strong> 24/7 and <strong>Sky Sports Football</strong> clips on YouTube — free for everyone.
         </p>
-        <div class="sky-news-player-wrap">
+        <div class="sky-news-tabs tab-row" role="tablist" aria-label="Sky Sports media">
+            <button type="button" class="tab-btn active" data-tab-group="sky-media" onclick="switchTab(event,'sky-tab-news','sky-media')">News 24/7</button>
+            <button type="button" class="tab-btn" data-tab-group="sky-media" onclick="switchTab(event,'sky-tab-football','sky-media')">Football clips</button>
+        </div>
+        <div id="sky-tab-news" class="tab-panel active sky-news-player-wrap" data-group="sky-media">
+            <iframe
+                class="sky-news-iframe sky-news-iframe-live"
+                title="Sky Sports News — official YouTube 24/7 live"
+                src="{{ sky_sports_news_live_embed_url }}"
+                loading="lazy"
+                referrerpolicy="strict-origin-when-cross-origin"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowfullscreen
+            ></iframe>
+        </div>
+        <div id="sky-tab-football" class="tab-panel sky-news-player-wrap" data-group="sky-media">
             <iframe
                 class="sky-news-iframe"
                 title="Sky Sports Football — official YouTube clips"
-                src="{{ sky_sports_news_embed_url }}"
+                src="{{ sky_sports_football_clips_embed_url }}"
                 loading="lazy"
                 referrerpolicy="strict-origin-when-cross-origin"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
@@ -20,7 +35,10 @@
             ></iframe>
         </div>
         <p class="sky-news-embed-hint muted small">
-            Official <strong>Sky Sports Football</strong> YouTube uploads. If the player is blank, try again later or refresh the page.
+            If a player is blank, switch tabs or open
+            <a href="{{ sky_sports_news_youtube_live_video_url }}" target="_blank" rel="noopener noreferrer">News on YouTube</a>
+            ·
+            <a href="{{ sky_sports_news_youtube_channel_url }}" target="_blank" rel="noopener noreferrer">@SkySportsNews</a>.
         </p>
         <div class="sky-news-sky-subscriber" data-sky-when="access" hidden>
             <a

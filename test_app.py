@@ -1604,6 +1604,43 @@ def test_settings_fixture_window_ui():
         return False
 
 
+def test_sky_optional_subscriber_ui():
+    """Settings toggle and dashboard panel hide Sky CTA unless hasSkyAccess."""
+    print("\nTesting optional Sky subscriber UI...")
+    try:
+        from unittest.mock import patch
+        from hibs_predictor.web import app
+
+        bundle = _sample_table_fixture_bundle()
+        with patch("hibs_predictor.web.fetch_all_fixtures", return_value=bundle), patch(
+            "hibs_predictor.web._fetch_full_table_rows", return_value=[]
+        ):
+            client = app.test_client()
+            settings = client.get("/settings")
+            dashboard = client.get("/")
+
+        assert settings.status_code == 200
+        sbody = settings.get_data(as_text=True)
+        assert 'data-hibs-setting-check="hasSkyAccess"' in sbody
+        assert "I have Sky / Sky Go" in sbody
+
+        assert dashboard.status_code == 200
+        dbody = dashboard.get_data(as_text=True)
+        assert "sky-sports-news" in dbody
+        assert 'data-sky-when="access"' in dbody
+        assert 'data-sky-when="no-access"' in dbody
+        assert "youtube-nocookie.com/embed" in dbody
+        assert "Watch on Sky (subscription)" in dbody
+        assert 'class="nav-btn sky-news-watch-live"' not in dbody
+        assert "Watch live on Sky Sports" not in dbody
+        assert "News 24/7" in dbody and "Football clips" in dbody
+        print("  ✓ Optional Sky subscriber settings + panel markup")
+        return True
+    except Exception as e:
+        print(f"  ✗ Optional Sky subscriber UI test failed: {e}")
+        return False
+
+
 def test_sky_sports_news_media_config():
     """Sky Sports News 24/7 YouTube live video + Football clips (no scraped streams)."""
     print("\nTesting Sky Sports News media config...")
@@ -1964,6 +2001,7 @@ def main():
         test_live_statistics_xg_mocked,
         test_europa_league_live_merge_freiburg_villa,
         test_live_merge_non_nordic_by_teams,
+        test_sky_optional_subscriber_ui,
         test_sky_sports_news_media_config,
         test_fotmob_adapter_mocked,
         test_football_data_standings_mocked,
