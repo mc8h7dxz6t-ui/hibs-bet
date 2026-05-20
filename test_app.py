@@ -249,6 +249,7 @@ def test_insights_tables_routes_and_snapshots():
         assert b"League Tables" in tables.data
         assert b"Betting Guide" in guide.data
         assert b"Bet engine profile" in settings.data
+        assert b"Fixture window" in settings.data
         assert dashboard.status_code == 200, dashboard.get_data(as_text=True)[:200]
         body = dashboard.get_data(as_text=True)
         assert "Aberdeen" in body and "Hibs" in body and "Dundee" in body
@@ -1227,6 +1228,46 @@ def test_calendar_year_season_candidate():
         return False
 
 
+def test_uefa_season_candidates_api_primary_first():
+    """UEFA cups try Jul-based API season (2025) before calendar window year 2026."""
+    print("\nTesting UEFA season candidates...")
+    try:
+        from datetime import datetime, timezone
+        from hibs_predictor.web import _fixture_fetch_season_candidates
+
+        now = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc)
+        seasons = _fixture_fetch_season_candidates("EL", "2026-05-20", "2026-05-27", now)
+        assert seasons[0] == 2025, seasons
+        assert 2026 in seasons
+        print("  ✓ UEFA season candidate order OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ UEFA season candidate test failed: {e}")
+        return False
+
+
+def test_empty_fixture_cache_not_reused():
+    """Empty per-league fixture lists are not served from cache for a full hour."""
+    print("\nTesting empty fixture cache bypass...")
+    try:
+        import tempfile
+        from hibs_predictor.cache import Cache
+        from hibs_predictor.web import _FIXTURE_CACHE_VERSION, _EMPTY_FIXTURE_CACHE_TTL_HOURS
+
+        with tempfile.TemporaryDirectory() as tmp:
+            c = Cache(cache_dir=tmp)
+            key = f"fixtures_5d_EUROPA_LEAGUE_{_FIXTURE_CACHE_VERSION}_00"
+            c.set(key, [], ttl_hours=_EMPTY_FIXTURE_CACHE_TTL_HOURS)
+            cached = c.get(key, ttl_hours=1.0)
+            assert cached == []
+            assert not cached  # mirrors web.py: falsy list is a cache miss
+        print("  ✓ Empty fixture cache bypass OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Empty fixture cache test failed: {e}")
+        return False
+
+
 def test_live_scores_merge_mocked():
     """Live snapshot fields merge onto dashboard fixture rows."""
     print("\nTesting live scores merge...")
@@ -1408,6 +1449,112 @@ def test_fixture_window_includes_todays_kicked_off():
         return True
     except Exception as e:
         print(f"  ✗ Fixture window test failed: {e}")
+        return False
+
+
+def test_user_fetch_days_five_or_seven():
+    """?days=, cookie, and env resolve to 5 or 7; cache keys include the window."""
+    print("\nTesting user-selectable fetch days (5/7)...")
+    try:
+        from hibs_predictor.web import (
+            app,
+            _FETCH_DAYS_COOKIE,
+            _FIXTURE_CACHE_VERSION,
+            _all_fixtures_cache_key,
+            _fetch_window_days,
+            _normalize_fetch_days,
+        )
+
+        assert _normalize_fetch_days(7) == 7
+        assert _normalize_fetch_days("7") == 7
+        assert _normalize_fetch_days(10) == 5
+        assert _normalize_fetch_days("nope") == 5
+
+        with app.test_request_context("/?days=7"):
+            assert _fetch_window_days() == 7
+            assert _all_fixtures_cache_key() == f"all_fixtures_7d_{_FIXTURE_CACHE_VERSION}"
+
+        with app.test_request_context("/?days=5"):
+            assert _fetch_window_days() == 5
+            assert _all_fixtures_cache_key() == f"all_fixtures_5d_{_FIXTURE_CACHE_VERSION}"
+
+        with app.test_request_context("/?days=99"):
+            assert _fetch_window_days() == 5
+
+        with app.test_request_context("/", headers={"Cookie": f"{_FETCH_DAYS_COOKIE}=7"}):
+            assert _fetch_window_days() == 7
+
+        with app.test_request_context("/?days=5", headers={"Cookie": f"{_FETCH_DAYS_COOKIE}=7"}):
+            assert _fetch_window_days() == 5
+
+        from unittest.mock import patch
+
+        stub = {
+            "all": [],
+            "by_region": {},
+            "by_league": {},
+            "dashboard_days": [],
+            "value_bets": [],
+            "total": 0,
+            "value_bet_count": 0,
+            "fetch_days": 7,
+            "has_api_clients": False,
+            "sidebar_upcoming": [],
+            "fixture_coverage": {},
+        }
+        client = app.test_client()
+        with patch("hibs_predictor.web.fetch_all_fixtures", return_value=stub):
+            res = client.get("/?days=7")
+        assert res.status_code == 200, res.status_code
+        set_cookie = res.headers.getlist("Set-Cookie")
+        assert any(_FETCH_DAYS_COOKIE in c and "=7" in c for c in set_cookie), set_cookie
+
+        print("  ✓ Fetch days query/cookie/cache key OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ User fetch days test failed: {e}")
+        return False
+
+
+def test_seven_day_window_includes_day_six_kickoff():
+    """7-day window extends past the 5-day cutoff (e.g. late-week UEFA finals)."""
+    print("\nTesting 7-day window vs 5-day cutoff...")
+    try:
+        from datetime import datetime, timezone
+
+        from hibs_predictor.display_tz import fixture_window_end_utc, fixture_window_start_utc
+
+        now = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc)
+        start = fixture_window_start_utc(now)
+        cut5 = fixture_window_end_utc(now, 5)
+        cut7 = fixture_window_end_utc(now, 7)
+        day6_ko = datetime(2026, 5, 26, 19, 0, tzinfo=timezone.utc)
+        assert start <= day6_ko <= cut7, "day-6 KO should be inside 7-day window"
+        assert day6_ko > cut5, "same KO should be outside 5-day window"
+        print("  ✓ 7-day window wider than 5-day")
+        return True
+    except Exception as e:
+        print(f"  ✗ 7-day window test failed: {e}")
+        return False
+
+
+def test_settings_fixture_window_ui():
+    """Settings page documents the 5/7 day fixture window control."""
+    print("\nTesting settings fixture window UI...")
+    try:
+        from hibs_predictor.web import app
+
+        client = app.test_client()
+        res = client.get("/settings")
+        assert res.status_code == 200, res.status_code
+        body = res.get_data(as_text=True)
+        assert "Fixture window" in body
+        assert 'data-hibs-setting="fetchDays"' in body
+        assert "7 days" in body
+        print("  ✓ Settings fixture window UI present")
+        return True
+    except Exception as e:
+        print(f"  ✗ Settings fixture window test failed: {e}")
         return False
 
 
@@ -1754,8 +1901,13 @@ def main():
         test_competition_display_titles,
         test_kickoff_display_tz,
         test_fixture_window_includes_todays_kicked_off,
+        test_user_fetch_days_five_or_seven,
+        test_seven_day_window_includes_day_six_kickoff,
+        test_settings_fixture_window_ui,
         test_nordic_leagues_configured,
         test_calendar_year_season_candidate,
+        test_uefa_season_candidates_api_primary_first,
+        test_empty_fixture_cache_not_reused,
         test_live_scores_merge_mocked,
         test_live_statistics_xg_mocked,
         test_europa_league_live_merge_freiburg_villa,

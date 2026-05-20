@@ -278,6 +278,9 @@
         html[data-hibs-density="spacious"] .fr-sum{padding:11px 10px;}
         .btn-refresh{background:rgba(57,255,20,0.15);border:1px solid rgba(57,255,20,0.45);color:var(--neon-value);padding:6px 14px;border-radius:8px;font-size:0.72em;font-weight:800;cursor:pointer;font-family:'Inter',sans-serif;}
         .btn-refresh:hover{filter:brightness(1.08);}
+        .fetch-days-toolbar{display:inline-flex;align-items:center;gap:6px;font-size:0.72em;color:var(--muted);}
+        .fetch-days-lbl{font-weight:700;letter-spacing:0.04em;text-transform:uppercase;font-size:0.9em;}
+        .fetch-days-select{background:rgba(15,23,42,0.9);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 8px;font-size:0.95em;font-family:'Inter',sans-serif;cursor:pointer;}
         .ref-cols{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;align-items:start;}
         @media(min-width:1180px){.ref-cols.ref-cols-sidebar{grid-template-columns:minmax(220px,280px) minmax(0,1fr);}}
         .dash-sidebar{align-self:start;position:sticky;top:12px;z-index:2;}
@@ -810,8 +813,10 @@
             density: 'comfortable',
             font: 'standard',
             dataQualityMin: '',
-            fullDataDefault: false
+            fullDataDefault: false,
+            fetchDays: '5'
         };
+        var FETCH_DAYS_KEY = 'hibs_fetch_days';
         var PROFILE_LABELS = {
             balanced: 'Balanced',
             conservative: 'Conservative',
@@ -826,10 +831,17 @@
             }
         }
 
+        function normalizeFetchDays(raw) {
+            var d = String(raw || DEFAULTS.fetchDays);
+            return d === '7' ? '7' : '5';
+        }
+
         function write(settings) {
             var next = Object.assign({}, DEFAULTS, settings || {});
+            next.fetchDays = normalizeFetchDays(next.fetchDays);
             try {
                 global.localStorage.setItem(KEY, JSON.stringify(next));
+                global.localStorage.setItem(FETCH_DAYS_KEY, next.fetchDays);
             } catch (e) {}
             apply(next);
             document.dispatchEvent(new CustomEvent('hibs-settings-change', { detail: next }));
@@ -846,8 +858,27 @@
             });
             document.querySelectorAll('[data-hibs-settings-summary]').forEach(function (node) {
                 var dq = s.dataQualityMin ? s.dataQualityMin + '% data bar' : 'Default data bar';
-                node.textContent = (PROFILE_LABELS[s.profile] || PROFILE_LABELS.balanced) + ' profile · ' + dq;
+                var win = normalizeFetchDays(s.fetchDays) + '-day fixtures';
+                node.textContent = (PROFILE_LABELS[s.profile] || PROFILE_LABELS.balanced) + ' profile · ' + win + ' · ' + dq;
             });
+            document.querySelectorAll('[data-hibs-fetch-days-select]').forEach(function (el) {
+                el.value = normalizeFetchDays(s.fetchDays);
+            });
+        }
+
+        function appendFetchDays(url) {
+            var days = normalizeFetchDays(read().fetchDays);
+            try {
+                var stored = global.localStorage.getItem(FETCH_DAYS_KEY);
+                if (stored) days = normalizeFetchDays(stored);
+            } catch (e) {}
+            var base = url || '/';
+            var parts = base.split('#');
+            var path = parts[0];
+            var hash = parts.length > 1 ? '#' + parts.slice(1).join('#') : '';
+            var q = path.indexOf('?') >= 0 ? '&' : '?';
+            if (/[?&]days=/.test(path)) return base;
+            return path + q + 'days=' + days + hash;
         }
 
         function syncControls(root) {
@@ -870,9 +901,13 @@
                 if (el.getAttribute('data-hibs-setting-bound') === '1') return;
                 el.setAttribute('data-hibs-setting-bound', '1');
                 el.addEventListener('change', function () {
+                    var key = el.getAttribute('data-hibs-setting');
                     var s = read();
-                    s[el.getAttribute('data-hibs-setting')] = el.value;
+                    s[key] = el.value;
                     write(s);
+                    if (key === 'fetchDays') {
+                        global.location.href = appendFetchDays('/');
+                    }
                 });
             });
             scope.querySelectorAll('[data-hibs-setting-check]').forEach(function (el) {
@@ -900,11 +935,14 @@
 
         global.HibsSettings = {
             STORAGE_KEY: KEY,
+            FETCH_DAYS_KEY: FETCH_DAYS_KEY,
             DEFAULTS: DEFAULTS,
             get: read,
             save: write,
             apply: apply,
             bind: bind,
+            normalizeFetchDays: normalizeFetchDays,
+            appendFetchDays: appendFetchDays,
             profileLabel: function (profile) { return PROFILE_LABELS[profile] || PROFILE_LABELS.balanced; }
         };
 

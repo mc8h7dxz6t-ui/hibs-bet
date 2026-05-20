@@ -22,7 +22,7 @@ try:
 except Exception as exc:
     print(f"M5 optimizations skipped: {exc}")
 
-from flask import Flask, render_template, jsonify, request, abort
+from flask import Flask, render_template, jsonify, request, abort, g, has_request_context
 from hibs_predictor.config import (
     LEAGUES,
     ALL_LEAGUE_CODES,
@@ -53,6 +53,12 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
 app.config["JSON_SORT_KEYS"] = False
 
+
+@app.after_request
+def _persist_fetch_days_cookie(response):
+    return _set_fetch_days_cookie_if_requested(response)
+
+
 aggregator = DataAggregator()
 betting_engine = BettingEngine(aggregator.get_all_clients())
 
@@ -68,6 +74,10 @@ def _api_football_season_year(now: datetime) -> int:
 
 
 _FDO_CALENDAR_COMPS = frozenset({"WC", "EC", "UNL", "CL", "EL", "UECL"})
+# UEFA club cups: API-Football season id is Jul-based; FDO often 403/429 on finals week.
+_API_FIRST_FIXTURE_LEAGUES = frozenset({"UCL", "EUROPA_LEAGUE", "UECL"})
+_FIXTURE_CACHE_VERSION = "v22"
+_EMPTY_FIXTURE_CACHE_TTL_HOURS = 0.2  # short negative cache — avoid hour-long empty poison
 
 
 def _years_touched_by_date_range(date_from_s: str, date_to_s: str) -> List[int]:
@@ -93,11 +103,12 @@ def _fixture_fetch_season_candidates(
     merged = set(window_years) | {primary, primary - 1}
     out: List[int] = []
     seen: set[int] = set()
-    for y in sorted(window_years, reverse=True):
+    # Jul-based API season (e.g. 2025 for 2025–26) before calendar years in the window.
+    for y in (primary, primary - 1):
         if y in merged and y not in seen:
             out.append(y)
             seen.add(y)
-    for y in (primary, primary - 1):
+    for y in sorted(window_years, reverse=True):
         if y in merged and y not in seen:
             out.append(y)
             seen.add(y)
@@ -118,12 +129,58 @@ def _fixture_key(fixture: Dict[str, Any]) -> str:
     return f"{home}|{away}|{fixture.get('date', '')}"
 
 
-def _fetch_window_days() -> int:
+_ALLOWED_FETCH_DAYS = (5, 7)
+_FETCH_DAYS_COOKIE = "hibs_fetch_days"
+_FETCH_DAYS_DEFAULT = 5
+
+
+def _normalize_fetch_days(raw: Any, *, default: int = _FETCH_DAYS_DEFAULT) -> int:
+    """User-selectable fixture window: only 5 or 7 days."""
     try:
-        d = int(os.getenv("HIBS_FETCH_DAYS", "5"))
-    except ValueError:
-        d = 5
-    return max(1, min(14, d))
+        d = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return d if d in _ALLOWED_FETCH_DAYS else default
+
+
+def _fetch_days_from_env() -> int:
+    return _normalize_fetch_days(os.getenv("HIBS_FETCH_DAYS", str(_FETCH_DAYS_DEFAULT)))
+
+
+def _fetch_window_days() -> int:
+    """Resolve fixture window for this request (query ?days=, cookie, env) or scripts (env only)."""
+    cached = getattr(g, "fetch_window_days", None) if has_request_context() else None
+    if cached is not None:
+        return int(cached)
+
+    resolved = _fetch_days_from_env()
+    if has_request_context():
+        if request.args.get("days") is not None:
+            resolved = _normalize_fetch_days(request.args.get("days"), default=resolved)
+        elif request.cookies.get(_FETCH_DAYS_COOKIE):
+            resolved = _normalize_fetch_days(
+                request.cookies.get(_FETCH_DAYS_COOKIE), default=resolved
+            )
+        g.fetch_window_days = resolved
+    return resolved
+
+
+def _set_fetch_days_cookie_if_requested(response):
+    """Persist ?days=5|7 on the dashboard response so API refreshes keep the window."""
+    if not has_request_context():
+        return response
+    raw = request.args.get("days")
+    if raw is None:
+        return response
+    days = _normalize_fetch_days(raw, default=_fetch_window_days())
+    response.set_cookie(
+        _FETCH_DAYS_COOKIE,
+        str(days),
+        max_age=60 * 60 * 24 * 365,
+        samesite="Lax",
+        path="/",
+    )
+    return response
 
 
 def _min_league_chip_fixtures() -> int:
@@ -143,7 +200,12 @@ def _ui_data_quality_min_pct() -> int:
 
 
 def _all_fixtures_cache_key() -> str:
-    return f"all_fixtures_{_fetch_window_days()}d_v21"
+    return f"all_fixtures_{_fetch_window_days()}d_{_FIXTURE_CACHE_VERSION}"
+
+
+def _hibs_debug_log(message: str) -> None:
+    if _env_truthy("HIBS_DEBUG"):
+        print(f"[HIBS_DEBUG] {message}")
 
 
 def _cache_ttl_hours(default: float = 1.0) -> float:
@@ -390,10 +452,12 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     prefer_fdo = _env_truthy("HIBS_PREFER_FOOTBALL_DATA_FIXTURES")
     skip_as_fx = _env_truthy("HIBS_SKIP_API_SPORTS_FIXTURES")
     ttl = _cache_ttl_hours(1.0)
-    cache_key = f"fixtures_{days}d_{league_code}_v21_{int(prefer_fdo)}{int(skip_as_fx)}"
+    cache_key = f"fixtures_{days}d_{league_code}_{_FIXTURE_CACHE_VERSION}_{int(prefer_fdo)}{int(skip_as_fx)}"
     cached = cache.get(cache_key, ttl_hours=ttl)
     if cached:
-        return cached
+        if cached:
+            return cached
+        _hibs_debug_log(f"skip empty per-league cache {league_code} key={cache_key}")
 
     league = LEAGUES.get(league_code, {})
     now = datetime.now(timezone.utc)
@@ -502,16 +566,21 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
         except Exception as ex:
             print(f"[FotMob] {league_code}: {ex!r}")
 
-    if prefer_fdo:
-        try_football_data()
-        if not fetched:
-            try_api_sports()
-    else:
+    api_first = league_code in _API_FIRST_FIXTURE_LEAGUES
+    if api_first or not prefer_fdo:
         try_api_sports()
         if not fetched:
             try_football_data()
+    else:
+        try_football_data()
+        if not fetched:
+            try_api_sports()
     if not fetched:
         try_fotmob()
+
+    _hibs_debug_log(
+        f"fixtures {league_code} days={days} count={len(fetched)} api_first={api_first} prefer_fdo={prefer_fdo}"
+    )
 
     fixtures = []
     for fixture in fetched.values():
@@ -572,7 +641,11 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
         fixtures.append(row)
 
     fixtures.sort(key=lambda x: x.get("date") or "")
-    cache.set(cache_key, fixtures, ttl_hours=ttl)
+    cache.set(
+        cache_key,
+        fixtures,
+        ttl_hours=ttl if fixtures else _EMPTY_FIXTURE_CACHE_TTL_HOURS,
+    )
     return fixtures
 
 
@@ -1008,7 +1081,7 @@ def fetch_all_fixtures() -> Dict:
         all_f = cached.get("all") or []
         if all_f:
             return _finalize_fixture_bundle(all_f)
-        return cached
+        _hibs_debug_log(f"skip empty all_fixtures cache key={ck}")
 
     all_fixtures: List[Dict] = []
 
@@ -1019,7 +1092,11 @@ def fetch_all_fixtures() -> Dict:
             print(f"[AllFixtures] {league_code}: {e}")
 
     result = _finalize_fixture_bundle(all_fixtures)
-    cache.set(ck, result, ttl_hours=ttl)
+    cache.set(
+        ck,
+        result,
+        ttl_hours=ttl if result.get("total") else _EMPTY_FIXTURE_CACHE_TTL_HOURS,
+    )
     return result
 
 
@@ -1363,7 +1440,12 @@ def guide_page():
 @app.route("/settings")
 def settings_page():
     """Front-end preferences persisted in localStorage by the settings template."""
-    return render_template("settings.html", data_quality_ui_min=_ui_data_quality_min_pct())
+    return render_template(
+        "settings.html",
+        data_quality_ui_min=_ui_data_quality_min_pct(),
+        fetch_days=_fetch_window_days(),
+        allowed_fetch_days=_ALLOWED_FETCH_DAYS,
+    )
 
 
 @app.route("/acca")

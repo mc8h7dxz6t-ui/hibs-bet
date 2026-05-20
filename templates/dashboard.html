@@ -25,6 +25,13 @@
                 <button type="button" class="ot" data-odds="frac" aria-pressed="false">Frac</button>
             </div>
             <button type="button" class="btn-betslip" data-betslip-open>Betslip</button>
+            <label class="fetch-days-toolbar" title="How far ahead to load fixtures">
+                <span class="fetch-days-lbl">Window</span>
+                <select id="dash-fetch-days" class="fetch-days-select" aria-label="Fixture window days">
+                    <option value="5"{% if fetch_days == 5 %} selected{% endif %}>5 days</option>
+                    <option value="7"{% if fetch_days == 7 %} selected{% endif %}>7 days</option>
+                </select>
+            </label>
             <button type="button" class="btn-refresh" id="btn-refresh">Refresh</button>
         </div>
     </header>
@@ -81,7 +88,7 @@
         <div class="dash-main">
             <div class="hero-strip">
                 <h1 class="hero-title"><span class="hero-brand">hibs-bet</span> {{ fetch_days }}-Day Fixtures</h1>
-                <p class="hero-meta"><strong>{{ total }}</strong> fixtures <span class="live-pill"><span class="live-dot"></span> LIVE DATA</span> · times shown in <strong>{{ display_tz_label }}</strong></p>
+                <p class="hero-meta"><strong>{{ total }}</strong> fixtures <span class="live-pill"><span class="live-dot"></span> LIVE DATA</span> · showing next <strong>{{ fetch_days }} days</strong> · times in <strong>{{ display_tz_label }}</strong></p>
                 <p class="hero-sub">Full fixture list by day and league — SPL first, then EPL, Scotland, England, Europe, internationals, UEFA. Tap any row for form, xG, markets and value picks.</p>
                 <section class="dash-info-box" aria-label="Dashboard overview">
                     <p class="dash-info-title">What this page does</p>
@@ -342,6 +349,67 @@
         });
     }
 
+    function currentFetchDays() {
+        var sel = document.getElementById('dash-fetch-days');
+        if (sel && (sel.value === '5' || sel.value === '7')) return sel.value;
+        if (window.HibsSettings && typeof HibsSettings.normalizeFetchDays === 'function') {
+            return HibsSettings.normalizeFetchDays(currentSettings().fetchDays);
+        }
+        return '5';
+    }
+
+    function dashboardUrl(extra) {
+        var params = new URLSearchParams(window.location.search);
+        params.set('days', currentFetchDays());
+        if (extra) {
+            Object.keys(extra).forEach(function (k) {
+                if (extra[k] == null) params.delete(k);
+                else params.set(k, String(extra[k]));
+            });
+        }
+        return '/?' + params.toString();
+    }
+
+    function syncFetchDaysFromUrl() {
+        var params = new URLSearchParams(window.location.search);
+        var urlDays = params.get('days');
+        if (urlDays === '5' || urlDays === '7') {
+            if (window.HibsSettings) {
+                var s = currentSettings();
+                if (s.fetchDays !== urlDays) {
+                    s.fetchDays = urlDays;
+                    HibsSettings.save(s);
+                }
+            }
+            return urlDays;
+        }
+        var stored = '5';
+        if (window.HibsSettings) {
+            stored = HibsSettings.normalizeFetchDays(currentSettings().fetchDays);
+        }
+        try {
+            var legacy = localStorage.getItem('hibs_fetch_days');
+            if (legacy) stored = (legacy === '7') ? '7' : '5';
+        } catch (e) {}
+        params.set('days', stored);
+        window.location.replace('/?' + params.toString());
+        return stored;
+    }
+
+    function wireFetchDays() {
+        var sel = document.getElementById('dash-fetch-days');
+        if (!sel) return;
+        sel.addEventListener('change', function () {
+            var d = sel.value;
+            if (window.HibsSettings) {
+                var s = currentSettings();
+                s.fetchDays = d;
+                HibsSettings.save(s);
+            }
+            window.location.href = dashboardUrl();
+        });
+    }
+
     function wireRefresh() {
         var b = document.getElementById('btn-refresh');
         if (!b) return;
@@ -350,7 +418,7 @@
             b.textContent = 'Refreshing…';
             fetch('/api/cache/clear?all=1', { method: 'POST' })
                 .catch(function () { return null; })
-                .finally(function () { window.location.reload(); });
+                .finally(function () { window.location.href = dashboardUrl({ refresh: '1' }); });
         });
     }
 
@@ -528,12 +596,14 @@
     }
 
     document.addEventListener('DOMContentLoaded', function () {
+        syncFetchDaysFromUrl();
         loadFilterState();
         restoreFilterChips();
         wireRegionChips();
         wireChips();
         wireSearch();
         wireVal();
+        wireFetchDays();
         wireRefresh();
         wireOddsToggle();
         wireUpcomingNav();

@@ -82,6 +82,18 @@
         </section>
 
         <section class="settings-card">
+            <h2>Fixtures</h2>
+            <div class="setting-row">
+                <label for="setting-fetch-days">Fixture window</label>
+                <select id="setting-fetch-days" data-hibs-setting="fetchDays" data-hibs-fetch-days-select>
+                    <option value="5">5 days — default</option>
+                    <option value="7">7 days — European finals week</option>
+                </select>
+                <p>Controls how far ahead the dashboard loads fixtures (saved in this browser). Use <strong>7 days</strong> during UEFA cup finals so late-week matches appear. Changing this reloads the dashboard with <code>?days=5</code> or <code>?days=7</code>; the server also remembers your choice in a cookie. Server default without a choice: {{ fetch_days }} days (env <code>HIBS_FETCH_DAYS</code> optional).</p>
+            </div>
+        </section>
+
+        <section class="settings-card">
             <h2>Data Quality</h2>
             <div class="setting-row">
                 <label class="setting-check">
@@ -104,7 +116,7 @@
 
         <section class="settings-card">
             <h2>Reset</h2>
-            <p class="settings-save-note">All settings are stored in localStorage on this device. They are safe front-end preferences and are not sent to the prediction engine.</p>
+            <p class="settings-save-note">Display preferences are stored in localStorage. The fixture window is also sent as <code>?days=</code> on dashboard refresh so the server fetches the matching range.</p>
             <div class="settings-actions">
                 <button type="button" class="status-btn" data-hibs-settings-reset>Reset preferences</button>
                 <a href="/" class="nav-btn" style="text-decoration:none;display:inline-flex;align-items:center;">Back to dashboard</a>
