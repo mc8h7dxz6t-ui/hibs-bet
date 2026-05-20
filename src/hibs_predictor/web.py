@@ -47,12 +47,12 @@ from hibs_predictor.display_tz import display_tz_label, fixture_window_start_utc
 from hibs_predictor.fixture_utils import display_competition_title
 from hibs_predictor.media_config import (
     SKY_SPORTS_FOOTBALL_YOUTUBE_CHANNEL_URL,
-    SKY_SPORTS_FOOTBALL_YOUTUBE_CLIPS_EMBED_URL,
     SKY_SPORTS_FOOTBALL_YOUTUBE_PRESET_DISPLAY,
     SKY_SPORTS_NEWS_YOUTUBE_LIVE_EMBED_URL,
     SKY_SPORTS_NEWS_YOUTUBE_LIVE_PAGE_URL,
     SKY_SPORTS_NEWS_YOUTUBE_PRESET_DISPLAY,
 )
+from hibs_predictor.sky_dock_probe import probe_sky_dock_embed, sky_dock_football_clips_embed_url
 
 TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -147,12 +147,19 @@ def _show_sky_panel() -> bool:
 
 
 def _sky_dock_context() -> Dict[str, Any]:
+    env_enabled = _show_sky_panel()
+    probe = probe_sky_dock_embed()
+    embed_ok = bool(probe.get("available"))
+    show = env_enabled and embed_ok
+    news_embed = probe.get("news_live_embed_url") or SKY_SPORTS_NEWS_YOUTUBE_LIVE_EMBED_URL
     return {
-        "show_sky_panel": _show_sky_panel(),
-        "sky_sports_news_live_embed_url": SKY_SPORTS_NEWS_YOUTUBE_LIVE_EMBED_URL,
+        "show_sky_panel": show,
+        "sky_dock_available": embed_ok,
+        "sky_dock_unavailable_note": env_enabled and not embed_ok,
+        "sky_sports_news_live_embed_url": news_embed,
         "sky_sports_news_preset_url": SKY_SPORTS_NEWS_YOUTUBE_PRESET_DISPLAY,
         "sky_sports_news_open_url": SKY_SPORTS_NEWS_YOUTUBE_LIVE_PAGE_URL,
-        "sky_sports_football_clips_embed_url": SKY_SPORTS_FOOTBALL_YOUTUBE_CLIPS_EMBED_URL,
+        "sky_sports_football_clips_embed_url": sky_dock_football_clips_embed_url(),
         "sky_sports_football_preset_url": SKY_SPORTS_FOOTBALL_YOUTUBE_PRESET_DISPLAY,
         "sky_sports_football_open_url": SKY_SPORTS_FOOTBALL_YOUTUBE_CHANNEL_URL,
     }

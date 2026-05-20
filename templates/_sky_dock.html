@@ -47,6 +47,7 @@
             <div id="sky-tab-football" class="tab-panel active sky-browser-viewport sky-dock-viewport" data-group="sky-media">
                 <iframe
                     class="sky-browser-iframe sky-dock-iframe"
+                    id="sky-dock-iframe-football"
                     title="Sky Sports Football — YouTube embed"
                     src="{{ sky_sports_football_clips_embed_url }}"
                     loading="lazy"
@@ -58,6 +59,7 @@
             <div id="sky-tab-news" class="tab-panel sky-browser-viewport sky-dock-viewport" data-group="sky-media">
                 <iframe
                     class="sky-browser-iframe sky-dock-iframe"
+                    id="sky-dock-iframe-news"
                     title="Sky Sports News 24/7 — YouTube embed"
                     src="{{ sky_sports_news_live_embed_url }}"
                     loading="lazy"
@@ -135,5 +137,27 @@
             if (btn) btn.click();
         });
     }
+
+    function hideSkyDockClient(reason) {
+        root.classList.remove('hibs-sky-dock-enabled', 'sky-dock-collapsed');
+        if (dock) dock.remove();
+        if (revealBtn) revealBtn.remove();
+        try {
+            document.dispatchEvent(new CustomEvent('hibs-sky-dock-hidden', { detail: { reason: reason || 'client' } }));
+        } catch (e) {}
+    }
+
+    var iframes = dock.querySelectorAll('.sky-dock-iframe');
+    var loaded = 0;
+    var fallbackTimer = window.setTimeout(function () {
+        if (loaded < iframes.length) hideSkyDockClient('iframe_load_timeout');
+    }, 5000);
+    iframes.forEach(function (iframe) {
+        iframe.addEventListener('load', function () {
+            loaded += 1;
+            iframe.dataset.skyLoaded = '1';
+            if (loaded >= iframes.length) window.clearTimeout(fallbackTimer);
+        });
+    });
 })();
 </script>

@@ -42,6 +42,16 @@
     </div>
     {% endif %}
 
+    {% if sky_dock_unavailable_note %}
+    <p class="sky-dock-hidden-note" role="status" style="margin:0 0 12px;padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:rgba(30,41,59,0.5);font-size:0.78em;color:var(--muted);">
+        Sky TV dock hidden — stream unavailable on YouTube. Open
+        <a href="{{ sky_sports_news_open_url }}" target="_blank" rel="noopener noreferrer">Sky Sports News live</a>
+        or
+        <a href="{{ sky_sports_football_open_url }}" target="_blank" rel="noopener noreferrer">Sky Sports Football</a>
+        on YouTube instead.
+    </p>
+    {% endif %}
+
     <div class="dash-layout">
         <aside class="dash-sidebar" aria-label="Filters and upcoming fixtures">
             <p class="dash-side-hd">Coming up</p>

@@ -1671,6 +1671,18 @@ def test_settings_fixture_window_ui():
         return False
 
 
+def _sky_dock_probe_ok():
+    return {
+        "available": True,
+        "live_video_id": "a-E_HJ7p1qg",
+        "news_embed_ok": True,
+        "football_embed_ok": True,
+        "news_live_embed_url": "https://www.youtube-nocookie.com/embed/a-E_HJ7p1qg",
+        "reason": "ok",
+        "cached": False,
+    }
+
+
 def test_sky_youtube_panel():
     """Fixed Sky dock in base layout; persists on settings; hide via env."""
     print("\nTesting Sky Sports YouTube dock...")
@@ -1681,53 +1693,112 @@ def test_sky_youtube_panel():
         bundle = _sample_table_fixture_bundle()
         with patch("hibs_predictor.web.fetch_all_fixtures", return_value=bundle), patch(
             "hibs_predictor.web._fetch_full_table_rows", return_value=[]
+        ), patch(
+            "hibs_predictor.web.probe_sky_dock_embed", return_value=_sky_dock_probe_ok()
         ):
             client = app.test_client()
             settings = client.get("/settings")
             dashboard = client.get("/")
             guide = client.get("/guide")
 
-        assert settings.status_code == 200
-        sbody = settings.get_data(as_text=True)
-        assert 'data-hibs-setting-check="hasSkyAccess"' not in sbody
-        assert "I have Sky / Sky Go" not in sbody
-        assert "Sky Sports</h2>" not in sbody
-        assert "sky-dock" in sbody
-        assert "hibs-sky-dock-enabled" in sbody
-        assert "hibs_sky_dock_collapsed" in sbody
-        assert "sky-dock-collapse" in sbody
+            assert settings.status_code == 200
+            sbody = settings.get_data(as_text=True)
+            assert 'data-hibs-setting-check="hasSkyAccess"' not in sbody
+            assert "I have Sky / Sky Go" not in sbody
+            assert "Sky Sports</h2>" not in sbody
+            assert 'id="sky-dock"' in sbody
+            assert '<html lang="en" class="hibs-sky-dock-enabled">' in sbody
+            assert "hibs_sky_dock_collapsed" in sbody
+            assert "sky-dock-collapse" in sbody
 
-        assert dashboard.status_code == 200
-        dbody = dashboard.get_data(as_text=True)
-        assert "sky-dock" in dbody
-        assert "sky-sports-news" not in dbody
-        assert "sky-browser-url" in dbody
-        assert "youtube.com/@SkySportsNews/live" in dbody
-        assert "youtube.com/@SkySportsFootball" in dbody
-        assert "sky-tab-football" in dbody and "sky-tab-football" in dbody
-        assert 'data-sky-tab="sky-tab-football"' in dbody
-        assert "youtube-nocookie.com/embed" in dbody
-        assert "a-E_HJ7p1qg" in dbody
-        assert "data-sky-when" not in dbody
-        assert "skysports.com/watch" not in dbody
-        assert "Watch on Sky" not in dbody
-        assert "Sky Go" not in dbody
-        assert "hibs-app-shell" in dbody
-        assert "--sky-dock-width:320px" in dbody
+            assert dashboard.status_code == 200
+            dbody = dashboard.get_data(as_text=True)
+            assert 'id="sky-dock"' in dbody
+            assert "sky-sports-news" not in dbody
+            assert "sky-browser-url" in dbody
+            assert "youtube.com/@SkySportsNews/live" in dbody
+            assert "youtube.com/@SkySportsFootball" in dbody
+            assert "sky-tab-football" in dbody and "sky-tab-football" in dbody
+            assert 'data-sky-tab="sky-tab-football"' in dbody
+            assert "youtube-nocookie.com/embed" in dbody
+            assert "a-E_HJ7p1qg" in dbody
+            assert "data-sky-when" not in dbody
+            assert "skysports.com/watch" not in dbody
+            assert "Watch on Sky" not in dbody
+            assert "Sky Go" not in dbody
+            assert "hibs-app-shell" in dbody
+            assert "--sky-dock-width:320px" in dbody
 
-        assert guide.status_code == 200
-        assert "sky-dock" in guide.get_data(as_text=True)
+            assert guide.status_code == 200
+            assert 'id="sky-dock"' in guide.get_data(as_text=True)
 
-        with patch.dict("os.environ", {"HIBS_SHOW_SKY_PANEL": "0"}, clear=False):
-            hidden = client.get("/")
-        assert hidden.status_code == 200
-        hidden_body = hidden.get_data(as_text=True)
-        assert "sky-dock" not in hidden_body
-        assert "hibs-sky-dock-enabled" not in hidden_body
-        print("  ✓ Sky Sports fixed dock (hide via HIBS_SHOW_SKY_PANEL=0)")
+            with patch.dict("os.environ", {"HIBS_SHOW_SKY_PANEL": "0"}, clear=False):
+                hidden = client.get("/?refresh=1")
+            assert hidden.status_code == 200
+            hidden_body = hidden.get_data(as_text=True)
+            assert 'id="sky-dock"' not in hidden_body
+            assert '<html lang="en" class="hibs-sky-dock-enabled">' not in hidden_body
+            print("  ✓ Sky Sports fixed dock (hide via HIBS_SHOW_SKY_PANEL=0)")
+
+            with patch(
+                "hibs_predictor.web.probe_sky_dock_embed",
+                return_value={
+                    "available": False,
+                    "live_video_id": "a-E_HJ7p1qg",
+                    "news_embed_ok": False,
+                    "football_embed_ok": True,
+                    "news_live_embed_url": "https://www.youtube-nocookie.com/embed/a-E_HJ7p1qg",
+                    "reason": "news_not_embeddable",
+                    "cached": False,
+                },
+            ):
+                blocked = client.get("/?refresh=1")
+            assert blocked.status_code == 200
+            blocked_body = blocked.get_data(as_text=True)
+            assert 'id="sky-dock"' not in blocked_body
+            assert '<html lang="en" class="hibs-sky-dock-enabled">' not in blocked_body
+            assert "sky-dock-hidden-note" in blocked_body
+            assert "Sky TV dock hidden" in blocked_body
+            print("  ✓ Sky dock hidden when embed probe unavailable")
         return True
     except Exception as e:
         print(f"  ✗ Sky Sports YouTube dock test failed: {e}")
+        return False
+
+
+def test_sky_dock_embed_probe():
+    """Sky dock probe uses oembed + playableInEmbed; caches result."""
+    print("\nTesting Sky dock embed probe...")
+    try:
+        from unittest.mock import MagicMock, patch
+        import tempfile
+        from hibs_predictor.cache import Cache
+        from hibs_predictor import sky_dock_probe as sdp
+
+        ok_resp = MagicMock(status_code=200)
+        ok_resp.json.return_value = {"html": "<iframe/>", "title": "Sky"}
+        watch_ok = MagicMock(status_code=200)
+        watch_ok.text = '"playableInEmbed":true'
+        live_page = MagicMock(status_code=200)
+        live_page.text = '"isLiveNow":false'
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(sdp, "Cache", lambda: Cache(cache_dir=tmp)), patch.object(
+                sdp.requests,
+                "get",
+                side_effect=[live_page, ok_resp, watch_ok, ok_resp],
+            ) as mock_get:
+                result = sdp.probe_sky_dock_embed(force_refresh=True)
+                assert result["available"] is True
+                assert result["live_video_id"] == sdp.SKY_SPORTS_NEWS_YOUTUBE_LIVE_VIDEO_ID
+                assert mock_get.call_count == 4
+                cached = sdp.probe_sky_dock_embed()
+                assert cached.get("cached") is True
+                assert mock_get.call_count == 4
+        print("  ✓ Sky dock embed probe (mocked)")
+        return True
+    except Exception as e:
+        print(f"  ✗ Sky dock embed probe test failed: {e}")
         return False
 
 
@@ -2095,6 +2166,7 @@ def main():
         test_europa_league_live_merge_freiburg_villa,
         test_live_merge_non_nordic_by_teams,
         test_sky_youtube_panel,
+        test_sky_dock_embed_probe,
         test_sky_sports_news_media_config,
         test_fotmob_adapter_mocked,
         test_football_data_standings_mocked,
