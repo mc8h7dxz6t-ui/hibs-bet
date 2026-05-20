@@ -331,10 +331,65 @@ LEAGUE_REGIONS = {
         "LA_LIGA", "SERIE_A", "BUNDESLIGA", "LIGUE_1", "EREDIVISIE", "PRIMEIRA",
         "BELGIUM_FIRST", "DENMARK_SL", "GREECE_SL", "AUSTRIA_BL",
         "NORWAY_ELITESERIEN", "FINLAND_VEIKKAUSLIIGA",
+        "UCL", "EUROPA_LEAGUE", "UECL",
     ],
     "🌍 International": ["WORLD_CUP", "EUROS", "NATIONS_LEAGUE"],
-    "🏆 UEFA club": ["UCL", "EUROPA_LEAGUE", "UECL"],
 }
+
+# Dashboard sidebar region chips (UK = Scotland + England only; UEFA cups are European).
+_DASHBOARD_REGION_UK = frozenset(
+    {
+        "SCOTLAND",
+        "SCOTLAND_CHAMP",
+        "SCOTLAND_L1",
+        "SCOTLAND_L2",
+        "SCOTTISH_CUP",
+        "EPL",
+        "CHAMPIONSHIP",
+        "LEAGUE_ONE",
+        "LEAGUE_TWO",
+        "FA_CUP",
+    }
+)
+_DASHBOARD_REGION_EUROPEAN = frozenset(
+    {
+        "LA_LIGA",
+        "SERIE_A",
+        "BUNDESLIGA",
+        "LIGUE_1",
+        "EREDIVISIE",
+        "PRIMEIRA",
+        "BELGIUM_FIRST",
+        "DENMARK_SL",
+        "GREECE_SL",
+        "AUSTRIA_BL",
+        "NORWAY_ELITESERIEN",
+        "FINLAND_VEIKKAUSLIIGA",
+        "UCL",
+        "EUROPA_LEAGUE",
+        "UECL",
+    }
+)
+_DASHBOARD_REGION_INTERNATIONAL = frozenset({"WORLD_CUP", "EUROS", "NATIONS_LEAGUE"})
+
+DASHBOARD_FILTER_REGIONS = (
+    ("", "All"),
+    ("uk", "UK"),
+    ("european", "European"),
+    ("international", "International"),
+)
+
+
+def league_dashboard_region(league_code: str) -> str:
+    """Region slug for dashboard filter chips (UEFA cups → european, not uk)."""
+    code = (league_code or "").strip()
+    if code in _DASHBOARD_REGION_UK:
+        return "uk"
+    if code in _DASHBOARD_REGION_EUROPEAN:
+        return "european"
+    if code in _DASHBOARD_REGION_INTERNATIONAL:
+        return "international"
+    return "other"
 
 DEFAULT_CACHE_TTL_HOURS = 4
 

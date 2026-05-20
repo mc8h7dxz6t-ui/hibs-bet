@@ -1197,6 +1197,12 @@ def test_nordic_leagues_configured():
         euro = LEAGUE_REGIONS.get("🏆 European", [])
         assert "NORWAY_ELITESERIEN" in euro
         assert "FINLAND_VEIKKAUSLIIGA" in euro
+        assert "EUROPA_LEAGUE" in euro
+        from hibs_predictor.config import league_dashboard_region
+
+        assert league_dashboard_region("EUROPA_LEAGUE") == "european"
+        assert league_dashboard_region("EPL") == "uk"
+        assert league_dashboard_region("LA_LIGA") == "european"
         print("  ✓ Norway/Finland leagues configured")
         return True
     except Exception as e:
@@ -1289,6 +1295,40 @@ def test_live_statistics_xg_mocked():
         return True
     except Exception as e:
         print(f"  ✗ Live statistics xG test failed: {e}")
+        return False
+
+
+def test_europa_league_live_merge_freiburg_villa():
+    """Europa League final merges live by team names when API fixture id differs."""
+    print("\nTesting Europa League live merge (Freiburg vs Villa)...")
+    try:
+        from hibs_predictor.live_scores import merge_live_into_fixtures, parse_api_fixture_live
+
+        raw = {
+            "fixture": {"id": 1375001, "status": {"short": "1H", "elapsed": 34}},
+            "goals": {"home": 0, "away": 1},
+            "teams": {"home": {"name": "SC Freiburg"}, "away": {"name": "Aston Villa"}},
+            "league": {"id": 3, "name": "UEFA Europa League"},
+        }
+        parsed = parse_api_fixture_live(raw)
+        assert parsed["_match_league_code"] == "EUROPA_LEAGUE"
+        live_by_id = {1375001: parsed}
+        fixtures = [
+            {
+                "id": 999888,
+                "home": "Freiburg",
+                "away": "Aston Villa",
+                "league": "EUROPA_LEAGUE",
+            }
+        ]
+        n = merge_live_into_fixtures(fixtures, live_by_id)
+        assert n == 1
+        assert fixtures[0]["live_score"] == "0-1"
+        assert fixtures[0]["is_live"] is True
+        print("  ✓ Europa final live merge OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Europa live merge test failed: {e}")
         return False
 
 
@@ -1715,6 +1755,7 @@ def main():
         test_calendar_year_season_candidate,
         test_live_scores_merge_mocked,
         test_live_statistics_xg_mocked,
+        test_europa_league_live_merge_freiburg_villa,
         test_live_merge_non_nordic_by_teams,
         test_sky_sports_news_media_config,
         test_fotmob_adapter_mocked,

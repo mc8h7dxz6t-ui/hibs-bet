@@ -23,7 +23,14 @@ except Exception as exc:
     print(f"M5 optimizations skipped: {exc}")
 
 from flask import Flask, render_template, jsonify, request, abort
-from hibs_predictor.config import LEAGUES, ALL_LEAGUE_CODES, LEAGUE_REGIONS, DASHBOARD_LEAGUE_ORDER
+from hibs_predictor.config import (
+    LEAGUES,
+    ALL_LEAGUE_CODES,
+    LEAGUE_REGIONS,
+    DASHBOARD_LEAGUE_ORDER,
+    DASHBOARD_FILTER_REGIONS,
+    league_dashboard_region,
+)
 from hibs_predictor.cache import Cache
 from hibs_predictor.data_aggregator import DataAggregator
 from hibs_predictor.betting_engine import (
@@ -136,7 +143,7 @@ def _ui_data_quality_min_pct() -> int:
 
 
 def _all_fixtures_cache_key() -> str:
-    return f"all_fixtures_{_fetch_window_days()}d_v20"
+    return f"all_fixtures_{_fetch_window_days()}d_v21"
 
 
 def _cache_ttl_hours(default: float = 1.0) -> float:
@@ -383,7 +390,7 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     prefer_fdo = _env_truthy("HIBS_PREFER_FOOTBALL_DATA_FIXTURES")
     skip_as_fx = _env_truthy("HIBS_SKIP_API_SPORTS_FIXTURES")
     ttl = _cache_ttl_hours(1.0)
-    cache_key = f"fixtures_{days}d_{league_code}_v20_{int(prefer_fdo)}{int(skip_as_fx)}"
+    cache_key = f"fixtures_{days}d_{league_code}_v21_{int(prefer_fdo)}{int(skip_as_fx)}"
     cached = cache.get(cache_key, ttl_hours=ttl)
     if cached:
         return cached
@@ -887,6 +894,8 @@ def _finalize_fixture_bundle(all_fixtures: List[Dict[str, Any]]) -> Dict[str, An
     from hibs_predictor.live_scores import attach_live_to_fixtures
 
     all_fixtures = enrich_fixtures_kickoff(all_fixtures)
+    for row in all_fixtures:
+        row["dashboard_region"] = league_dashboard_region(str(row.get("league") or ""))
     try:
         attach_live_to_fixtures(all_fixtures, aggregator, include_events=True, include_stats=True)
     except Exception as exc:
@@ -1033,6 +1042,8 @@ def _sidebar_upcoming(all_fixtures: List[Dict[str, Any]], limit: int = 80) -> Li
                 "away": f.get("away", "?"),
                 "league": f.get("league", ""),
                 "league_name": f.get("league_name", ""),
+                "dashboard_region": f.get("dashboard_region")
+                or league_dashboard_region(str(f.get("league") or "")),
                 "kickoff_time": f.get("kickoff_time") or "—",
                 "kickoff_day_local": f.get("kickoff_day_local") or "",
             }
@@ -1154,6 +1165,7 @@ def index():
         fixture_coverage=fixture_coverage,
         dashboard_info=_dashboard_info_box(fixture_coverage, data["total"]),
         league_regions=LEAGUE_REGIONS,
+        dashboard_filter_regions=DASHBOARD_FILTER_REGIONS,
         leagues_for_filter=_leagues_for_filter(data["by_league"]),
         min_league_chip_fixtures=_min_league_chip_fixtures(),
         dashboard_league_order=DASHBOARD_LEAGUE_ORDER,

@@ -89,6 +89,26 @@ def _normalize_team(name: str) -> str:
     return re.sub(r"\s+", " ", str(name or "").strip().lower())
 
 
+def _team_names_match(a: str, b: str) -> bool:
+    """Loose match for provider naming (e.g. SC Freiburg vs Freiburg)."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if a in b or b in a:
+        return True
+    for prefix in ("sc ", "fc ", "ac ", "as ", "sv ", "sk ", "rc ", "cd ", "cf "):
+        if a.startswith(prefix):
+            core = a[len(prefix) :].strip()
+            if core and (core == b or core in b or b in core):
+                return True
+        if b.startswith(prefix):
+            core = b[len(prefix) :].strip()
+            if core and (core == a or core in a or a in core):
+                return True
+    return False
+
+
 def _stat_type_key(stat_type: str) -> Optional[str]:
     return _STAT_TYPE_MAP.get(str(stat_type or "").strip().lower())
 
@@ -293,10 +313,23 @@ def _build_team_league_index(live_by_id: Dict[int, Dict[str, Any]]) -> Dict[Tupl
     return index
 
 
+def _build_team_only_index(live_by_id: Dict[int, Dict[str, Any]]) -> Dict[Tuple[str, str], Dict[str, Any]]:
+    index: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for row in live_by_id.values():
+        if not row.get("is_live"):
+            continue
+        home = _normalize_team(row.get("_match_home") or "")
+        away = _normalize_team(row.get("_match_away") or "")
+        if home and away:
+            index[(home, away)] = row
+    return index
+
+
 def _resolve_live_for_fixture(
     row: Dict[str, Any],
     live_by_id: Dict[int, Dict[str, Any]],
     team_index: Dict[Tuple[str, str, str], Dict[str, Any]],
+    team_only_index: Dict[Tuple[str, str], Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
     fid = row.get("id")
     try:
@@ -309,7 +342,21 @@ def _resolve_live_for_fixture(
     away = _normalize_team(str(row.get("away") or ""))
     league = str(row.get("league") or "")
     if home and away:
-        return team_index.get((home, away, league))
+        hit = team_index.get((home, away, league))
+        if hit:
+            return hit
+        if league:
+            hit = team_index.get((home, away, ""))
+            if hit:
+                return hit
+        exact = team_only_index.get((home, away))
+        if exact:
+            return exact
+        for (lh, la), live_row in team_only_index.items():
+            if _team_names_match(home, lh) and _team_names_match(away, la):
+                return live_row
+            if _team_names_match(home, la) and _team_names_match(away, lh):
+                return live_row
     return None
 
 
@@ -412,8 +459,9 @@ def merge_live_into_fixtures(
     """Attach live_* fields to dashboard rows. Returns count of rows marked in-play."""
     merged = 0
     team_index = _build_team_league_index(live_by_id)
+    team_only_index = _build_team_only_index(live_by_id)
     for row in fixtures:
-        live = _resolve_live_for_fixture(row, live_by_id, team_index)
+        live = _resolve_live_for_fixture(row, live_by_id, team_index, team_only_index)
         if not live:
             row.setdefault("is_live", False)
             continue
@@ -476,26 +524,50 @@ def live_payload_for_ids(
     cache = Cache()
     live_by_id = fetch_live_by_id(client, cache=cache)
     want = {int(i) for i in fixture_ids if i is not None}
-    subset = {fid: dict(row) for fid, row in live_by_id.items() if fid in want and row.get("is_live")}
+    rows_by_id: Dict[int, Dict[str, Any]] = {}
+    for r in fixture_rows or []:
+        try:
+            rows_by_id[int(r["id"])] = r
+        except (TypeError, ValueError, KeyError):
+            continue
+    team_index = _build_team_league_index(live_by_id)
+    team_only_index = _build_team_only_index(live_by_id)
 
-    if include_events and subset:
-        _enrich_live_events(client, subset, cache, fixture_ids=list(subset.keys()))
+    by_dashboard_id: Dict[int, Dict[str, Any]] = {}
+    api_rows_by_id: Dict[int, Dict[str, Any]] = {}
+    for fid_int in want:
+        dash_row = rows_by_id.get(fid_int)
+        live = None
+        if fid_int in live_by_id and live_by_id[fid_int].get("is_live"):
+            live = live_by_id[fid_int]
+        elif dash_row:
+            live = _resolve_live_for_fixture(dash_row, live_by_id, team_index, team_only_index)
+        if not live or not live.get("is_live"):
+            continue
+        live_copy = dict(live)
+        by_dashboard_id[fid_int] = live_copy
+        try:
+            api_fid = int(live_copy.get("fixture_id") or fid_int)
+        except (TypeError, ValueError):
+            api_fid = fid_int
+        api_rows_by_id[api_fid] = live_copy
 
-    if include_stats and subset:
-        rows_for_stats = fixture_rows
-        if rows_for_stats is None:
-            rows_for_stats = [{"id": fid} for fid in subset]
-        _enrich_live_statistics(client, subset, cache, fixture_rows=rows_for_stats)
+    if include_events and api_rows_by_id:
+        _enrich_live_events(client, api_rows_by_id, cache, fixture_ids=list(api_rows_by_id.keys()))
+
+    if include_stats and api_rows_by_id:
+        rows_for_stats = fixture_rows if fixture_rows else [{"id": fid} for fid in by_dashboard_id]
+        _enrich_live_statistics(client, api_rows_by_id, cache, fixture_rows=rows_for_stats)
 
     out: Dict[str, Dict[str, Any]] = {}
-    for fid, row in subset.items():
+    for fid, row in by_dashboard_id.items():
         out[str(fid)] = {k: row.get(k) for k in _LIVE_PAYLOAD_KEYS if row.get(k) is not None}
     try:
         poll_sec = int(os.getenv("HIBS_LIVE_POLL_SEC", "60"))
     except ValueError:
         poll_sec = 60
     poll_sec = max(30, min(120, poll_sec))
-    return {"fixtures": out, "poll_after_sec": poll_sec, "live_count": len(out)}
+    return {"fixtures": out, "poll_after_sec": poll_sec, "live_count": len(by_dashboard_id)}
 
 
 def fixture_ids_likely_in_play(fixtures: List[Dict[str, Any]], *, now: Optional[datetime] = None) -> List[int]:

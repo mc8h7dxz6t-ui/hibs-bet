@@ -14,6 +14,7 @@
      data-home="{{ fixture.home }}"
      data-away="{{ fixture.away }}"
      data-league="{{ fixture.league }}"
+     data-region="{{ fixture.dashboard_region|default('other') }}"
      data-is-live="{% if fixture.is_live %}1{% else %}0{% endif %}"
      data-has-value="{% if fixture.has_value_bet %}1{% else %}0{% endif %}"
      data-data-q="{% if fixture.data_quality is defined and fixture.data_quality %}{{ fixture.data_quality.score_pct }}{% else %}0{% endif %}"

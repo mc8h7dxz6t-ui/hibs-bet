@@ -44,8 +44,14 @@
                 <input type="search" id="dash-search" class="dash-search" placeholder="Search teams…" autocomplete="off" aria-label="Search fixtures">
                 <label class="chk-inline"><input type="checkbox" id="flt-value"> Value only</label>
                 <label class="chk-inline" title="Only matches meeting data coverage threshold."><input type="checkbox" id="flt-data-full"> Full data (≥{{ data_quality_ui_min }}%)</label>
-                <div class="chip-row" id="chip-row">
-                    <button type="button" class="chip chip-lg active" data-league="">All</button>
+                <div class="chip-row" id="region-chip-row" aria-label="Region filter">
+                    {% for slug, label in dashboard_filter_regions %}
+                    <button type="button" class="chip chip-region{% if not slug %} active{% endif %}" data-region="{{ slug }}">{{ label }}</button>
+                    {% endfor %}
+                </div>
+                <p class="chip-hint region-filter-hint" id="region-filter-hint" hidden>UEFA cup finals (e.g. Europa League) are under <strong>European</strong>, not UK — switch region or choose All.</p>
+                <div class="chip-row" id="chip-row" aria-label="League filter">
+                    <button type="button" class="chip chip-lg active" data-league="">All leagues</button>
                     {% for code, name in leagues_for_filter %}
                     <button type="button" class="chip chip-lg" data-league="{{ code }}">{{ name }}</button>
                     {% endfor %}
@@ -60,7 +66,7 @@
                 {% set last_day.val = item.kickoff_day_local %}
                 <div class="du-day">{{ item.kickoff_day_local[8:10] }}/{{ item.kickoff_day_local[5:7] }}</div>
                 {% endif %}
-                <a href="#fix-{{ item.id }}" class="du-row" data-league="{{ item.league }}" data-fid="{{ item.id }}">
+                <a href="#fix-{{ item.id }}" class="du-row" data-league="{{ item.league }}" data-region="{{ item.dashboard_region|default('other') }}" data-fid="{{ item.id }}">
                     <span class="du-ko">{{ item.kickoff_time }}</span>
                     <span class="du-teams">{{ item.home }} <span class="du-vs">v</span> {{ item.away }}</span>
                 </a>
@@ -173,9 +179,52 @@
 <script src="{{ url_for('static', filename='hibs_assistant.js') }}"></script>
 <script>
 (function () {
+    var FILTER_KEY = 'hibs_league_filter_v1';
+    var activeRegion = '';
     var activeLeague = '';
     var searchQ = '';
     var fullDataOnly = false;
+
+    function loadFilterState() {
+        try {
+            var raw = localStorage.getItem(FILTER_KEY);
+            if (!raw) return;
+            var s = JSON.parse(raw);
+            if (s && typeof s === 'object') {
+                activeRegion = s.region || '';
+                activeLeague = s.league || '';
+            } else if (typeof raw === 'string') {
+                activeRegion = raw;
+            }
+        } catch (e) {}
+        if (activeRegion === 'uk' && !activeLeague) {
+            var hint = document.getElementById('region-filter-hint');
+            if (hint) hint.hidden = false;
+        }
+    }
+
+    function saveFilterState() {
+        try {
+            localStorage.setItem(FILTER_KEY, JSON.stringify({ region: activeRegion, league: activeLeague }));
+        } catch (e) {}
+    }
+
+    function restoreFilterChips() {
+        var regionRow = document.getElementById('region-chip-row');
+        if (regionRow) {
+            regionRow.querySelectorAll('.chip-region').forEach(function (btn) {
+                var on = (btn.getAttribute('data-region') || '') === activeRegion;
+                btn.classList.toggle('active', on);
+            });
+        }
+        var row = document.getElementById('chip-row');
+        if (row) {
+            row.querySelectorAll('.chip').forEach(function (btn) {
+                var on = (btn.getAttribute('data-league') || '') === activeLeague;
+                btn.classList.toggle('active', on);
+            });
+        }
+    }
 
     function currentSettings() {
         return window.HibsSettings && typeof HibsSettings.get === 'function' ? HibsSettings.get() : {};
@@ -194,7 +243,11 @@
         var valCb = document.getElementById('flt-value');
         var valOnly = valCb ? valCb.checked : false;
         var dqMin = currentDqMin();
+        var hint = document.getElementById('region-filter-hint');
+        if (hint) hint.hidden = activeRegion !== 'uk' || !!activeLeague;
         document.querySelectorAll('#dash-fixture-root .fixture-card').forEach(function (card) {
+            var rg = activeRegion;
+            var okR = !rg || card.getAttribute('data-region') === rg;
             var lg = activeLeague;
             var okL = !lg || card.getAttribute('data-league') === lg;
             var okV = !valOnly || card.getAttribute('data-has-value') === '1';
@@ -203,7 +256,7 @@
             var dq = parseFloat(card.getAttribute('data-data-q') || '0');
             if (isNaN(dq)) dq = 0;
             var okD = !fullDataOnly || dq >= dqMin;
-            var show = okL && okV && okS && okD;
+            var show = okR && okL && okV && okS && okD;
             card.style.display = show ? '' : 'none';
         });
         document.querySelectorAll('.lg-block').forEach(function (block) {
@@ -221,6 +274,8 @@
             day.style.display = v ? '' : 'none';
         });
         document.querySelectorAll('#dash-upcoming .du-row').forEach(function (row) {
+            var rg = activeRegion;
+            var okR = !rg || row.getAttribute('data-region') === rg;
             var lg = activeLeague;
             var okL = !lg || row.getAttribute('data-league') === lg;
             var fid = row.getAttribute('data-fid');
@@ -230,7 +285,21 @@
             var dq = card ? parseFloat(card.getAttribute('data-data-q') || '0') : 0;
             if (isNaN(dq)) dq = 0;
             var okD = !fullDataOnly || dq >= dqMin;
-            row.style.display = (okL && okV && okS && okD) ? '' : 'none';
+            row.style.display = (okR && okL && okV && okS && okD) ? '' : 'none';
+        });
+    }
+
+    function wireRegionChips() {
+        var regionRow = document.getElementById('region-chip-row');
+        if (!regionRow) return;
+        regionRow.querySelectorAll('.chip-region').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                regionRow.querySelectorAll('.chip-region').forEach(function (b) { b.classList.remove('active'); });
+                btn.classList.add('active');
+                activeRegion = btn.getAttribute('data-region') || '';
+                saveFilterState();
+                applyDashFilters();
+            });
         });
     }
 
@@ -242,6 +311,7 @@
                 row.querySelectorAll('.chip').forEach(function (b) { b.classList.remove('active'); });
                 btn.classList.add('active');
                 activeLeague = btn.getAttribute('data-league') || '';
+                saveFilterState();
                 applyDashFilters();
             });
         });
@@ -458,6 +528,9 @@
     }
 
     document.addEventListener('DOMContentLoaded', function () {
+        loadFilterState();
+        restoreFilterChips();
+        wireRegionChips();
         wireChips();
         wireSearch();
         wireVal();
