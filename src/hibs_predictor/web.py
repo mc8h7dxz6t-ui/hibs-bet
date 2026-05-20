@@ -715,16 +715,30 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
 
         home_id = fixture_team_id(fixture, "home") or fixture_team_id(enriched, "home")
         away_id = fixture_team_id(fixture, "away") or fixture_team_id(enriched, "away")
+        home_last10: List[Dict[str, Any]] = []
+        away_last10: List[Dict[str, Any]] = []
         try:
             home_last10 = TeamStrengthCalculator.parse_last_10_results(
                 enriched.get("home_recent", []), home_id
             )
+        except Exception as e:
+            print(f"[Fixture last10 home] {league_code} {_fixture_key(fixture)}: {e!r}")
+        try:
             away_last10 = TeamStrengthCalculator.parse_last_10_results(
                 enriched.get("away_recent", []), away_id
             )
         except Exception as e:
-            print(f"[Fixture last10] {league_code} {_fixture_key(fixture)}: {e!r}")
-            home_last10, away_last10 = [], []
+            print(f"[Fixture last10 away] {league_code} {_fixture_key(fixture)}: {e!r}")
+        if home_id and not home_last10 and enriched.get("home_recent"):
+            print(
+                f"[Fixture last10 home] {league_code} {_fixture_key(fixture)}: "
+                f"id={home_id} had {len(enriched.get('home_recent') or [])} raw matches but 0 parsed"
+            )
+        if away_id and not away_last10 and enriched.get("away_recent"):
+            print(
+                f"[Fixture last10 away] {league_code} {_fixture_key(fixture)}: "
+                f"id={away_id} had {len(enriched.get('away_recent') or [])} raw matches but 0 parsed"
+            )
 
         comp_meta = enriched.get("competition_meta") if isinstance(enriched.get("competition_meta"), dict) else {}
         if not comp_meta and isinstance(fixture.get("competition_meta"), dict):
@@ -761,7 +775,11 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
             "market_odds": enriched.get("market_odds", {}),
             "supplemental": enriched.get("supplemental", {}),
             "xg_source": enriched.get("xg_source", "unknown"),
-            "has_value_bet": bool(prediction.get("has_any_value", prediction.get("value_bets"))),
+            "has_value_bet": bool(
+                prediction.get("has_any_value")
+                or prediction.get("value_bets")
+                or prediction.get("value_bets_alt")
+            ),
         }
         row["data_quality"] = _data_quality_for_enriched(enriched, prediction)
         fixtures.append(row)

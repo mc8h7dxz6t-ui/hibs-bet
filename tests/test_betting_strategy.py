@@ -1,4 +1,4 @@
-"""Tests for line shopping, CLV, and cross-book value rejection."""
+"""Tests for line shopping, CLV, cross-book value rejection, balanced value, dual finder."""
 
 from __future__ import annotations
 
@@ -67,6 +67,138 @@ def test_value_reject_on_high_cross_book_diff(monkeypatch):
     )
     assert not filtered
     assert rejected.get("home") == "odds_cross_book_disagreement"
+
+
+def test_value_not_only_outsiders(monkeypatch):
+    """Short-priced favourite with strong model prob should pass value filters."""
+    from hibs_predictor.betting_engine import BettingEngine, OddsAnalyzer
+
+    monkeypatch.setenv("HIBS_VALUE_MAX_ODDS", "6")
+    raw = OddsAnalyzer.identify_value_bets(
+        {"home": 0.58, "draw": 0.24, "away": 0.18},
+        {"home": 2.05, "draw": 3.8, "away": 5.0},
+        margin=0.04,
+    )
+    assert "home" in raw
+    fixture = {
+        "league": "EPL",
+        "odds_cross_book_max_implied_diff_pct": 2.0,
+        "data_quality": {"score_pct": 90},
+        "xg_source": "api_xg",
+        "home_position": {"position": 3},
+        "away_position": {"position": 8},
+        "home_form": 0.7,
+        "away_form": 0.5,
+        "home_stats": {"played": 20},
+        "away_stats": {"played": 20},
+    }
+    filtered, rejected = BettingEngine._filter_value_bets(
+        raw,
+        fixture,
+        {"home": 0.58, "draw": 0.24, "away": 0.18},
+        {
+            "table_gap_home_worse": -5,
+            "xg_gap_home_minus_away": 0.2,
+            "form_gap_home_minus_away": 0.2,
+            "strength_gap_home_minus_away": 0.1,
+        },
+        0.04,
+        90.0,
+        True,
+        cross_pct=2.0,
+    )
+    assert "home" in filtered
+    assert filtered["home"].get("odds", 99) < 2.5
+    assert rejected.get("home") is None
+
+
+def test_market_consensus_value_favorite():
+    from hibs_predictor.betting_engine import OddsAnalyzer
+
+    sharp = {"home": 0.52, "draw": 0.26, "away": 0.22}
+    out = OddsAnalyzer.identify_market_consensus_value(
+        {"home": 0.58, "draw": 0.24, "away": 0.18},
+        sharp,
+        {"home": 1.75, "draw": 3.6, "away": 4.5},
+        margin=0.03,
+        min_model_prob=0.52,
+    )
+    assert "home" in out
+    assert out["home"]["source"] == "market_consensus"
+
+
+def test_dual_value_finder_agreement(monkeypatch):
+    from hibs_predictor.betting_engine import BettingEngine
+
+    monkeypatch.setenv("HIBS_VALUE_CONSENSUS_MARGIN", "0.02")
+    monkeypatch.setenv("HIBS_VALUE_CONSENSUS_MIN_MODEL", "0.52")
+    monkeypatch.setenv("HIBS_VALUE_REQUIRE_DATA_PCT", "0")
+    monkeypatch.setenv("HIBS_MIN_DATA_QUALITY_PCT", "0")
+
+    fixture = {
+        "home": {"id": 1, "name": "Team A"},
+        "away": {"id": 2, "name": "Team B"},
+        "league": "EPL",
+        "odds_home": 1.8,
+        "odds_draw": 3.6,
+        "odds_away": 4.5,
+        "odds_available": True,
+        "best_odds_1x2": {"home": 1.8, "draw": 3.6, "away": 4.5},
+        "sharp_anchor_implied": {"home": 0.52, "draw": 0.26, "away": 0.22},
+        "home_stats": {
+            "played": 15,
+            "goals_for": 28,
+            "goals_against": 18,
+            "expected_goals": 27,
+            "expected_goals_against": 17,
+        },
+        "away_stats": {
+            "played": 15,
+            "goals_for": 20,
+            "goals_against": 22,
+            "expected_goals": 19,
+            "expected_goals_against": 23,
+        },
+        "home_form": 0.72,
+        "away_form": 0.48,
+        "home_home_factor": 1.1,
+        "away_away_factor": 0.95,
+        "xg_home": 1.55,
+        "xg_away": 1.05,
+        "xg_source": "stats_api_xg",
+        "home_recent_n": 8,
+        "away_recent_n": 8,
+        "home_position": {"position": 2},
+        "away_position": {"position": 9},
+        "data_quality": {"score_pct": 92, "full_scope": True},
+        "market_odds": {},
+        "all_bookmaker_odds": [
+            {"bookmaker": "Pinnacle", "home": 1.8, "draw": 3.6, "away": 4.5},
+        ],
+    }
+    engine = BettingEngine({})
+    pred = engine.predict_with_confidence(fixture)
+    vb = pred.get("value_bets") or {}
+    alt = pred.get("value_bets_alt") or {}
+    if "home" in vb and "home" in alt:
+        assert vb["home"].get("value_dual_agree") is True
+        assert alt["home"].get("value_dual_agree") is True
+
+
+def test_enriched_skips_cache_when_recent_missing():
+    from hibs_predictor.data_aggregator import DataAggregator
+
+    cached = {
+        "home_recent": [],
+        "away_recent": [{"teams": {"home": {"id": 2}, "away": {"id": 3}}, "goals": {"home": 1, "away": 0}}],
+    }
+    assert DataAggregator._enriched_needs_recent_refetch(cached, 10, 20) is True
+    assert DataAggregator._enriched_needs_recent_refetch(cached, None, 20) is False
+    full = {
+        "home_recent": [{"x": 1}],
+        "away_recent": [{"x": 2}],
+    }
+    assert DataAggregator._enriched_needs_recent_refetch(full, 10, 20) is False
 
 
 def test_clv_enrich_after_sync(tmp_path, monkeypatch):

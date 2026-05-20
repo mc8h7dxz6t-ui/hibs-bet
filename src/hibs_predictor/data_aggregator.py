@@ -571,10 +571,10 @@ class DataAggregator:
             fixture_id_for_xg = None
 
         cached = self.cache.get(cache_key, ttl_hours=2)
-        if cached:
+        if cached and not self._enriched_needs_recent_refetch(cached, home_id, away_id):
             return cached
 
-        enriched = dict(fixture)
+        enriched = dict(cached) if cached else dict(fixture)
 
         try:
             enriched["home_recent"] = self._fetch_team_recent_matches(home_id, fdo_comp=fdo_comp)
@@ -778,8 +778,24 @@ class DataAggregator:
             print(f"[enrich data_quality] {league_code} fid={fixture_id_str}: {exc!r}")
             enriched["data_quality"] = {"score_pct": 0.0, "blocks": [], "full_scope": False, "strong_scope": False}
 
-        self.cache.set(cache_key, enriched, ttl_hours=2)
+        cache_ttl = 2.0
+        if self._enriched_needs_recent_refetch(enriched, home_id, away_id):
+            cache_ttl = 0.25
+        self.cache.set(cache_key, enriched, ttl_hours=cache_ttl)
         return enriched
+
+    @staticmethod
+    def _enriched_needs_recent_refetch(
+        enriched: Dict[str, Any],
+        home_id: Optional[int],
+        away_id: Optional[int],
+    ) -> bool:
+        """True when a team id exists but no finished recent matches were loaded (retry, don't freeze empty)."""
+        if home_id and not (enriched.get("home_recent") or []):
+            return True
+        if away_id and not (enriched.get("away_recent") or []):
+            return True
+        return False
 
     def _fetch_team_stats(
         self,

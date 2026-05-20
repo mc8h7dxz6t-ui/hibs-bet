@@ -27,13 +27,14 @@
         {% if fixture.has_value_bet and vb_list %}
         <div class="fr-value-strip" aria-label="Value bets in this match">
             {% for v in vb_list[:5] %}
-            <span class="fr-value-box" title="Model edge vs book implied probability">
+            <span class="fr-value-box fr-value-{{ v.value_tier|default('neutral') }}{% if v.value_dual_agree %} fr-value-dual{% endif %}" title="{% if v.source == 'market_consensus' %}Consensus vs sharp line{% else %}Model edge vs book{% endif %}{% if v.value_tier %} · {{ v.value_tier }}{% endif %}{% if v.value_dual_agree %} · dual agree{% endif %}">
                 <span class="fr-value-ico" aria-hidden="true">⚡</span>
-                <span class="fr-value-lbl">{{ v.market_label }}</span>
+                <span class="fr-value-lbl">{{ v.market_label }}{% if v.source == 'market_consensus' %} <em class="fr-value-src">cons</em>{% endif %}</span>
                 <span class="fr-value-odds" data-odds-dec="{{ v.odds }}" data-odds-template="@ {odds}">@ {{ "%.2f"|format(v.odds) }}</span>
                 {% if v.edge_pct is defined and v.edge_pct is not none %}
                 <span class="fr-value-edge">+{{ "%.1f"|format(v.edge_pct) }}%</span>
                 {% endif %}
+                {% if v.value_tier == 'outsider' %}<span class="fr-value-tier">dog</span>{% elif v.value_tier == 'favorite' %}<span class="fr-value-tier">fav</span>{% endif %}
             </span>
             {% endfor %}
             {% if vb_list|length > 5 %}
@@ -100,13 +101,13 @@
                 {% endif %}
             </select>
         </div>
-        {% if hl10 or al10 %}
         <div class="fr-l10-preview" aria-hidden="true">
-            {% if hl10 %}<span class="fr-l10-lbl">H</span><div class="form-strip form-dots-compact">{% for r in hl10 %}<span class="fd fd-{{ r.result }}" title="{{ fixture.home }} {{ r.score }}">{{ r.result }}</span>{% endfor %}</div>{% endif %}
-            {% if hl10 and al10 %}<span class="fr-l10-sep">·</span>{% endif %}
-            {% if al10 %}<span class="fr-l10-lbl">A</span><div class="form-strip form-dots-compact">{% for r in al10 %}<span class="fd fd-{{ r.result }}" title="{{ fixture.away }} {{ r.score }}">{{ r.result }}</span>{% endfor %}</div>{% endif %}
+            <span class="fr-l10-lbl">H</span>
+            {% if hl10 %}<div class="form-strip form-dots-compact">{% for r in hl10 %}<span class="fd fd-{{ r.result }}" title="{{ fixture.home }} {{ r.score }}">{{ r.result }}</span>{% endfor %}</div>{% else %}<span class="fr-l10-na">—</span>{% endif %}
+            <span class="fr-l10-sep">·</span>
+            <span class="fr-l10-lbl">A</span>
+            {% if al10 %}<div class="form-strip form-dots-compact">{% for r in al10 %}<span class="fd fd-{{ r.result }}" title="{{ fixture.away }} {{ r.score }}">{{ r.result }}</span>{% endfor %}</div>{% else %}<span class="fr-l10-na">—</span>{% endif %}
         </div>
-        {% endif %}
     </div>
     <span class="fr-od fr-od-h{% if vb.get('home') %} fr-od-value{% endif %}" title="{% if vb.get('home') %}Value: Home{% endif %}"{% if p and p.bookmaker_odds.home is not none %} data-odds-dec="{{ p.bookmaker_odds.home }}"{% endif %}>{% if p and p.bookmaker_odds.home is not none %}{{ "%.2f"|format(p.bookmaker_odds.home) }}{% else %}—{% endif %}</span>
     <span class="fr-od fr-od-x{% if vb.get('draw') %} fr-od-value{% endif %}" title="{% if vb.get('draw') %}Value: Draw{% endif %}"{% if p and p.bookmaker_odds.draw is not none %} data-odds-dec="{{ p.bookmaker_odds.draw }}"{% endif %}>{% if p and p.bookmaker_odds.draw is not none %}{{ "%.2f"|format(p.bookmaker_odds.draw) }}{% else %}—{% endif %}</span>

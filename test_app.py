@@ -464,33 +464,32 @@ def test_both_teams_form_and_strength():
 
         home_id = 502
         away_id = 499
+        def _ft(h, a, gh, ga, d):
+            return {
+                "teams": {"home": {"id": h, "name": "H"}, "away": {"id": a, "name": "A"}},
+                "goals": {"home": gh, "away": ga},
+                "fixture": {"status": {"short": "FT"}, "date": d},
+            }
+
         home_recent = [
-            {
-                "teams": {"home": {"id": home_id}, "away": {"id": away_id}},
-                "goals": {"home": 2, "away": 0},
-                "fixture": {"status": {"short": "FT"}, "date": "2026-05-01T12:00:00+00:00"},
-            },
-            {
-                "teams": {"home": {"id": 999}, "away": {"id": home_id}},
-                "goals": {"home": 1, "away": 2},
-                "fixture": {"status": {"short": "FT"}, "date": "2026-04-20T12:00:00+00:00"},
-            },
+            _ft(home_id, away_id, 2, 0, "2026-05-01T12:00:00+00:00"),
+            _ft(999, home_id, 1, 2, "2026-04-28T12:00:00+00:00"),
+            _ft(home_id, 888, 3, 1, "2026-04-24T12:00:00+00:00"),
+            _ft(777, home_id, 0, 2, "2026-04-20T12:00:00+00:00"),
+            _ft(home_id, 666, 1, 1, "2026-04-15T12:00:00+00:00"),
+            _ft(555, home_id, 2, 3, "2026-04-10T12:00:00+00:00"),
         ]
         away_recent = [
-            {
-                "teams": {"home": {"id": away_id}, "away": {"id": home_id}},
-                "goals": {"home": 3, "away": 1},
-                "fixture": {"status": {"short": "FT"}, "date": "2026-05-02T12:00:00+00:00"},
-            },
-            {
-                "teams": {"home": {"id": 888}, "away": {"id": away_id}},
-                "goals": {"home": 0, "away": 1},
-                "fixture": {"status": {"short": "FT"}, "date": "2026-04-18T12:00:00+00:00"},
-            },
+            _ft(away_id, home_id, 3, 1, "2026-05-02T12:00:00+00:00"),
+            _ft(888, away_id, 0, 1, "2026-04-27T12:00:00+00:00"),
+            _ft(away_id, 777, 2, 0, "2026-04-22T12:00:00+00:00"),
+            _ft(home_id, away_id, 1, 2, "2026-04-18T12:00:00+00:00"),
+            _ft(666, away_id, 1, 1, "2026-04-12T12:00:00+00:00"),
+            _ft(away_id, 555, 4, 2, "2026-04-08T12:00:00+00:00"),
         ]
         h10 = TeamStrengthCalculator.parse_last_10_results(home_recent, home_id)
         a10 = TeamStrengthCalculator.parse_last_10_results(away_recent, away_id)
-        assert len(h10) == 2 and len(a10) == 2
+        assert len(h10) >= 5 and len(a10) >= 5
         assert h10[0]["result"] == "W" and a10[0]["result"] == "W"
 
         home_form = TeamStrengthCalculator.calculate_form_strength(home_recent, home_id)

@@ -86,6 +86,46 @@ def _odds_cross_reject_pct() -> float:
     return _env_float("HIBS_ODDS_CROSS_REJECT_PCT", 10.0)
 
 
+def _value_max_odds() -> float:
+    return _env_float("HIBS_VALUE_MAX_ODDS", 6.0)
+
+
+def _value_consensus_margin() -> float:
+    return _env_float("HIBS_VALUE_CONSENSUS_MARGIN", 0.03)
+
+
+def _value_consensus_min_model() -> float:
+    return _env_float("HIBS_VALUE_CONSENSUS_MIN_MODEL", 0.52)
+
+
+def _value_odds_class(outcome: str, odds: float, book_1x2: Dict[str, float]) -> str:
+    """Classify a value pick as favorite, neutral, or outsider for UI filtering."""
+    if odds <= 1.0:
+        return "neutral"
+    if outcome in ("home", "draw", "away"):
+        prices = []
+        for side in ("home", "draw", "away"):
+            raw = book_1x2.get(side)
+            try:
+                fv = float(raw) if raw is not None else 0.0
+            except (TypeError, ValueError):
+                continue
+            if fv > 1.0:
+                prices.append(fv)
+        if prices:
+            fav_odds = min(prices)
+            if odds <= fav_odds * 1.12:
+                return "favorite"
+            if odds >= max(4.0, fav_odds * 1.85):
+                return "outsider"
+            return "neutral"
+    if odds <= 1.85:
+        return "favorite"
+    if odds >= 4.5:
+        return "outsider"
+    return "neutral"
+
+
 def _fixture_team_display_name(fixture: Dict[str, Any], side: str) -> str:
     blk = fixture.get(side)
     if isinstance(blk, dict):
@@ -470,6 +510,44 @@ class OddsAnalyzer:
                 }
         return value_bets
 
+    @staticmethod
+    def identify_market_consensus_value(
+        model_probabilities: Dict[str, float],
+        sharp_implied: Dict[str, float],
+        bookmaker_odds: Dict[str, float],
+        margin: float = 0.03,
+        min_model_prob: float = 0.52,
+    ) -> Dict[str, Any]:
+        """Value vs median/Pinnacle de-vig implied — surfaces mispriced favourites, not only longshots."""
+        if not sharp_implied or not all(sharp_implied.get(s) for s in ("home", "draw", "away")):
+            return {}
+        value_bets: Dict[str, Any] = {}
+        for outcome in ("home", "draw", "away"):
+            model_prob = float(model_probabilities.get(outcome, 0.0))
+            if model_prob < min_model_prob:
+                continue
+            sharp = float(sharp_implied.get(outcome, 0.0))
+            odds = bookmaker_odds.get(outcome)
+            if odds is None or float(odds) <= 1.0:
+                continue
+            odds = float(odds)
+            edge = model_prob - sharp
+            if edge > margin:
+                roi = (edge / sharp) * 100 if sharp > 0 else 0.0
+                value_bets[outcome] = {
+                    "model_probability": round(model_prob, 4),
+                    "model_probability_pct": round(model_prob * 100, 1),
+                    "implied_probability": round(sharp, 4),
+                    "implied_probability_pct": round(sharp * 100, 1),
+                    "edge": round(edge, 4),
+                    "edge_pct": round(edge * 100, 1),
+                    "roi_percent": round(roi, 1),
+                    "odds": odds,
+                    "kelly": OddsAnalyzer.kelly_criterion(model_prob, odds),
+                    "source": "market_consensus",
+                }
+        return value_bets
+
 
 class BettingEngine:
 
@@ -654,6 +732,13 @@ class BettingEngine:
                 required_edge += (0.35 - model_prob) * 0.22
             if odds > 4.5:
                 required_edge += min(0.08, (odds - 4.5) * 0.014)
+            max_odds_cap = _value_max_odds()
+            if odds > 8.0 and model_prob < 0.15:
+                rejected[outcome] = "longshot_requires_15pct_model"
+                continue
+            if odds > max_odds_cap and model_prob < max(0.15, 1.0 / max_odds_cap):
+                rejected[outcome] = "odds_above_env_cap_without_model_support"
+                continue
             if dq_known and dq_pct < 80.0:
                 required_edge += (80.0 - dq_pct) * 0.001
             if edge < required_edge:
@@ -1138,6 +1223,62 @@ class BettingEngine:
         if gated_values:
             value_bets = {}
             rejected_value_bets = {**{k: "data_quality_env_gate" for k in filtered_value_bets}, **rejected_value_bets}
+
+        book_1x2 = dict(bookmaker_odds) if bookmaker_odds else {}
+        for _k, _row in value_bets.items():
+            _odds = cls._safe_float(_row.get("odds"), 0.0) or 0.0
+            _row["source"] = "model_edge"
+            _row["value_tier"] = _value_odds_class(str(_k), _odds, book_1x2)
+
+        value_bets_alt: Dict[str, Any] = {}
+        alt_rejected: Dict[str, str] = {}
+        if not gated_values and not portfolio_reject:
+            sharp_impl = fixture.get("sharp_anchor_implied") or {}
+            alt_raw = (
+                OddsAnalyzer.identify_market_consensus_value(
+                    ensemble_probs,
+                    sharp_impl,
+                    book_1x2,
+                    margin=_value_consensus_margin(),
+                    min_model_prob=_value_consensus_min_model(),
+                )
+                if sharp_impl and book_1x2
+                else {}
+            )
+            alt_filtered, alt_rejected = self._filter_value_bets(
+                alt_raw,
+                fixture,
+                merged_model,
+                matchup_context,
+                margin,
+                dq_pct,
+                dq_known,
+                markets_enabled=markets_enabled,
+                cross_pct=cross_pct,
+                xg_source=fixture.get("xg_source"),
+            )
+            for _k, _row in alt_filtered.items():
+                row = dict(_row)
+                row["source"] = "market_consensus"
+                row["value_tier"] = _value_odds_class(
+                    str(_k), cls._safe_float(row.get("odds"), 0.0) or 0.0, book_1x2
+                )
+                value_bets_alt[_k] = row
+                if _k in value_bets:
+                    value_bets[_k]["value_dual_agree"] = True
+                    row["value_dual_agree"] = True
+
+        if poisson_probs_cal and book_1x2:
+            for _pk in ("home", "draw", "away"):
+                if _pk not in value_bets:
+                    continue
+                poisson_p = float(poisson_probs_cal.get(_pk, 0.0))
+                odds_pk = book_1x2.get(_pk)
+                if not odds_pk or float(odds_pk) <= 1.0:
+                    continue
+                impl_pk = OddsAnalyzer.decimal_to_probability(float(odds_pk))
+                if poisson_p - impl_pk > margin and poisson_p >= _value_consensus_min_model():
+                    value_bets[_pk]["poisson_agree"] = True
         confidence = max(ensemble_probs.values())
         predicted_outcome = max(ensemble_probs, key=ensemble_probs.get)
         best_bet = max(value_bets, key=lambda x: value_bets[x].get("roi_percent", 0)) if value_bets else None
@@ -1160,25 +1301,56 @@ class BettingEngine:
         }
         for _k, row in value_bets.items():
             row["market_label"] = market_labels.get(_k, _k.replace("_", " ").title())
+        for _k, row in value_bets_alt.items():
+            row["market_label"] = market_labels.get(_k, _k.replace("_", " ").title())
         for _ti, (_k, _row) in enumerate(sorted(value_bets.items(), key=lambda kv: -kv[1].get("roi_percent", 0.0))):
-            _row["value_tier"] = 1 if _ti == 0 else (2 if _ti == 1 else 3)
+            _row["value_rank"] = 1 if _ti == 0 else (2 if _ti == 1 else 3)
         value_highlights = sorted(
             [
                 {
                     "key": k,
                     "roi": v.get("roi_percent", 0.0),
                     "label": v.get("market_label", k),
-                    "tier": int(v.get("value_tier", 3)),
+                    "tier": int(v.get("value_rank", 3)),
+                    "value_tier": v.get("value_tier"),
+                    "source": v.get("source"),
                 }
                 for k, v in value_bets.items()
             ],
             key=lambda z: -z["roi"],
         )[:6]
-        value_bets_display = []
+        value_signals: List[Dict[str, Any]] = []
+        seen_signal: set = set()
         for k, v in sorted(value_bets.items(), key=lambda kv: -kv[1].get("roi_percent", 0.0)):
+            if k in seen_signal:
+                continue
+            sig = dict(v)
+            sig["outcome"] = k
+            value_signals.append(sig)
+            seen_signal.add(k)
+        for k, v in sorted(value_bets_alt.items(), key=lambda kv: -kv[1].get("roi_percent", 0.0)):
+            if k in seen_signal:
+                continue
+            sig = dict(v)
+            sig["outcome"] = k
+            value_signals.append(sig)
+            seen_signal.add(k)
+        value_bets_display: List[Dict[str, Any]] = []
+        seen_display: set = set()
+        for k, v in sorted(value_bets.items(), key=lambda kv: -kv[1].get("roi_percent", 0.0)):
+            if k in seen_display:
+                continue
             row = dict(v)
             row["outcome"] = k
             value_bets_display.append(row)
+            seen_display.add(k)
+        for k, v in sorted(value_bets_alt.items(), key=lambda kv: -kv[1].get("roi_percent", 0.0)):
+            if k in seen_display:
+                continue
+            row = dict(v)
+            row["outcome"] = k
+            value_bets_display.append(row)
+            seen_display.add(k)
         line_odds: Dict[str, Any] = {}
         for _lk in ("btts_yes", "btts_no", "over15", "under15", "over25", "under25", "over35", "under35"):
             _lv = merged_book.get(_lk)
@@ -1212,10 +1384,13 @@ class BettingEngine:
             "bookmaker_odds": bookmaker_odds if bookmaker_odds else {"home": None, "draw": None, "away": None},
             "odds_source_bookmaker": has_book,
             "value_bets": value_bets,
+            "value_bets_alt": value_bets_alt,
+            "value_signals": value_signals,
+            "value_bets_alt_rejected": alt_rejected,
             "value_bets_display": value_bets_display,
             "value_highlights": value_highlights,
             "line_odds": line_odds,
-            "has_any_value": bool(value_bets),
+            "has_any_value": bool(value_bets) or bool(value_bets_alt),
             "best_bet": best_bet,
             "best_bet_roi": round(best_roi, 1),
             "data_quality": dq_bundle if dq_bundle else None,

@@ -503,7 +503,11 @@
         {% for bdata in p.value_bets_display %}
         <div style="background:rgba(255,215,0,0.04);border:1px solid rgba(255,215,0,0.14);border-radius:8px;padding:10px;margin-bottom:8px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                <strong style="color:var(--gold);font-size:0.8em;">{{ bdata.market_label }} @ <span data-odds-dec="{{ bdata.odds }}">{{ "%.2f"|format(bdata.odds) }}</span></strong>
+                <strong style="color:var(--gold);font-size:0.8em;">{{ bdata.market_label }} @ <span data-odds-dec="{{ bdata.odds }}">{{ "%.2f"|format(bdata.odds) }}</span>
+                {% if bdata.source == 'market_consensus' %}<span class="mpill" style="font-size:0.65em;">consensus</span>{% elif bdata.source == 'model_edge' %}<span class="mpill" style="font-size:0.65em;">model</span>{% endif %}
+                {% if bdata.value_tier == 'outsider' %}<span class="mpill" style="font-size:0.65em;">outsider</span>{% elif bdata.value_tier == 'favorite' %}<span class="mpill" style="font-size:0.65em;">core</span>{% endif %}
+                {% if bdata.value_dual_agree %}<span class="mpill" style="font-size:0.65em;">dual ✓</span>{% endif %}
+                </strong>
                 <span class="kelly-label kelly-{{ bdata.kelly.confidence_label|lower }}">{{ bdata.kelly.confidence_label }}</span>
             </div>
             <div class="market-pills" style="margin-bottom:5px;">
