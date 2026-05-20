@@ -1,7 +1,10 @@
 """
 Persistent prediction audit trail + post-match result join for calibration / ROI analysis.
 
-Enable with HIBS_PREDICTION_LOG_ENABLED=1. All logging is best-effort and must never break predictions.
+Enable with HIBS_PREDICTION_LOG_ENABLED=1. Optional CLV: HIBS_CLV_LOG_ENABLED=1 stores opening
+1X2 + best-bet odds at capture; pred-log-sync joins closing 1X2 from API-Football fixture odds
+when available and computes clv_pp (stake implied vs close, percentage points).
+All logging is best-effort and must never break predictions.
 """
 
 from __future__ import annotations
@@ -27,6 +30,11 @@ def _db_path() -> str:
 def _enabled() -> bool:
     load_dotenv()
     return os.getenv("HIBS_PREDICTION_LOG_ENABLED", "0").lower() in ("1", "true", "yes")
+
+
+def _clv_enabled() -> bool:
+    load_dotenv()
+    return os.getenv("HIBS_CLV_LOG_ENABLED", "0").lower() in ("1", "true", "yes")
 
 
 def _min_interval_sec() -> int:
@@ -111,11 +119,84 @@ def _kickoff_iso(fixture: Dict[str, Any]) -> str:
     return ""
 
 
-def _enrich_summary(fixture: Dict[str, Any]) -> Dict[str, Any]:
+def _implied_from_decimal(odds: Any) -> Optional[float]:
+    try:
+        o = float(odds)
+    except (TypeError, ValueError):
+        return None
+    if o <= 1.0:
+        return None
+    return 1.0 / o
+
+
+def compute_clv_pp(implied_open: Optional[float], implied_close: Optional[float]) -> Optional[float]:
+    """CLV in percentage points: positive when closing implied > stake (line moved toward your pick)."""
+    if implied_open is None or implied_close is None:
+        return None
+    return round((implied_close - implied_open) * 100.0, 2)
+
+
+def parse_closing_1x2_from_odds_response(odds_raw: Any) -> Dict[str, Optional[float]]:
+    """Best Match Winner prices across bookmakers in API-Football odds response."""
+    best: Dict[str, Optional[float]] = {"home": None, "draw": None, "away": None}
+    if not isinstance(odds_raw, list):
+        return best
+    for entry in odds_raw:
+        if not isinstance(entry, dict):
+            continue
+        for bm in entry.get("bookmakers", []) or []:
+            for bet in bm.get("bets", []) or []:
+                if bet.get("name") != "Match Winner":
+                    continue
+                for v in bet.get("values", []) or []:
+                    val = (v.get("value") or "").lower()
+                    try:
+                        price = float(v.get("odd", 0) or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    if price <= 1.0:
+                        continue
+                    if val in best:
+                        cur = best[val]
+                        best[val] = price if cur is None else max(cur, price)
+    return best
+
+
+def _clv_opening_capture(fixture: Dict[str, Any], prediction: Dict[str, Any]) -> Dict[str, Any]:
+    """Opening-line capture for CLV analysis."""
+    bo = prediction.get("bookmaker_odds") or {}
+    opening: Dict[str, Optional[float]] = {}
+    for side in ("home", "draw", "away"):
+        raw = bo.get(side)
+        try:
+            opening[side] = float(raw) if raw is not None and float(raw) > 1.0 else None
+        except (TypeError, ValueError):
+            opening[side] = None
+    best = prediction.get("best_bet")
+    best_row = (prediction.get("value_bets") or {}).get(best) if best else None
+    best_odds = None
+    if isinstance(best_row, dict):
+        try:
+            o = best_row.get("odds")
+            best_odds = float(o) if o is not None and float(o) > 1.0 else None
+        except (TypeError, ValueError):
+            best_odds = None
+    return {
+        "opening_odds_1x2": opening,
+        "best_bet_outcome": best,
+        "best_bet_odds": best_odds,
+        "best_bet_edge_pct": (best_row or {}).get("edge_pct") if isinstance(best_row, dict) else None,
+        "odds_cross_max_implied_diff_pct": float(fixture.get("odds_cross_max_implied_diff_pct") or 0.0),
+        "closing_odds_1x2": None,
+        "clv_pp": None,
+    }
+
+
+def _enrich_summary(fixture: Dict[str, Any], prediction: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     dq = fixture.get("data_quality") or {}
     hp = fixture.get("home_position") or {}
     ap = fixture.get("away_position") or {}
-    return {
+    out: Dict[str, Any] = {
         "home_recent_n": int(fixture.get("home_recent_n") or 0),
         "away_recent_n": int(fixture.get("away_recent_n") or 0),
         "odds_available": bool(fixture.get("odds_available")),
@@ -126,6 +207,9 @@ def _enrich_summary(fixture: Dict[str, Any]) -> Dict[str, Any]:
         "data_quality_pct": float(dq.get("score_pct") or 0),
         "full_scope": bool(dq.get("full_scope")),
     }
+    if _clv_enabled() and prediction:
+        out["clv"] = _clv_opening_capture(fixture, prediction)
+    return out
 
 
 def maybe_log_prediction_snapshot(fixture: Dict[str, Any], prediction: Dict[str, Any]) -> None:
@@ -168,7 +252,7 @@ def maybe_log_prediction_snapshot(fixture: Dict[str, Any], prediction: Dict[str,
             dq = fixture.get("data_quality") or {}
             dq_pct = float(dq.get("score_pct") or 0)
             pred_json = json.dumps(prediction, default=str)
-            sum_json = json.dumps(_enrich_summary(fixture), default=str)
+            sum_json = json.dumps(_enrich_summary(fixture, prediction), default=str)
             conn.execute(
                 """
                 INSERT INTO prediction_snapshots (
@@ -219,9 +303,29 @@ def _parse_kickoff_iso(iso: str) -> Optional[datetime]:
         return None
 
 
+def _apply_clv_to_enrich_summary(
+    enrich: Dict[str, Any],
+    closing: Dict[str, Optional[float]],
+) -> Dict[str, Any]:
+    clv = enrich.get("clv")
+    if not isinstance(clv, dict):
+        return enrich
+    opening = clv.get("opening_odds_1x2") or {}
+    clv["closing_odds_1x2"] = closing
+    outcome = clv.get("best_bet_outcome")
+    open_odds = clv.get("best_bet_odds")
+    close_side = closing.get(str(outcome)) if outcome else None
+    impl_open = _implied_from_decimal(open_odds)
+    impl_close = _implied_from_decimal(close_side)
+    clv["clv_pp"] = compute_clv_pp(impl_open, impl_close)
+    enrich["clv"] = clv
+    return enrich
+
+
 def sync_finished_results(
     fetch_fixture_fn: Any,
     *,
+    fetch_odds_fn: Any = None,
     max_fixtures: int = 400,
     min_after_kickoff_hours: float = 2.5,
 ) -> int:
@@ -229,6 +333,7 @@ def sync_finished_results(
     For snapshots missing results, fetch fixture status via API and fill goals when FT.
 
     ``fetch_fixture_fn``: ``ApiSportsFootballClient.fetch_fixture`` (fixture_id -> raw response row).
+    ``fetch_odds_fn``: optional ``fetch_odds`` for closing 1X2 when ``HIBS_CLV_LOG_ENABLED=1``.
     Returns number of snapshot rows updated (can be > distinct fixtures if multiple pending rows).
     """
     path = _db_path()
@@ -288,6 +393,32 @@ def sync_finished_results(
                 )
                 updated += cur.rowcount if cur.rowcount else 0
                 conn.commit()
+                if _clv_enabled() and fetch_odds_fn is not None:
+                    try:
+                        odds_raw = fetch_odds_fn(fid_int)
+                        closing = parse_closing_1x2_from_odds_response(odds_raw)
+                    except Exception:
+                        closing = {"home": None, "draw": None, "away": None}
+                    snap_rows = conn.execute(
+                        """
+                        SELECT id, enrich_summary_json FROM prediction_snapshots
+                        WHERE fixture_id=? AND enrich_summary_json IS NOT NULL
+                        """,
+                        (fid_int,),
+                    ).fetchall()
+                    for sr in snap_rows:
+                        try:
+                            enrich = json.loads(sr["enrich_summary_json"])
+                        except Exception:
+                            continue
+                        if not isinstance(enrich, dict) or "clv" not in enrich:
+                            continue
+                        enrich = _apply_clv_to_enrich_summary(enrich, closing)
+                        conn.execute(
+                            "UPDATE prediction_snapshots SET enrich_summary_json=? WHERE id=?",
+                            (json.dumps(enrich, default=str), sr["id"]),
+                        )
+                    conn.commit()
     finally:
         conn.close()
     return updated
@@ -347,6 +478,7 @@ def report_summary_dict() -> Dict[str, Any]:
             "n_used_metrics": 0,
             "message": "No rows with recorded results yet. Run pred-log-sync.",
             "brier_by_data_quality_bucket": brier_by_data_quality_bucket(),
+            "clv_by_league": clv_beat_close_by_league(),
         }
 
     brier_sum = 0.0
@@ -386,6 +518,7 @@ def report_summary_dict() -> Dict[str, Any]:
             "n_used_metrics": 0,
             "message": "No rows with parseable 1X2 results yet. Run pred-log-sync after matches finish.",
             "brier_by_data_quality_bucket": brier_by_data_quality_bucket(),
+            "clv_by_league": clv_beat_close_by_league(),
         }
 
     n_eff = max(1, n_used)
@@ -401,7 +534,73 @@ def report_summary_dict() -> Dict[str, Any]:
     }
     if value_attempts:
         out["value_hit_rate"] = round(100.0 * value_wins / value_attempts, 2)
+    out["clv_by_league"] = clv_beat_close_by_league()
     return out
+
+
+def clv_beat_close_by_league() -> Dict[str, Any]:
+    """CLV beat-close rate and mean clv_pp grouped by league (requires HIBS_CLV_LOG_ENABLED snapshots)."""
+    if not os.path.isfile(_db_path()):
+        return {"enabled": False, "leagues": []}
+    init_db()
+    conn = sqlite3.connect(_db_path(), timeout=20)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT league_code, enrich_summary_json
+            FROM prediction_snapshots
+            WHERE enrich_summary_json IS NOT NULL AND enrich_summary_json != ''
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    by_league: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        try:
+            enrich = json.loads(r["enrich_summary_json"])
+        except Exception:
+            continue
+        clv = enrich.get("clv") if isinstance(enrich, dict) else None
+        if not isinstance(clv, dict):
+            continue
+        pp = clv.get("clv_pp")
+        if pp is None:
+            continue
+        try:
+            pp_f = float(pp)
+        except (TypeError, ValueError):
+            continue
+        lg = str(r["league_code"] or "unknown")
+        bucket = by_league.setdefault(lg, {"n": 0, "beat_close": 0, "clv_pp_sum": 0.0})
+        bucket["n"] += 1
+        bucket["clv_pp_sum"] += pp_f
+        if pp_f > 0:
+            bucket["beat_close"] += 1
+
+    leagues_out: List[Dict[str, Any]] = []
+    total_n = 0
+    total_beat = 0
+    for lg, b in sorted(by_league.items(), key=lambda x: -x[1]["n"]):
+        n = int(b["n"])
+        beat = int(b["beat_close"])
+        total_n += n
+        total_beat += beat
+        leagues_out.append(
+            {
+                "league": lg,
+                "n_clv": n,
+                "beat_close_pct": round(100.0 * beat / n, 2) if n else None,
+                "avg_clv_pp": round(b["clv_pp_sum"] / n, 2) if n else None,
+            }
+        )
+    return {
+        "enabled": _clv_enabled(),
+        "n_clv_rows": total_n,
+        "beat_close_pct": round(100.0 * total_beat / total_n, 2) if total_n else None,
+        "leagues": leagues_out,
+    }
 
 
 def export_scored_csv(target_path: str) -> int:

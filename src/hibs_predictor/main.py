@@ -294,6 +294,7 @@ def run_pred_log_sync(args: argparse.Namespace) -> None:
         sys.exit(1)
     n = sync_finished_results(
         agg.clients["api_sports"].fetch_fixture,
+        fetch_odds_fn=agg.clients["api_sports"].fetch_odds,
         max_fixtures=int(args.max_fixtures),
         min_after_kickoff_hours=float(args.min_after_kickoff_hours),
     )

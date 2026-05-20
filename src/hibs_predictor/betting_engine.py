@@ -17,6 +17,75 @@ def _allow_dummy_numeric() -> bool:
     return (os.getenv("HIBS_ALLOW_DUMMY") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _value_markets_enabled() -> set:
+    raw = (os.getenv("HIBS_VALUE_MARKETS") or "1x2,btts,ou").strip().lower()
+    tokens = {t.strip() for t in raw.split(",") if t.strip()}
+    if not tokens:
+        tokens = {"1x2", "btts", "ou"}
+    return tokens
+
+
+def _value_league_allowed(league_code: str) -> bool:
+    raw = (os.getenv("HIBS_VALUE_LEAGUES") or "").strip()
+    if not raw:
+        return True
+    allowed = {x.strip().upper() for x in raw.split(",") if x.strip()}
+    return str(league_code or "").strip().upper() in allowed
+
+
+def _is_cup_or_playoff_fixture(fixture: Dict[str, Any]) -> bool:
+    meta = fixture.get("competition_meta") or {}
+    if not isinstance(meta, dict):
+        return False
+    rnd = str(meta.get("api_round") or "").lower()
+    if not rnd:
+        return False
+    markers = (
+        "final",
+        "semi",
+        "quarter",
+        "round of",
+        "play-off",
+        "playoff",
+        "knockout",
+        "cup",
+    )
+    return any(m in rnd for m in markers)
+
+
+def _real_xg_source(xg_source: Any) -> bool:
+    s = str(xg_source or "").lower()
+    return s in ("understat_xg", "api_xg", "stats_api_xg") or "api" in s and "xg" in s
+
+
+def _best_1x2_odds_from_fixture(fixture: Dict[str, Any]) -> Dict[str, float]:
+    """Line-shopped best prices for 1X2 (falls back to fixture triplet)."""
+    best = fixture.get("best_odds_1x2") or {}
+    out: Dict[str, float] = {}
+    for side in ("home", "draw", "away"):
+        raw = best.get(side)
+        if raw is None:
+            raw = fixture.get(f"odds_{side}")
+        try:
+            fv = float(raw) if raw is not None else 0.0
+        except (TypeError, ValueError):
+            continue
+        if fv > 1.0:
+            out[side] = fv
+    return out
+
+
+def _odds_cross_reject_pct() -> float:
+    return _env_float("HIBS_ODDS_CROSS_REJECT_PCT", 10.0)
+
+
 def _fixture_team_display_name(fixture: Dict[str, Any], side: str) -> str:
     blk = fixture.get(side)
     if isinstance(blk, dict):
@@ -540,13 +609,36 @@ class BettingEngine:
         margin: float,
         dq_pct: float,
         dq_known: bool,
+        *,
+        markets_enabled: Optional[set] = None,
+        cross_pct: float = 0.0,
+        xg_source: Any = None,
     ) -> Tuple[Dict[str, Any], Dict[str, str]]:
         filtered: Dict[str, Any] = {}
         rejected: Dict[str, str] = {}
         if dq_known and dq_pct < 68.0:
             return {}, {k: "data_quality_below_value_floor" for k in value_bets}
 
+        enabled = markets_enabled if markets_enabled is not None else _value_markets_enabled()
+        cross_limit = _odds_cross_reject_pct()
+        steam = cross_pct >= cross_limit
+        real_xg = _real_xg_source(xg_source or fixture.get("xg_source"))
+        btts_ou_margin_discount = 0.012 if real_xg else 0.0
+
         for outcome, row in value_bets.items():
+            if outcome in ("home", "draw", "away") and "1x2" not in enabled:
+                rejected[outcome] = "market_disabled_by_env"
+                continue
+            if outcome.startswith(("btts_", "home_and_btts", "draw_and_btts", "away_and_btts")):
+                if "btts" not in enabled:
+                    rejected[outcome] = "market_disabled_by_env"
+                    continue
+            if outcome.startswith(("over", "under")) and "ou" not in enabled:
+                rejected[outcome] = "market_disabled_by_env"
+                continue
+            if steam:
+                rejected[outcome] = "odds_cross_book_disagreement"
+                continue
             model_prob = float(merged_model.get(outcome, row.get("model_probability") or 0.0))
             odds = cls._safe_float(row.get("odds"), 0.0) or 0.0
             edge = cls._safe_float(row.get("edge"), 0.0) or 0.0
@@ -556,6 +648,8 @@ class BettingEngine:
                 continue
 
             required_edge = max(margin, 0.05 if outcome in ("home", "draw", "away") else margin)
+            if outcome.startswith(("btts_", "over", "under")) and btts_ou_margin_discount > 0:
+                required_edge = max(0.03, required_edge - btts_ou_margin_discount)
             if model_prob < 0.35:
                 required_edge += (0.35 - model_prob) * 0.22
             if odds > 4.5:
@@ -913,25 +1007,15 @@ class BettingEngine:
         ensemble_probs, league_profile_debug = apply_league_probability_profile(ensemble_probs, league_code)
         matchup_context = self._matchup_context(fixture, metadata, xg_home, xg_away)
         ensemble_probs, mismatch_calibration = self._apply_mismatch_calibration(ensemble_probs, matchup_context)
-        oh_raw, od_raw, oa_raw = fixture.get("odds_home"), fixture.get("odds_draw"), fixture.get("odds_away")
-        has_book = bool(
-            fixture.get("odds_available")
-            or (
-                oh_raw is not None and od_raw is not None and oa_raw is not None
-                and float(oh_raw) > 1.0 and float(od_raw) > 1.0 and float(oa_raw) > 1.0
+        bookmaker_odds = _best_1x2_odds_from_fixture(fixture)
+        has_book = len(bookmaker_odds) == 3
+        try:
+            cross_pct = max(
+                float(fixture.get("odds_cross_max_implied_diff_pct") or 0.0),
+                float(fixture.get("odds_cross_book_max_implied_diff_pct") or 0.0),
             )
-        )
-        bookmaker_odds: Dict[str, float] = {}
-        if has_book:
-            try:
-                bookmaker_odds = {
-                    "home": float(oh_raw),
-                    "draw": float(od_raw),
-                    "away": float(oa_raw),
-                }
-            except (TypeError, ValueError):
-                bookmaker_odds = {}
-                has_book = False
+        except (TypeError, ValueError):
+            cross_pct = 0.0
         if has_book and bookmaker_odds:
             try:
                 blend = float(os.getenv("HIBS_CALIB_MARKET_BLEND", "0.08"))
@@ -1013,14 +1097,9 @@ class BettingEngine:
             dq_min_boost = float(os.getenv("HIBS_MIN_DATA_QUALITY_PCT", "58"))
         except ValueError:
             dq_min_boost = 58.0
-        try:
-            dq_val_req = float(os.getenv("HIBS_VALUE_REQUIRE_DATA_PCT", "72"))
-        except ValueError:
-            dq_val_req = 72.0
-        try:
-            base_margin = float(os.getenv("HIBS_VALUE_EDGE_MARGIN", "0.04"))
-        except ValueError:
-            base_margin = 0.04
+        dq_val_req = _env_float("HIBS_VALUE_REQUIRE_DATA_PCT", 78.0)
+        base_margin = _env_float("HIBS_VALUE_EDGE_MARGIN", 0.05)
+        cup_dq_floor = _env_float("HIBS_VALUE_CUP_DQ_PCT", 82.0)
         avg_n = (n_home + n_away) / 2.0
         conf_scale = min(1.0, max(0.4, avg_n / 8.0))
         margin = base_margin + (1.0 - conf_scale) * 0.02
@@ -1031,6 +1110,15 @@ class BettingEngine:
         margin = min(0.14, margin)
         value_bets = OddsAnalyzer.identify_value_bets(merged_model, merged_book, margin=margin) if merged_book else {}
         dq_known = bool(dq_bundle and dq_bundle.get("score_pct") is not None)
+        markets_enabled = _value_markets_enabled()
+        league_code_val = str(fixture.get("league") or league_code or "")
+        portfolio_reject: Dict[str, str] = {}
+        if not _value_league_allowed(league_code_val):
+            portfolio_reject = {k: "league_not_in_value_allowlist" for k in value_bets}
+            value_bets = {}
+        elif _is_cup_or_playoff_fixture(fixture) and dq_known and dq_pct < cup_dq_floor:
+            portfolio_reject = {k: "cup_playoff_low_data_quality" for k in value_bets}
+            value_bets = {}
         filtered_value_bets, rejected_value_bets = self._filter_value_bets(
             value_bets,
             fixture,
@@ -1039,12 +1127,17 @@ class BettingEngine:
             margin,
             dq_pct,
             dq_known,
+            markets_enabled=markets_enabled,
+            cross_pct=cross_pct,
+            xg_source=fixture.get("xg_source"),
         )
+        if portfolio_reject:
+            rejected_value_bets = {**portfolio_reject, **rejected_value_bets}
         value_bets = filtered_value_bets
         gated_values = dq_val_req > 0 and dq_pct < dq_val_req
         if gated_values:
             value_bets = {}
-            rejected_value_bets = {k: "data_quality_env_gate" for k in filtered_value_bets}
+            rejected_value_bets = {**{k: "data_quality_env_gate" for k in filtered_value_bets}, **rejected_value_bets}
         confidence = max(ensemble_probs.values())
         predicted_outcome = max(ensemble_probs, key=ensemble_probs.get)
         best_bet = max(value_bets, key=lambda x: value_bets[x].get("roi_percent", 0)) if value_bets else None

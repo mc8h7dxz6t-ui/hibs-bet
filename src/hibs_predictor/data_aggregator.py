@@ -275,8 +275,12 @@ def _empty_odds_bundle() -> Dict[str, Any]:
         "all_bookmaker_odds": [],
         "odds_secondary": {"home": None, "draw": None, "away": None},
         "odds_cross_max_implied_diff_pct": 0.0,
+        "odds_cross_book_max_implied_diff_pct": 0.0,
         "odds_primary_source": "partial",
         "market_odds": {},
+        "best_odds_1x2": {"home": None, "draw": None, "away": None},
+        "best_odds_source": {"home": None, "draw": None, "away": None},
+        "sharp_anchor_implied": {},
     }
 
 
@@ -294,6 +298,80 @@ def _max_implied_delta_pct(
     for p, q in ((a, x), (b, y), (c, z)):
         d = max(d, abs(_implied_prob(p) - _implied_prob(q)) * 100.0)
     return round(d, 2)
+
+
+def compute_best_line_from_bookmakers(
+    all_bookmakers: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Best decimal price per 1X2 outcome across bookmaker rows, plus cross-book disagreement.
+
+    Returns keys: best_odds_1x2, best_odds_source, odds_cross_book_max_implied_diff_pct,
+    sharp_anchor_implied (median de-vig 1X2 or Pinnacle when listed).
+    """
+    sides = ("home", "draw", "away")
+    best: Dict[str, Optional[float]] = {s: None for s in sides}
+    source: Dict[str, Optional[str]] = {s: None for s in sides}
+    by_side_prices: Dict[str, List[float]] = {s: [] for s in sides}
+    pinnacle: Dict[str, Optional[float]] = {s: None for s in sides}
+
+    for row in all_bookmakers or []:
+        if not isinstance(row, dict):
+            continue
+        bm_name = str(row.get("bookmaker") or row.get("name") or "").strip()
+        is_pinnacle = "pinnacle" in bm_name.lower()
+        for side in sides:
+            raw = row.get(side)
+            try:
+                price = float(raw) if raw is not None else 0.0
+            except (TypeError, ValueError):
+                continue
+            if price <= 1.0:
+                continue
+            by_side_prices[side].append(price)
+            if is_pinnacle:
+                cur = pinnacle.get(side)
+                pinnacle[side] = price if cur is None else max(cur, price)
+            cur_best = best[side]
+            if cur_best is None or price > cur_best:
+                best[side] = price
+                source[side] = bm_name or row.get("source") or "unknown"
+
+    cross = 0.0
+    for side in sides:
+        prices = by_side_prices[side]
+        if len(prices) < 2:
+            continue
+        impls = [_implied_prob(p) for p in prices if p > 1.0]
+        if len(impls) >= 2:
+            cross = max(cross, (max(impls) - min(impls)) * 100.0)
+
+    sharp: Dict[str, float] = {}
+    if all(pinnacle.get(s) and pinnacle[s] > 1.0 for s in sides):
+        raw_impl = {s: _implied_prob(float(pinnacle[s])) for s in sides}  # type: ignore[arg-type]
+        s = sum(raw_impl.values())
+        if s > 0:
+            sharp = {k: raw_impl[k] / s for k in raw_impl}
+    else:
+        med_odds: Dict[str, float] = {}
+        for side in sides:
+            prices = sorted(by_side_prices[side])
+            if not prices:
+                continue
+            mid = prices[len(prices) // 2]
+            med_odds[side] = mid
+        if len(med_odds) == 3:
+            raw_impl = {k: _implied_prob(v) for k, v in med_odds.items()}
+            s = sum(raw_impl.values())
+            if s > 0:
+                sharp = {k: raw_impl[k] / s for k in raw_impl}
+
+    return {
+        "best_odds_1x2": best,
+        "best_odds_source": source,
+        "odds_cross_book_max_implied_diff_pct": round(cross, 2),
+        "sharp_anchor_implied": sharp,
+    }
 
 
 def _parse_api_sports_side_markets(odds_data: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -661,8 +739,12 @@ class DataAggregator:
         enriched["all_bookmaker_odds"] = bundle["all_bookmaker_odds"]
         enriched["odds_secondary"] = bundle["odds_secondary"]
         enriched["odds_cross_max_implied_diff_pct"] = bundle["odds_cross_max_implied_diff_pct"]
+        enriched["odds_cross_book_max_implied_diff_pct"] = bundle.get("odds_cross_book_max_implied_diff_pct", 0.0)
         enriched["odds_primary_source"] = bundle["odds_primary_source"]
         enriched["market_odds"] = bundle["market_odds"]
+        enriched["best_odds_1x2"] = bundle.get("best_odds_1x2") or {}
+        enriched["best_odds_source"] = bundle.get("best_odds_source") or {}
+        enriched["sharp_anchor_implied"] = bundle.get("sharp_anchor_implied") or {}
         enriched["league_factor"] = league.get("strength_factor", 1.0)
         try:
             fid_int = int(raw_fid) if raw_fid not in (None, "", "0", 0) else 0
@@ -1105,6 +1187,18 @@ class DataAggregator:
             sa = oa_away if pa == as_away and oa_away else (as_away if pa == oa_away and as_away else None)
             primary_src = "partial"
 
+        line_shop = compute_best_line_from_bookmakers(all_bookmakers)
+        best_1x2 = line_shop.get("best_odds_1x2") or {}
+        bh = best_1x2.get("home")
+        bd = best_1x2.get("draw")
+        ba = best_1x2.get("away")
+        best_ok = bool(bh and bd and ba and bh > 1 and bd > 1 and ba > 1)
+        if best_ok:
+            ph, pd, pa = bh, bd, ba
+            primary_src = "line_shop_best"
+        cross_book = float(line_shop.get("odds_cross_book_max_implied_diff_pct") or 0.0)
+        cross = max(float(cross), cross_book)
+
         avail = bool(ph and pd and pa and ph > 1 and pd > 1 and pa > 1)
         bundle = {
             "odds_home": ph,
@@ -1114,8 +1208,12 @@ class DataAggregator:
             "all_bookmaker_odds": all_bookmakers,
             "odds_secondary": {"home": sh, "draw": sd, "away": sa},
             "odds_cross_max_implied_diff_pct": cross,
+            "odds_cross_book_max_implied_diff_pct": cross_book,
             "odds_primary_source": primary_src,
             "market_odds": market_odds,
+            "best_odds_1x2": line_shop.get("best_odds_1x2"),
+            "best_odds_source": line_shop.get("best_odds_source"),
+            "sharp_anchor_implied": line_shop.get("sharp_anchor_implied") or {},
         }
         self.cache.set(cache_key, bundle, ttl_hours=1)
         return bundle
