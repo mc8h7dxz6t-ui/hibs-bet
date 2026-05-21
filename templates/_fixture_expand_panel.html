@@ -250,7 +250,8 @@
                 <td><strong>{{ hp.position }}</strong></td>
                 <td>{{ hp.played }}</td><td>{{ hp.won }}</td><td>{{ hp.drawn }}</td><td>{{ hp.lost }}</td>
                 <td>{{ hp.goals_for }}</td><td>{{ hp.goals_against }}</td>
-                <td>{{ "+"|string + hp.goal_diff|string if hp.goal_diff > 0 else hp.goal_diff }}</td>
+                {% set hp_gd = hp.get('goal_diff', 0) if hp is mapping else (hp.goal_diff|default(0)) %}
+                <td>{{ "+"|string + hp_gd|string if hp_gd > 0 else hp_gd }}</td>
                 <td><strong>{{ hp.points }}</strong></td>
                 <td>
                     {% if hp.form %}
@@ -267,7 +268,8 @@
                 <td><strong>{{ ap.position }}</strong></td>
                 <td>{{ ap.played }}</td><td>{{ ap.won }}</td><td>{{ ap.drawn }}</td><td>{{ ap.lost }}</td>
                 <td>{{ ap.goals_for }}</td><td>{{ ap.goals_against }}</td>
-                <td>{{ "+"|string + ap.goal_diff|string if ap.goal_diff > 0 else ap.goal_diff }}</td>
+                {% set ap_gd = ap.get('goal_diff', 0) if ap is mapping else (ap.goal_diff|default(0)) %}
+                <td>{{ "+"|string + ap_gd|string if ap_gd > 0 else ap_gd }}</td>
                 <td><strong>{{ ap.points }}</strong></td>
                 <td>
                     {% if ap.form %}
