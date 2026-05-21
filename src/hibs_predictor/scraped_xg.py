@@ -34,12 +34,21 @@ def _avg_team_xg_from_recent(matches: List[Dict[str, Any]], team_id: int, min_sa
     return sum(vals) / len(vals)
 
 
-def _statsbomb_xg_enabled() -> bool:
+def _statsbomb_xg_enabled(league_code: str = "") -> bool:
+    """Mirror supplemental ``_statsbomb_team_proxy_on``: cups default-on; else light/max-data."""
     raw = (os.getenv("HIBS_ENABLE_STATSBOMB_LIGHT") or "").strip().lower()
     if raw in ("0", "false", "no", "off"):
         return False
     if raw in ("1", "true", "yes", "on"):
         return True
+    if league_code:
+        try:
+            from hibs_predictor.scrapers import statsbomb_open as sb
+
+            if league_code in sb.STATSBOMB_CUP_LEAGUES:
+                return True
+        except Exception:
+            pass
     return _env_on("HIBS_MAX_DATA", "0")
 
 
@@ -203,7 +212,7 @@ def resolve_scraped_xg(
             src = str(sup_fbref.get("source") or "fbref_schedule_xg")
             return pair[0], pair[1], src, meta
 
-    if _statsbomb_xg_enabled():
+    if _statsbomb_xg_enabled(league_code):
         sb_proxy = sup.get("statsbomb_open_team_proxy") if isinstance(sup, dict) else None
         pair = _xg_from_statsbomb_proxy(sb_proxy, enriched)
         if pair:
