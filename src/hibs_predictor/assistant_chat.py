@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from hibs_predictor.acca_review import review_acca_legs
 from hibs_predictor.assistant_context import (
+    _live_snippet,
     acca_greeting_lines,
     build_acca_candidates,
     build_acca_window_summary,
@@ -264,7 +265,11 @@ def parse_intent(question: str) -> Tuple[str, Dict[str, Any]]:
         return "acca", {"type": "win"}
     if any(x in q for x in ("review acca", "review slip", "review my acca", "review betslip", "acca review", "review legs")):
         return "acca_review", {}
-    if any(x in q for x in ("value bet", "value scan", "edge", "ev ")):
+    if any(x in q for x in ("in play", "in-play", "live score", "live game", "live match")) or (
+        "live" in q and any(x in q for x in ("fixture", "game", "match", "score", "now"))
+    ):
+        return "live", {}
+    if any(x in q for x in ("value bet", "value scan", "edge", "ev ", "dual agree", "dual finder")):
         return "value", {}
     if any(x in q for x in ("best single", "best bet", "top bet", "best pick", "strongest bet")):
         return "best_singles", {}
@@ -475,12 +480,40 @@ def handle_chat(
             out["blocks"] = [{"type": "builders", "items": builders}]
         return out
 
+    if intent == "live":
+        live_hits = [p for p in packets if p.get("is_live")]
+        if not live_hits:
+            out["blocks"] = [
+                {
+                    "type": "text",
+                    "lines": ["No in-play fixtures in the current window — refresh during match hours."],
+                }
+            ]
+        else:
+            lines = [f"**{len(live_hits)}** fixture(s) in play:"]
+            for pkt in live_hits[:12]:
+                snip = _live_snippet(pkt)
+                if snip:
+                    lines.append(f"{_match_label(pkt)} — {snip}.")
+            out["blocks"] = [
+                {"type": "text", "lines": lines},
+                {"type": "fixtures", "items": live_hits[:10], "compact": False},
+            ]
+        return out
+
     if intent == "value":
         hits = [p for p in packets if p.get("has_value_bet") and is_analyzable(p)]
+        dual = [p for p in hits if p.get("has_value_dual_agree")]
         if not hits:
             out["blocks"] = [{"type": "text", "lines": ["No value-flagged fixtures with full model data in this window."]}]
         else:
-            out["blocks"] = [{"type": "fixtures", "items": hits[:10], "compact": True}]
+            intro = [f"**{len(hits)}** value-flagged fixture(s) with full model data."]
+            if dual:
+                intro.append(f"**{len(dual)}** with dual-finder agreement (model + consensus).")
+            out["blocks"] = [
+                {"type": "text", "lines": intro},
+                {"type": "fixtures", "items": hits[:10], "compact": True},
+            ]
         return out
 
     if intent in ("stats", "analyze", "general", "table"):

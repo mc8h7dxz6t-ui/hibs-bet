@@ -36,6 +36,9 @@
         } else if (Array.isArray(raw)) {
             packets = raw;
         }
+        if (raw && raw.fixtures_summary && raw.fixtures_summary.length && !packets.length) {
+            packets = raw.fixtures_summary;
+        }
     }
 
     function togglePanel() {
@@ -460,11 +463,26 @@
         if (si.confidence_pct != null) {
             html += '<p class="ac-line"><strong>Confidence:</strong> ' + si.confidence_pct + '%</p>';
         }
+        if (pkt.is_live) {
+            html += '<p class="ac-line" style="color:var(--neon-value);font-size:0.88em;"><span class="live-dot"></span> LIVE';
+            if (pkt.live_score) html += ' ' + esc(pkt.live_score);
+            if (pkt.live_status) html += ' · ' + esc(pkt.live_status);
+            if (pkt.live_minute != null) html += ' ' + pkt.live_minute + "'";
+            html += '</p>';
+        }
         if (pkt.data_quality_pct != null) {
             html += '<p class="ac-line" style="font-size:0.88em;">Data <span class="fr-dq fr-dq-compact ' + dqBadgeClass(pkt.data_quality_pct) + '">' + pkt.data_quality_pct + '%</span></p>';
         }
-        if (pkt.xg_source) {
+        if (pkt.bet_confidence != null) {
+            html += '<p class="ac-line" style="font-size:0.84em;">Bet confidence: <strong>' + pkt.bet_confidence + '%</strong></p>';
+        }
+        if (pkt.sources_summary) {
+            html += '<p class="ac-line" style="font-size:0.82em;color:var(--muted);">Sources: ' + esc(pkt.sources_summary) + '</p>';
+        } else if (pkt.xg_source) {
             html += '<p class="ac-line" style="font-size:0.84em;color:var(--muted);">xG source: ' + esc(pkt.xg_source) + '</p>';
+        }
+        if (pkt.has_value_dual_agree) {
+            html += '<p class="ac-line" style="font-size:0.84em;color:var(--gold);">Dual finder agree on value</p>';
         }
         if (si.rationale_metrics && si.rationale_metrics.length && !compact) {
             html += '<ul style="font-size:0.86em;">';

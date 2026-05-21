@@ -750,21 +750,67 @@ def _form_summary(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     return summary
 
 
+def _wdl_string(rows: List[Dict[str, Any]]) -> str:
+    letters: List[str] = []
+    for r in rows or []:
+        res = str(r.get("result") or "").upper()
+        if res in ("W", "D", "L"):
+            letters.append(res)
+        if len(letters) >= 10:
+            break
+    return "".join(letters)
+
+
+def _competition_display(fixture_row: Dict[str, Any]) -> str:
+    title = fixture_row.get("league_name") or fixture_row.get("league") or ""
+    meta = fixture_row.get("competition_meta") if isinstance(fixture_row.get("competition_meta"), dict) else {}
+    rnd = meta.get("api_round") or meta.get("round")
+    if rnd and title:
+        return f"{title} · {rnd}"
+    return str(title) if title else str(fixture_row.get("league") or "")
+
+
+def _supplemental_tags(sup: Any) -> List[str]:
+    if not isinstance(sup, dict):
+        return []
+    tags: List[str] = []
+    for key, label in (
+        ("understat", "understat"),
+        ("understat_light", "understat"),
+        ("wikipedia_positions", "wikipedia"),
+        ("soccerstats_positions", "soccerstats"),
+        ("fbref_schedule", "fbref"),
+        ("fbref_home_squad", "fbref"),
+        ("statsbomb_open_team_proxy", "statsbomb"),
+        ("sofascore_xg", "sofascore"),
+    ):
+        if sup.get(key):
+            tags.append(label)
+    return sorted(set(tags))
+
+
+def _packet_has_value_dual_agree(value_bets_display: List[Any], value_bets: Any = None) -> bool:
+    for v in value_bets_display or []:
+        if isinstance(v, dict) and v.get("value_dual_agree"):
+            return True
+    if isinstance(value_bets, dict):
+        for row in value_bets.values():
+            if isinstance(row, dict) and row.get("value_dual_agree"):
+                return True
+    return False
+
+
 def build_assistant_packet(fixture_row: Dict[str, Any]) -> Dict[str, Any]:
     """Single fixture payload for Betting Assistant + API."""
     p = fixture_row.get("prediction") or {}
-    fix = {
-        "league": fixture_row.get("league"),
-        "home": fixture_row.get("home"),
-        "away": fixture_row.get("away"),
-        "home_recent_n": len(fixture_row.get("home_last10") or []),
-        "away_recent_n": len(fixture_row.get("away_last10") or []),
-        "data_quality": fixture_row.get("data_quality"),
-        "home_btts_rate": p.get("home_btts_rate"),
-        "away_btts_rate": p.get("away_btts_rate"),
-        "home_position": fixture_row.get("home_position"),
-        "away_position": fixture_row.get("away_position"),
-    }
+    ps = p.get("probability_scores") or {}
+    dq = fixture_row.get("data_quality") or {}
+    home_last10 = fixture_row.get("home_last10") or []
+    away_last10 = fixture_row.get("away_last10") or []
+    value_bets_display = p.get("value_bets_display") or []
+    value_bets = p.get("value_bets") or {}
+    hist = p.get("historic_calibration") if isinstance(p.get("historic_calibration"), dict) else {}
+    shrink = hist.get("calibration_shrink") if isinstance(hist.get("calibration_shrink"), dict) else None
     return {
         "id": fixture_row.get("id"),
         "home": fixture_row.get("home"),
@@ -773,31 +819,57 @@ def build_assistant_packet(fixture_row: Dict[str, Any]) -> Dict[str, Any]:
         "kickoff_time": fixture_row.get("kickoff_time"),
         "league": fixture_row.get("league"),
         "league_name": fixture_row.get("league_name"),
-        "home_recent_n": len(fixture_row.get("home_last10") or []),
-        "away_recent_n": len(fixture_row.get("away_last10") or []),
-        "home_form": _compact_result_rows(fixture_row.get("home_last10") or []),
-        "away_form": _compact_result_rows(fixture_row.get("away_last10") or []),
-        "home_form_summary": _form_summary(fixture_row.get("home_last10") or []),
-        "away_form_summary": _form_summary(fixture_row.get("away_last10") or []),
+        "competition_display": _competition_display(fixture_row),
+        "competition_meta": fixture_row.get("competition_meta") or {},
+        "home_recent_n": len(home_last10),
+        "away_recent_n": len(away_last10),
+        "home_last10_wdl": _wdl_string(home_last10),
+        "away_last10_wdl": _wdl_string(away_last10),
+        "home_form": _compact_result_rows(home_last10),
+        "away_form": _compact_result_rows(away_last10),
+        "home_form_summary": _form_summary(home_last10),
+        "away_form_summary": _form_summary(away_last10),
         "home_position": fixture_row.get("home_position") or {},
         "away_position": fixture_row.get("away_position") or {},
         "fixture_injuries": fixture_row.get("fixture_injuries") or [],
         "xg_source": fixture_row.get("xg_source"),
         "structured_insight": p.get("structured_insight"),
         "pick_menu": p.get("pick_menu"),
-        "probability_scores": p.get("probability_scores"),
+        "probability_scores": ps,
         "prediction_quality_hint": p.get("prediction_quality_hint") or {},
         "league_model_profile": p.get("league_model_profile") or {},
         "matchup_calibration": p.get("matchup_calibration"),
+        "historic_calibration": hist or None,
+        "calibration_shrink": shrink,
+        "value_bets": value_bets,
+        "value_bets_alt": p.get("value_bets_alt") or {},
         "value_bets_rejected": p.get("value_bets_rejected") or {},
-        "value_bets_display": p.get("value_bets_display") or [],
+        "value_bets_display": value_bets_display,
         "has_value_bet": fixture_row.get("has_value_bet"),
+        "has_value_dual_agree": _packet_has_value_dual_agree(value_bets_display, value_bets),
+        "line_odds": p.get("line_odds") or {},
+        "bookmaker_odds": p.get("bookmaker_odds") or {},
+        "best_odds_1x2": fixture_row.get("best_odds_1x2") or {},
+        "sharp_anchor_implied": fixture_row.get("sharp_anchor_implied") or {},
+        "bet_confidence": p.get("bet_confidence"),
+        "bet_confidence_min_value": p.get("bet_confidence_min_value"),
         "prediction_unavailable": bool(p.get("prediction_unavailable")),
-        "data_quality_pct": (fixture_row.get("data_quality") or {}).get("score_pct"),
-        "field_scores": (fixture_row.get("data_quality") or {}).get("field_scores") or {},
-        "weak_fields": (fixture_row.get("data_quality") or {}).get("weak_fields") or [],
-        "trust_label": (fixture_row.get("data_quality") or {}).get("trust_label"),
+        "data_quality": dq,
+        "data_quality_pct": dq.get("score_pct"),
+        "field_scores": dq.get("field_scores") or {},
+        "weak_fields": dq.get("weak_fields") or [],
+        "trust_label": dq.get("trust_label"),
         "supplemental": fixture_row.get("supplemental") or {},
+        "supplemental_tags": _supplemental_tags(fixture_row.get("supplemental")),
+        "is_live": bool(fixture_row.get("is_live")),
+        "live_score": fixture_row.get("live_score"),
+        "live_status": fixture_row.get("live_status"),
+        "live_minute": fixture_row.get("live_minute"),
+        "live_status_long": fixture_row.get("live_status_long"),
+        "live_xg_home": fixture_row.get("live_xg_home"),
+        "live_xg_away": fixture_row.get("live_xg_away"),
+        "live_stats": fixture_row.get("live_stats"),
+        "live_last_event": fixture_row.get("live_last_event"),
     }
 
 

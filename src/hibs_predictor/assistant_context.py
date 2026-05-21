@@ -40,6 +40,184 @@ def _implied_pct(odds: Any) -> Optional[float]:
     return round(100.0 / o, 1)
 
 
+def enrich_assistant_packet(packet: Dict[str, Any]) -> Dict[str, Any]:
+    """Attach derived assistant fields (sources line, dual-agree flag)."""
+    out = dict(packet)
+    if not out.get("sources_summary"):
+        out["sources_summary"] = data_sources_summary(out)
+    if not out.get("supplemental_tags"):
+        sup = out.get("supplemental") or {}
+        tags: List[str] = []
+        if isinstance(sup, dict):
+            for key, label in (
+                ("understat", "understat"),
+                ("understat_light", "understat"),
+                ("wikipedia_positions", "wikipedia"),
+                ("soccerstats_positions", "soccerstats"),
+                ("fbref_schedule", "fbref"),
+                ("statsbomb_open_team_proxy", "statsbomb"),
+            ):
+                if sup.get(key):
+                    tags.append(label)
+        out["supplemental_tags"] = sorted(set(tags))
+    if "has_value_dual_agree" not in out:
+        out["has_value_dual_agree"] = any(
+            isinstance(v, dict) and v.get("value_dual_agree")
+            for v in out.get("value_bets_display") or []
+        ) or any(
+            isinstance(row, dict) and row.get("value_dual_agree")
+            for row in (out.get("value_bets") or {}).values()
+        )
+    return out
+
+
+def _position_brief(pos: Dict[str, Any], team: str) -> str:
+    if not pos or not pos.get("position"):
+        return f"{team}: —"
+    bits = [f"{team} **{pos.get('position')}**", f"{pos.get('points', '—')} pts"]
+    if pos.get("played") is not None:
+        bits.append(f"P{pos.get('played')}")
+    if pos.get("goal_diff") is not None:
+        gd = pos.get("goal_diff")
+        gd_s = f"+{gd}" if isinstance(gd, (int, float)) and gd > 0 else str(gd)
+        bits.append(f"GD {gd_s}")
+    if pos.get("form"):
+        bits.append(f"table form {pos.get('form')}")
+    return " · ".join(bits)
+
+
+def _live_snippet(packet: Dict[str, Any]) -> Optional[str]:
+    if not packet.get("is_live"):
+        return None
+    score = packet.get("live_score") or "—"
+    status = packet.get("live_status") or "LIVE"
+    minute = packet.get("live_minute")
+    chunk = f"In play **{score}** ({status}"
+    if minute is not None:
+        chunk += f" {minute}'"
+    chunk += ")"
+    lxh = packet.get("live_xg_home")
+    lxa = packet.get("live_xg_away")
+    if lxh is not None or lxa is not None:
+        chunk += f" · live xG {lxh}–{lxa}"
+    evt = packet.get("live_last_event") or {}
+    if isinstance(evt, dict) and evt.get("label"):
+        chunk += f" · last {evt['label']}"
+    return chunk
+
+
+def _sharp_anchor_pct(packet: Dict[str, Any]) -> Optional[Dict[str, float]]:
+    sharp = packet.get("sharp_anchor_implied") or {}
+    if not isinstance(sharp, dict) or not sharp:
+        return None
+    out: Dict[str, float] = {}
+    for k, v in sharp.items():
+        try:
+            out[k] = round(float(v) * 100, 1)
+        except (TypeError, ValueError):
+            continue
+    return out or None
+
+
+def _value_signals_compact(packet: Dict[str, Any], *, limit: int = 2) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for v in packet.get("value_bets_display") or []:
+        if not isinstance(v, dict):
+            continue
+        rows.append(
+            {
+                "label": v.get("market_label") or v.get("outcome"),
+                "edge_pct": v.get("edge_pct"),
+                "dual": bool(v.get("value_dual_agree")),
+                "tier": v.get("value_tier"),
+            }
+        )
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def build_fixtures_summary(
+    packets: List[Dict[str, Any]],
+    *,
+    max_n: int = 80,
+) -> List[Dict[str, Any]]:
+    """Compact per-fixture rows for assistant snapshot (card scan, filters)."""
+    ordered = sorted(packets or [], key=lambda p: (p.get("date") or "", p.get("kickoff_time") or ""))
+    out: List[Dict[str, Any]] = []
+    for pkt in ordered[:max_n]:
+        si = pkt.get("structured_insight") or {}
+        ps = pkt.get("probability_scores") or {}
+        hp = pkt.get("home_position") or {}
+        ap = pkt.get("away_position") or {}
+        out.append(
+            {
+                "id": pkt.get("id"),
+                "home": pkt.get("home"),
+                "away": pkt.get("away"),
+                "kickoff_time": pkt.get("kickoff_time"),
+                "league": pkt.get("league"),
+                "league_name": pkt.get("league_name"),
+                "competition_display": pkt.get("competition_display"),
+                "data_quality_pct": pkt.get("data_quality_pct"),
+                "trust_label": pkt.get("trust_label"),
+                "weak_fields": (pkt.get("weak_fields") or [])[:4],
+                "xg_source": pkt.get("xg_source"),
+                "xg_home": ps.get("xg_home"),
+                "xg_away": ps.get("xg_away"),
+                "home_last10_wdl": pkt.get("home_last10_wdl"),
+                "away_last10_wdl": pkt.get("away_last10_wdl"),
+                "home_win_pct": ps.get("home_win_pct"),
+                "draw_pct": ps.get("draw_pct"),
+                "away_win_pct": ps.get("away_win_pct"),
+                "btts_pct": ps.get("btts_pct"),
+                "over15_pct": ps.get("over15_pct"),
+                "over25_pct": ps.get("over25_pct"),
+                "over35_pct": ps.get("over35_pct"),
+                "pick": si.get("pick"),
+                "pick_confidence_pct": si.get("confidence_pct"),
+                "pick_mode": si.get("mode"),
+                "bet_confidence": pkt.get("bet_confidence"),
+                "bet_confidence_min_value": pkt.get("bet_confidence_min_value"),
+                "has_value_bet": pkt.get("has_value_bet"),
+                "has_value_dual_agree": pkt.get("has_value_dual_agree"),
+                "value_signals": _value_signals_compact(pkt),
+                "value_rejected_n": len(pkt.get("value_bets_rejected") or {}),
+                "line_odds": pkt.get("line_odds"),
+                "best_odds_1x2": pkt.get("best_odds_1x2"),
+                "sharp_anchor_pct": _sharp_anchor_pct(pkt),
+                "is_live": pkt.get("is_live"),
+                "live_score": pkt.get("live_score"),
+                "live_status": pkt.get("live_status"),
+                "live_minute": pkt.get("live_minute"),
+                "live_xg_home": pkt.get("live_xg_home"),
+                "live_xg_away": pkt.get("live_xg_away"),
+                "home_position": {
+                    "position": hp.get("position"),
+                    "points": hp.get("points"),
+                    "source": hp.get("source"),
+                }
+                if hp
+                else {},
+                "away_position": {
+                    "position": ap.get("position"),
+                    "points": ap.get("points"),
+                    "source": ap.get("source"),
+                }
+                if ap
+                else {},
+                "injuries_n": len(pkt.get("fixture_injuries") or []),
+                "supplemental_tags": pkt.get("supplemental_tags") or [],
+                "calibration_shrink": pkt.get("calibration_shrink"),
+                "sources_summary": pkt.get("sources_summary") or data_sources_summary(pkt),
+                "form_brief": _form_snippet(pkt),
+                "home_recent_n": pkt.get("home_recent_n"),
+                "away_recent_n": pkt.get("away_recent_n"),
+            }
+        )
+    return out
+
+
 def data_sources_summary(packet: Dict[str, Any]) -> str:
     """Human-readable list of inputs that contributed to this fixture."""
     parts: List[str] = []
@@ -111,15 +289,53 @@ def _rejected_lines(packet: Dict[str, Any]) -> List[str]:
 def _form_snippet(packet: Dict[str, Any]) -> str:
     bits: List[str] = []
     for side, label in (("home", packet.get("home") or "Home"), ("away", packet.get("away") or "Away")):
+        wdl = packet.get(f"{side}_last10_wdl") or ""
         fs = packet.get(f"{side}_form_summary") or {}
-        if not fs.get("played"):
+        if not fs.get("played") and not wdl:
             bits.append(f"{label}: form n/a")
             continue
-        bits.append(
-            f"{label} L{fs.get('played')}: W{fs.get('wins')}D{fs.get('draws')}L{fs.get('losses')} "
-            f"(GF{fs.get('gf')} GA{fs.get('ga')}, BTTS {fs.get('btts')}, O2.5 {fs.get('over25')})"
-        )
+        chunk = f"{label}"
+        if wdl:
+            chunk += f" [{wdl}]"
+        if fs.get("played"):
+            chunk += (
+                f" L{fs.get('played')}: W{fs.get('wins')}D{fs.get('draws')}L{fs.get('losses')} "
+                f"(GF{fs.get('gf')} GA{fs.get('ga')}, BTTS {fs.get('btts')}, O2.5 {fs.get('over25')})"
+            )
+        bits.append(chunk)
     return " · ".join(bits)
+
+
+def _line_odds_snippet(packet: Dict[str, Any]) -> Optional[str]:
+    lo = packet.get("line_odds") or {}
+    best = packet.get("best_odds_1x2") or {}
+    bits: List[str] = []
+    for key, label in (("btts_yes", "BTTS"), ("over25", "O2.5"), ("over15", "O1.5")):
+        if lo.get(key):
+            bits.append(f"{label} {lo[key]}")
+    for side, label in (("home", "H"), ("draw", "D"), ("away", "A")):
+        if best.get(side):
+            bits.append(f"best {label} {best[side]}")
+    sharp = _sharp_anchor_pct(packet)
+    if sharp:
+        bits.append(
+            "sharp "
+            + "/".join(f"{k[0].upper()}{sharp[k]:.0f}%" for k in ("home", "draw", "away") if k in sharp)
+        )
+    return ", ".join(bits) if bits else None
+
+
+def _calibration_snippet(packet: Dict[str, Any]) -> Optional[str]:
+    shrink = packet.get("calibration_shrink")
+    if not isinstance(shrink, dict) or not shrink:
+        return None
+    factor = shrink.get("shrink_factor") or shrink.get("factor")
+    if factor is None:
+        return None
+    try:
+        return f"Historic calibration shrink **{float(factor):.2f}** applied to model blend."
+    except (TypeError, ValueError):
+        return None
 
 
 def _xg_snippet(packet: Dict[str, Any]) -> str:
@@ -158,20 +374,59 @@ def build_fixture_context_lines(packet: Dict[str, Any], *, include_pick: bool = 
     """Factual assistant lines grounded in structured_insight + packet fields."""
     si = packet.get("structured_insight") or {}
     ps = packet.get("probability_scores") or {}
+    comp = packet.get("competition_display") or packet.get("league_name") or packet.get("league")
     lines: List[str] = [
         f"**{_match_label(packet)}**"
+        + (f" · {comp}" if comp else "")
         + (f" · KO {_kickoff_display(packet)}" if _kickoff_display(packet) else ""),
     ]
     dq = packet.get("data_quality_pct")
+    trust = packet.get("trust_label")
     if dq is not None:
         gate = value_require_data_pct()
         note = "clears value bar" if float(dq) >= gate else f"below value bar ({gate:.0f}%)"
-        lines.append(f"Data coverage: **{dq}%** ({note}).")
-    lines.append(f"Sources: {data_sources_summary(packet)}.")
+        trust_bit = f" · trust **{trust}**" if trust else ""
+        lines.append(f"Data coverage: **{dq}%**{trust_bit} ({note}).")
+    elif trust:
+        lines.append(f"Data trust: **{trust}**.")
+    bet_conf = packet.get("bet_confidence")
+    if bet_conf is not None:
+        floor = packet.get("bet_confidence_min_value")
+        conf_note = "meets value floor" if floor is None or float(bet_conf) >= float(floor) else "below value confidence floor"
+        lines.append(f"Bet confidence: **{bet_conf:.0f}%** ({conf_note}).")
+    tags = packet.get("supplemental_tags") or []
+    src = packet.get("sources_summary") or data_sources_summary(packet)
+    if tags:
+        src += f" · tags: {', '.join(tags)}"
+    lines.append(f"Sources: {src}.")
+    live = _live_snippet(packet)
+    if live:
+        lines.append(live + ".")
+    if packet.get("live_stats") and packet.get("is_live"):
+        lines.append("Live stats feed attached for in-play read.")
+    hp = packet.get("home_position") or {}
+    ap = packet.get("away_position") or {}
+    if hp.get("position") or ap.get("position"):
+        lines.append(
+            "Table: "
+            + _position_brief(hp, packet.get("home") or "Home")
+            + " · "
+            + _position_brief(ap, packet.get("away") or "Away")
+            + "."
+        )
     lines.append(_xg_snippet(packet))
     form = _form_snippet(packet)
     if form:
         lines.append(f"Form: {form}.")
+    prices = _line_odds_snippet(packet)
+    if prices:
+        lines.append(f"Best lines: {prices}.")
+    cal = _calibration_snippet(packet)
+    if cal:
+        lines.append(cal)
+    inj = packet.get("fixture_injuries") or []
+    if inj:
+        lines.append(f"Injuries/absences: **{len(inj)}** rows on feed.")
     if include_pick:
         pick = si.get("pick") or "—"
         conf = si.get("confidence_pct")
@@ -192,9 +447,14 @@ def build_fixture_context_lines(packet: Dict[str, Any], *, include_pick: bool = 
     ):
         if ps.get(key) is not None:
             lines.append(f"{label}: {ps[key]}%")
+    if packet.get("has_value_dual_agree"):
+        lines.append("Value dual finder: **both model and consensus agree** on at least one market.")
     val_lines = _value_signal_lines(packet)
     if val_lines:
         lines.append("Value signals: " + "; ".join(val_lines) + ".")
+    alt_n = len(packet.get("value_bets_alt") or {})
+    if alt_n:
+        lines.append(f"Alt value finder: **{alt_n}** consensus-edge market(s).")
     rejected = _rejected_lines(packet)
     if rejected:
         lines.append("Value guardrails blocked: " + "; ".join(rejected) + ".")
@@ -333,6 +593,11 @@ def _leg_candidate_blurb(packet: Dict[str, Any], leg: Dict[str, Any]) -> str:
     dq = packet.get("data_quality_pct")
     if dq is not None:
         bits.append(f"dq {dq}%")
+    if packet.get("trust_label"):
+        bits.append(str(packet["trust_label"]))
+    bc = packet.get("bet_confidence")
+    if bc is not None:
+        bits.append(f"bet conf {bc:.0f}%")
     for v in packet.get("value_bets_display") or []:
         if isinstance(v, dict) and v.get("market_key") == leg.get("market_key") and v.get("value_dual_agree"):
             bits.append("dual agree")
@@ -355,9 +620,15 @@ def _acca_rank_score(acca: Dict[str, Any]) -> float:
     legs = acca.get("legs") or []
     leg_scores = sum(float(l.get("score") or l.get("model_pct") or 0) for l in legs)
     thin_penalty = sum(12.0 for l in legs if (l.get("data_quality_pct") or 100) < assistant_min_data_pct())
+    dual_bonus = sum(3.0 for l in legs if l.get("value_dual_agree") or l.get("has_value_dual_agree"))
+    bet_conf_bonus = sum(
+        min(4.0, max(0.0, (float(l.get("bet_confidence") or 0) - 70.0) * 0.1))
+        for l in legs
+        if l.get("bet_confidence") is not None
+    )
     combined = float(acca.get("combined_odds") or 1.0)
     price_bonus = min(8.0, max(0.0, (combined - 2.5) * 2.0))
-    return conf * 0.55 + leg_scores * 0.08 + price_bonus - thin_penalty
+    return conf * 0.55 + leg_scores * 0.08 + price_bonus + dual_bonus + bet_conf_bonus - thin_penalty
 
 
 def build_best_acca_ideas(

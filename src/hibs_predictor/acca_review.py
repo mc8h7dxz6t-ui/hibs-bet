@@ -141,6 +141,13 @@ def _leg_paragraph(
         if float(dq) < value_require_data_pct():
             parts.append(f"(below {value_require_data_pct():.0f}% value threshold)")
         parts.append(".")
+    bet_conf = (packet or {}).get("bet_confidence")
+    if bet_conf is not None:
+        parts.append(f" Bet confidence {bet_conf:.0f}%")
+        floor = (packet or {}).get("bet_confidence_min_value")
+        if floor is not None and float(bet_conf) < float(floor):
+            parts.append(" (below value confidence floor)")
+        parts.append(".")
     if packet:
         parts.append(_xg_snippet(packet) + ".")
         form = _form_snippet(packet)
@@ -224,6 +231,8 @@ def review_acca_legs(
                 "implied_pct": implied,
                 "edge_pct": edge,
                 "data_quality_pct": (packet or {}).get("data_quality_pct"),
+                "bet_confidence": (packet or {}).get("bet_confidence"),
+                "has_value_dual_agree": (packet or {}).get("has_value_dual_agree"),
                 "xg_snippet": _xg_snippet(packet) if packet else None,
                 "form_snippet": _form_snippet(packet) if packet else None,
                 "data_sources": data_sources_summary(packet) if packet else None,

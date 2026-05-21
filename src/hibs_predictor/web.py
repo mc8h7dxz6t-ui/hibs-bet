@@ -832,6 +832,8 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
             "market_odds": enriched.get("market_odds", {}),
             "supplemental": enriched.get("supplemental", {}),
             "xg_source": enriched.get("xg_source", "unknown"),
+            "best_odds_1x2": enriched.get("best_odds_1x2") or {},
+            "sharp_anchor_implied": enriched.get("sharp_anchor_implied") or {},
             "has_value_bet": bool(
                 prediction.get("has_any_value")
                 or prediction.get("value_bets")
@@ -1407,18 +1409,20 @@ def _leagues_for_filter(by_league: Dict[str, List]) -> List[tuple]:
 
 
 def _assistant_packets_from_fixtures(fixtures: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    from hibs_predictor.assistant_context import enrich_assistant_packet
     from hibs_predictor.match_insight import build_assistant_packet
 
-    return [build_assistant_packet(f) for f in fixtures]
+    return [enrich_assistant_packet(build_assistant_packet(f)) for f in fixtures]
 
 
 def _assistant_bundle(fixtures: List[Dict[str, Any]]) -> Dict[str, Any]:
-    from hibs_predictor.assistant_context import build_acca_candidates
+    from hibs_predictor.assistant_context import build_acca_candidates, build_fixtures_summary
     from hibs_predictor.assistant_recommendations import build_assistant_recommendations
 
     packets = _assistant_packets_from_fixtures(fixtures)
     return {
         "packets": packets,
+        "fixtures_summary": build_fixtures_summary(packets, max_n=80),
         "recommendations": build_assistant_recommendations(packets),
         "acca_candidates": build_acca_candidates(packets),
         "count": len(packets),
@@ -1487,7 +1491,7 @@ def index():
 @app.route("/api/assistant/snapshot")
 def api_assistant_snapshot():
     """Structured insight packets + acca/market recommendations for the Betting Assistant."""
-    data = fetch_all_fixtures()
+    data = fetch_all_fixtures(attach_live=True)
     bundle = _assistant_bundle(data["all"])
     return jsonify(bundle)
 
@@ -1515,7 +1519,7 @@ def api_assistant_chat():
     if not question:
         return jsonify({"error": "question required"}), 400
     fixture_id = payload.get("fixture_id")
-    data = fetch_all_fixtures()
+    data = fetch_all_fixtures(attach_live=True)
     bundle = _assistant_bundle(data["all"])
     legs = payload.get("legs")
     if legs is not None and not isinstance(legs, list):
@@ -1539,7 +1543,7 @@ def api_assistant_acca_review():
     legs = payload.get("legs")
     if not isinstance(legs, list) or not legs:
         return jsonify({"error": "legs array required"}), 400
-    data = fetch_all_fixtures()
+    data = fetch_all_fixtures(attach_live=True)
     packets = _assistant_packets_from_fixtures(data["all"])
     return jsonify(review_acca_legs(legs, packets))
 

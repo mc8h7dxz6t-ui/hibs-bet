@@ -106,6 +106,10 @@ def _leg_from_menu_item(packet: Dict[str, Any], item: Dict[str, Any]) -> Dict[st
         "roi_pct": item.get("roi_pct"),
         "recommended": bool(item.get("recommended")),
         "data_quality_pct": packet.get("data_quality_pct"),
+        "bet_confidence": packet.get("bet_confidence"),
+        "has_value_dual_agree": packet.get("has_value_dual_agree"),
+        "is_live": packet.get("is_live"),
+        "live_score": packet.get("live_score"),
     }
 
 
@@ -122,6 +126,11 @@ def _leg_score(leg: Dict[str, Any]) -> float:
     dq = leg.get("data_quality_pct")
     if dq is not None:
         score *= 0.85 + min(1.0, float(dq) / 100.0) * 0.15
+    if leg.get("value_dual_agree") or leg.get("has_value_dual_agree"):
+        score += 5.0
+    bc = leg.get("bet_confidence")
+    if bc is not None:
+        score += min(6.0, max(0.0, (float(bc) - 72.0) * 0.12))
     return score
 
 
