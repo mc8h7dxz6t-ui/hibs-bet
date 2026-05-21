@@ -805,6 +805,12 @@ class DataAggregator:
         except Exception as exc:
             print(f"[enrich scraped_xg] {league_code} fid={fixture_id_str}: {exc!r}")
         try:
+            from hibs_predictor.deep_enrich import maybe_deep_enrich
+
+            enriched = maybe_deep_enrich(self, fixture, league_code, enriched)
+        except Exception as exc:
+            print(f"[enrich deep] {league_code} fid={fixture_id_str}: {exc!r}")
+        try:
             enriched["data_quality"] = compute_fixture_data_quality(enriched)
         except Exception as exc:
             print(f"[enrich data_quality] {league_code} fid={fixture_id_str}: {exc!r}")

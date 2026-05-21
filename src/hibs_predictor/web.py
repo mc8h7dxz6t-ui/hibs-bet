@@ -248,6 +248,10 @@ def _ui_data_quality_min_pct() -> int:
         return 85
 
 
+def _ui_show_dq90_chip() -> bool:
+    return (os.getenv("HIBS_UI_SHOW_DQ90_CHIP") or "1").strip().lower() not in ("0", "false", "no", "off")
+
+
 def _all_fixtures_cache_key() -> str:
     return f"all_fixtures_{_fetch_window_days()}d_{_FIXTURE_CACHE_VERSION}"
 
@@ -345,12 +349,31 @@ def _slim_row_enrich_fresh(row: Dict[str, Any]) -> bool:
     return DataAggregator._enriched_cache_fresh(proxy, home_id, away_id)
 
 
+def _league_codes_enrich_priority_order(codes: List[str]) -> List[str]:
+    """When HIBS_ENRICH_PRIORITY_TODAY=1, leagues with a cached kickoff today are fetched first."""
+    if not _env_truthy("HIBS_ENRICH_PRIORITY_TODAY"):
+        return list(codes)
+    from hibs_predictor.deep_enrich import fixture_is_today, league_codes_priority_today
+
+    days = _fetch_window_days()
+    prefer_fdo = _env_truthy("HIBS_PREFER_FOOTBALL_DATA_FIXTURES")
+    skip_as_fx = _env_truthy("HIBS_SKIP_API_SPORTS_FIXTURES")
+    cache = Cache()
+    preview: Dict[str, List[Dict[str, Any]]] = {}
+    for code in codes:
+        cache_key = f"fixtures_{days}d_{code}_{_FIXTURE_CACHE_VERSION}_{int(prefer_fdo)}{int(skip_as_fx)}"
+        cached = cache.get(cache_key, ttl_hours=_cache_ttl_hours(1.0)) or []
+        preview[code] = cached if isinstance(cached, list) else []
+    return league_codes_priority_today(codes, preview)
+
+
 def _fetch_all_league_fixtures_parallel() -> List[Dict]:
     """Fetch per-league fixture rows concurrently (each league uses its own disk cache)."""
-    workers = min(_fixture_fetch_workers(), len(ALL_LEAGUE_CODES))
+    codes = _league_codes_enrich_priority_order(list(ALL_LEAGUE_CODES))
+    workers = min(_fixture_fetch_workers(), len(codes))
     out: List[Dict] = []
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(fetch_next_48h_fixtures, code): code for code in ALL_LEAGUE_CODES}
+        futures = {pool.submit(fetch_next_48h_fixtures, code): code for code in codes}
         for fut in as_completed(futures):
             league_code = futures[fut]
             try:
@@ -1444,6 +1467,7 @@ def index():
         ),
         leagues=LEAGUES,
         data_quality_ui_min=_ui_data_quality_min_pct(),
+        data_quality_show_90_chip=_ui_show_dq90_chip(),
         assistant_packets=assistant_packets,
         assistant_recommendations=assistant_bundle.get("recommendations"),
         sidebar_upcoming=data.get("sidebar_upcoming", []),

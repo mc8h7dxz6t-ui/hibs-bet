@@ -61,6 +61,12 @@
                 <input type="search" id="dash-search" class="dash-search" placeholder="Search teams…" autocomplete="off" aria-label="Search fixtures">
                 <label class="chk-inline"><input type="checkbox" id="flt-value"> Value only</label>
                 <label class="chk-inline" title="Only matches meeting data coverage threshold."><input type="checkbox" id="flt-data-full"> Full data (≥{{ data_quality_ui_min }}%)</label>
+                {% if data_quality_show_90_chip %}
+                <div class="chip-row" id="dq-chip-row" aria-label="Data quality filter">
+                    <button type="button" class="chip chip-dq" data-dq-min="">Any data</button>
+                    <button type="button" class="chip chip-dq" data-dq-min="90">90%+ data only</button>
+                </div>
+                {% endif %}
                 <div class="chip-row" id="region-chip-row" aria-label="Region filter">
                     {% for slug, label in dashboard_filter_regions %}
                     <button type="button" class="chip chip-region{% if not slug %} active{% endif %}" data-region="{{ slug }}">{{ label }}</button>
@@ -199,6 +205,7 @@
     var activeLeague = '';
     var searchQ = '';
     var fullDataOnly = false;
+    var activeDqMin = 0;
 
     function loadFilterState() {
         try {
@@ -271,7 +278,8 @@
             var dq = parseFloat(card.getAttribute('data-data-q') || '0');
             if (isNaN(dq)) dq = 0;
             var okD = !fullDataOnly || dq >= dqMin;
-            var show = okR && okL && okV && okS && okD;
+            var ok90 = !activeDqMin || dq >= activeDqMin;
+            var show = okR && okL && okV && okS && okD && ok90;
             card.style.display = show ? '' : 'none';
         });
         document.querySelectorAll('.lg-block').forEach(function (block) {
@@ -300,8 +308,26 @@
             var dq = card ? parseFloat(card.getAttribute('data-data-q') || '0') : 0;
             if (isNaN(dq)) dq = 0;
             var okD = !fullDataOnly || dq >= dqMin;
-            row.style.display = (okR && okL && okV && okS && okD) ? '' : 'none';
+            var ok90 = !activeDqMin || dq >= activeDqMin;
+            row.style.display = (okR && okL && okV && okS && okD && ok90) ? '' : 'none';
         });
+    }
+
+    function wireDqChips() {
+        var dqRow = document.getElementById('dq-chip-row');
+        if (!dqRow) return;
+        dqRow.querySelectorAll('.chip-dq').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                dqRow.querySelectorAll('.chip-dq').forEach(function (b) { b.classList.remove('active'); });
+                btn.classList.add('active');
+                var raw = btn.getAttribute('data-dq-min') || '';
+                activeDqMin = raw ? parseFloat(raw) : 0;
+                if (isNaN(activeDqMin)) activeDqMin = 0;
+                applyDashFilters();
+            });
+        });
+        var first = dqRow.querySelector('.chip-dq[data-dq-min=""]');
+        if (first) first.classList.add('active');
     }
 
     function wireRegionChips() {
@@ -607,6 +633,7 @@
         syncFetchDaysFromUrl();
         loadFilterState();
         restoreFilterChips();
+        wireDqChips();
         wireRegionChips();
         wireChips();
         wireSearch();

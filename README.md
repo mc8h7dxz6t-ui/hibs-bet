@@ -158,6 +158,32 @@ hibs-bet/
 └── BETTING_ENGINE.md          # Detailed documentation
 ```
 
+## Data quality (DQ) and 90% target
+
+Each fixture gets a **0–100% data quality** score from weighted inputs (team IDs, last-10 form, season stats, table position, xG source, 1X2 odds, side markets, supplemental context, injuries). Block weights are defined in `src/hibs_predictor/data_quality.py` (xG is 18 points max; 1X2 book prices 19).
+
+**Realistic ceilings (typical full 7-day window, with APIs configured):**
+
+| League tier | Typical ≥90% | Typical ≥85% | Main blockers below 90% |
+|-------------|--------------|--------------|-------------------------|
+| EPL / top-5 with Understat | 55–70% | 75–85% | Missing side markets, cup rounds without fixture xG |
+| Scottish Prem / Championship (FBref schedule) | 45–60% | 65–80% | Proxy xG until schedule match; sparse injuries |
+| UEFA cups / lower tiers | 15–35% | 40–55% | No team IDs, no league table, goals-only xG |
+| Friendlies / unmapped teams | &lt;10% | &lt;20% | No IDs, no odds, no standings |
+
+**Raise coverage toward 90%:**
+
+```env
+HIBS_TARGET_DQ_PCT=90          # second-pass deep enrich until 90% or 2 retries (75–89% band)
+HIBS_DEEP_ENRICH=1             # same target when TARGET unset (defaults to 90)
+HIBS_MAX_DATA=1                # full API + StatsBomb light scrapers
+HIBS_ENRICH_PRIORITY_TODAY=1   # fetch leagues with a kickoff today first (API budget)
+```
+
+Measure before/after: `python3 scripts/measure_dq_7d.py` (reports ≥78%, ≥85%, ≥90%, avg, and weak blocks on 78–89% rows).
+
+Dashboard: use the **90%+ data only** chip to filter to the high-trust pool without hiding other leagues.
+
 ## Performance Notes
 
 - **Accuracy**: Baseline ~55% on outcome prediction

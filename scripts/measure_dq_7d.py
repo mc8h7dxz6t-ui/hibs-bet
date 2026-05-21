@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Count fixtures in the fetch window with data_quality >= 78% and >= 85%."""
+"""Count fixtures in the fetch window with data_quality >= 78%, >= 85%, and >= 90%."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ os.chdir(ROOT)
 os.environ.setdefault("HIBS_FETCH_DAYS", "7")
 os.environ.setdefault("HIBS_SCRAPE_XG", "1")
 os.environ.setdefault("HIBS_ENABLE_SUPPLEMENTAL", "1")
+os.environ.setdefault("HIBS_TARGET_DQ_PCT", "90")
 
 
 def _league_filter() -> list[str] | None:
@@ -55,7 +56,9 @@ def run(label: str) -> dict:
     filt = _league_filter()
     codes = [c for c in ALL_LEAGUE_CODES if c in LEAGUES and (not filt or c in filt)]
 
-    n = g78 = g85 = 0
+    n = g78 = g85 = g90 = 0
+    dq_sum = 0.0
+    gap_keys: Counter = Counter()
     by_league: dict[str, list[float]] = defaultdict(list)
     xg_src: Counter = Counter()
     thin_leagues: Counter = Counter()
@@ -84,18 +87,33 @@ def run(label: str) -> dict:
                 continue
             pct = float(dq.get("score_pct") or 0)
             n += 1
+            dq_sum += pct
             by_league[code].append(pct)
             xg_src[str(en.get("xg_source") or fx.get("xg_source") or "unknown")] += 1
             if pct >= 78:
                 g78 += 1
             if pct >= 85:
                 g85 += 1
+            if pct >= 90:
+                g90 += 1
+            elif 78 <= pct < 90:
+                from hibs_predictor.deep_enrich import analyze_dq_gaps
+
+                for gap in analyze_dq_gaps(en if isinstance(en, dict) else fx).get("gaps") or []:
+                    gap_keys[str(gap.get("key") or "?")] += 1
             if pct < 78:
                 thin_leagues[code] += 1
 
+    avg = dq_sum / max(1, n)
     print(f"fixtures enriched: {n}")
+    print(f"avg dq: {avg:.1f}%")
     print(f"dq >= 78%: {g78} ({100 * g78 / max(1, n):.1f}%)")
     print(f"dq >= 85%: {g85} ({100 * g85 / max(1, n):.1f}%)")
+    print(f"dq >= 90%: {g90} ({100 * g90 / max(1, n):.1f}%)")
+    if gap_keys:
+        print("\nWeak blocks on 78-89% rows:")
+        for key, c in gap_keys.most_common(10):
+            print(f"  {key:22} {c}")
     print("\nxG sources:")
     for src, c in xg_src.most_common(12):
         print(f"  {src:28} {c}")
@@ -103,7 +121,7 @@ def run(label: str) -> dict:
         print("\nLeagues with thin rows (dq<78 or no fixtures):")
         for lc, c in thin_leagues.most_common(20):
             print(f"  {lc:22} {c}")
-    return {"n": n, "g78": g78, "g85": g85}
+    return {"n": n, "g78": g78, "g85": g85, "g90": g90, "avg": avg}
 
 
 if __name__ == "__main__":
@@ -114,3 +132,5 @@ if __name__ == "__main__":
     print("\n--- delta ---")
     print(f"dq>=78: {before['g78']} -> {after['g78']} (+{after['g78'] - before['g78']})")
     print(f"dq>=85: {before['g85']} -> {after['g85']} (+{after['g85'] - before['g85']})")
+    print(f"dq>=90: {before['g90']} -> {after['g90']} (+{after['g90'] - before['g90']})")
+    print(f"avg dq: {before['avg']:.1f}% -> {after['avg']:.1f}%")
