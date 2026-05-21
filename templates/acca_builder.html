@@ -84,6 +84,16 @@
 .mpill{font-size:0.6em;color:var(--muted);background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05);border-radius:5px;padding:2px 6px;}
 .mpill strong{color:var(--text);}
 .mpill.vp{color:var(--gold);border-color:rgba(255,215,0,0.18);}
+
+.acca-review-panel{margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:rgba(2,6,23,0.55);}
+.acca-review-hd{font-size:0.72em;font-weight:800;color:var(--green);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;}
+.btn-review-acca{width:100%;padding:10px;border:none;border-radius:8px;background:linear-gradient(135deg,#1e3a5f,#0f172a);color:#e8f4ff;font-size:0.78em;font-weight:800;cursor:pointer;font-family:'Inter',sans-serif;margin-bottom:8px;}
+.btn-review-acca:hover{opacity:0.92;}
+.btn-review-acca:disabled{opacity:0.35;cursor:not-allowed;}
+.acca-review-out{font-size:0.74em;line-height:1.45;color:var(--text);max-height:280px;overflow-y:auto;}
+.acca-review-leg-item{margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid rgba(148,163,184,0.12);}
+.acca-review-leg-item:last-child{border-bottom:none;margin-bottom:0;}
+.acca-review-warn{color:#fde68a;font-weight:700;font-size:0.72em;}
 </style>
 {% endblock %}
 
@@ -143,7 +153,13 @@
         </div>
 
         <button class="btn-copy-slip" id="btn-copy-slip" onclick="copySlipSummary()" disabled>📋 Copy slip summary</button>
+        <button type="button" class="btn-review-acca" id="btn-review-acca" onclick="reviewAccaSlip()" disabled>🧠 Review acca with AI</button>
         <button class="btn-clear" onclick="clearSlip()">✕ Clear Slip</button>
+
+        <div class="acca-review-panel" id="acca-review-panel" hidden>
+            <div class="acca-review-hd">AI acca review</div>
+            <div class="acca-review-out" id="acca-review-out"></div>
+        </div>
 
         <div class="disclaimer">⚠️ For analysis only — we do not link to operators or open bet slips. Place bets only with a licensed bookmaker you choose. Gamble responsibly. 18+<br>
             <a href="https://www.begambleaware.org" target="_blank">BeGambleAware.org</a></div>
@@ -270,12 +286,102 @@ function toggle(fid, home, away, league, outcome, odds) {
     renderSlip();
 }
 
+function slipLegsPayload() {
+    const outcomeLabels = { home: 'Home Win', draw: 'Draw', away: 'Away Win' };
+    return Object.keys(slip).map(fid => {
+        const s = slip[fid];
+        return {
+            fixture_id: fid,
+            home: s.home,
+            away: s.away,
+            market_key: s.outcome,
+            market_label: outcomeLabels[s.outcome] || s.outcome,
+            odds: s.odds,
+        };
+    });
+}
+
+function syncAccaLegsGlobal() {
+    window.HIBS_ACCA_LEGS = slipLegsPayload();
+}
+
+function reviewAccaSlip() {
+    const legs = slipLegsPayload();
+    if (!legs.length) return;
+    const btn = document.getElementById('btn-review-acca');
+    const panel = document.getElementById('acca-review-panel');
+    const out = document.getElementById('acca-review-out');
+    btn.disabled = true;
+    btn.textContent = 'Reviewing…';
+    fetch('/api/assistant/acca-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ legs }),
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                out.innerHTML = '<p style="color:#fecaca;">' + data.error + '</p>';
+            } else {
+                out.innerHTML = renderAccaReview(data);
+            }
+            panel.hidden = false;
+            syncAccaLegsGlobal();
+        })
+        .catch(() => {
+            out.innerHTML = '<p style="color:#fecaca;">Could not reach acca review API.</p>';
+            panel.hidden = false;
+        })
+        .finally(() => {
+            btn.disabled = !Object.keys(slip).length;
+            btn.textContent = '🧠 Review acca with AI';
+        });
+}
+
+function dqClass(pct) {
+    if (pct == null) return '';
+    if (pct >= 90) return 'ok';
+    if (pct >= 78) return 'mid';
+    return 'low';
+}
+
+function renderAccaReview(data) {
+    let html = '';
+    if (data.summary) {
+        html += '<p style="margin:0 0 10px;color:var(--muted);">' + data.summary + '</p>';
+    }
+    (data.legs || []).forEach((leg, i) => {
+        const badge = leg.data_quality_pct != null
+            ? '<span class="fr-dq fr-dq-compact ' + dqClass(leg.data_quality_pct) + '">' + leg.data_quality_pct + '%</span> '
+            : '';
+        html += '<div class="acca-review-leg-item">';
+        html += '<p style="margin:0 0 4px;"><strong>Leg ' + (i + 1) + ':</strong> ' + badge + (leg.match || '') + ' — ' + (leg.market_label || '') + '</p>';
+        if (leg.model_pct != null) {
+            html += '<p style="margin:0 0 4px;color:var(--muted);">Model ' + leg.model_pct + '%';
+            if (leg.implied_pct != null) html += ' vs implied ' + leg.implied_pct + '%';
+            if (leg.edge_pct != null) html += ' · edge ' + (leg.edge_pct >= 0 ? '+' : '') + leg.edge_pct + '%';
+            html += '</p>';
+        }
+        html += '<p style="margin:0;">' + (leg.paragraph || '') + '</p>';
+        if (leg.thin_data) {
+            html += '<p class="acca-review-warn" style="margin:6px 0 0;">Thin data — caution</p>';
+        }
+        html += '</div>';
+    });
+    if (data.disclaimer) {
+        html += '<p style="margin:10px 0 0;font-size:0.68em;color:var(--muted);">' + data.disclaimer + '</p>';
+    }
+    return html;
+}
+
 function renderSlip() {
     const body = document.getElementById('slip-body');
     const empty = document.getElementById('slip-empty');
     body.querySelectorAll('.slip-sel').forEach(e=>e.remove());
     const keys = Object.keys(slip);
     empty.style.display = keys.length ? 'none' : 'block';
+    const reviewBtn = document.getElementById('btn-review-acca');
+    if (reviewBtn) reviewBtn.disabled = !keys.length;
     keys.forEach(fid => {
         const s = slip[fid];
         const ol = s.outcome==='home' ? s.home : s.outcome==='away' ? s.away : 'Draw';
@@ -294,6 +400,7 @@ function renderSlip() {
     });
     recalc();
     persistSlip();
+    syncAccaLegsGlobal();
 }
 
 function removeSel(fid) {

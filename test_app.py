@@ -509,7 +509,11 @@ def test_both_teams_form_and_strength():
                     "league": "SERIE_A",
                     "home_last10": h10,
                     "away_last10": a10,
-                    "prediction": {"bookmaker_odds": {}, "line_odds": {}},
+                    "prediction": {
+                        "bookmaker_odds": {"home": None, "draw": None, "away": None},
+                        "line_odds": {},
+                        "value_bets": {},
+                    },
                 },
                 display_tz_label="UK",
             )
@@ -519,6 +523,60 @@ def test_both_teams_form_and_strength():
         return True
     except Exception as e:
         print(f"  ✗ Both teams form test failed: {e}")
+        return False
+
+
+def test_fixture_row_btts_win_columns():
+    """Compact fixture row shows model BTTS % and 1X2 win lean."""
+    print("\nTesting fixture row BTTS / Win columns...")
+    try:
+        from flask import Flask, render_template_string
+
+        app = Flask(__name__, template_folder="templates")
+        with app.app_context():
+            html = render_template_string(
+                "{% include '_fixture_row_compact.html' %}",
+                fixture={
+                    "id": 99,
+                    "home": "Hibs",
+                    "away": "Hearts",
+                    "league": "SCOTLAND",
+                    "prediction": {
+                        "predicted_outcome": "home",
+                        "probabilities_pct": {"home": 45.6, "draw": 29.8, "away": 24.7},
+                        "btts_probability_pct": 58.0,
+                        "score_and_btts_pct": {
+                            "home_win_and_btts": 22.0,
+                            "draw_and_btts": 18.0,
+                            "away_win_and_btts": 12.0,
+                        },
+                        "bookmaker_odds": {"home": 2.8, "draw": 3.25, "away": 2.81},
+                        "line_odds": {"btts_yes": 1.72},
+                        "value_bets": {
+                            "btts_yes": {
+                                "edge_pct": 3.0,
+                                "odds": 1.72,
+                                "market_label": "BTTS Yes",
+                                "kelly": {"confidence_label": "Medium"},
+                            },
+                        },
+                        "value_bets_display": [],
+                        "poisson_probs": {"home": 40.0, "draw": 30.0, "away": 30.0},
+                    },
+                },
+                display_tz_label="UK",
+            )
+        assert "fr-prob-btts" in html
+        assert "fr-prob-win" in html
+        assert "58%" in html
+        assert 'fr-win-lean">H</span>' in html
+        assert "46%" in html
+        assert "22" in html and "+B" in html
+        assert "fr-prob-value" in html
+        print("  ✓ Fixture row BTTS / Win columns OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Fixture row BTTS / Win columns test failed: {e}")
         return False
 
 
@@ -2147,6 +2205,7 @@ def main():
         test_value_edge_fields,
         test_bottom_top_underdog_not_home_value,
         test_both_teams_form_and_strength,
+        test_fixture_row_btts_win_columns,
         test_pick_menu,
         test_dashboard_days_grouping,
         test_competition_display_titles,

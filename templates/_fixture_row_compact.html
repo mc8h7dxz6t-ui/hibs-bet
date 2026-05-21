@@ -1,6 +1,7 @@
 {% set p = fixture.prediction %}
-{% set show_pred = p and not (p.prediction_unavailable | default(false)) %}
-{% set vb = p.value_bets if p else {} %}
+{% set model_ok = p and not (p.prediction_unavailable | default(false)) %}
+{% set show_pred = model_ok and p.probabilities_pct is defined %}
+{% set vb = p.value_bets if p and p.value_bets is defined else {} %}
 {% set best = p.best_bet if p else none %}
 {% set hp = fixture.home_position %}
 {% set ap = fixture.away_position %}
@@ -9,6 +10,32 @@
 {% set lo = p.line_odds if p and p.line_odds is defined else {} %}
 {% set vb_list = p.value_bets_display if p and p.value_bets_display is defined and p.value_bets_display else [] %}
 {% set vb_multi = vb_list|length > 1 %}
+{% set btts_pct = p.btts_probability_pct if model_ok and p.btts_probability_pct is defined and p.btts_probability_pct is not none else none %}
+{% set win_lean = none %}
+{% set win_pct = none %}
+{% set joint_pct = none %}
+{% if show_pred %}
+    {% if p.predicted_outcome == 'home' %}
+        {% set win_lean = 'H' %}
+        {% set win_pct = p.probabilities_pct.home %}
+    {% elif p.predicted_outcome == 'draw' %}
+        {% set win_lean = 'D' %}
+        {% set win_pct = p.probabilities_pct.draw %}
+    {% else %}
+        {% set win_lean = 'A' %}
+        {% set win_pct = p.probabilities_pct.away %}
+    {% endif %}
+{% endif %}
+{% set sab = p.score_and_btts_pct if p and p.score_and_btts_pct is defined else {} %}
+{% if win_lean == 'H' and sab.home_win_and_btts is defined %}
+    {% set joint_pct = sab.home_win_and_btts %}
+{% elif win_lean == 'D' and sab.draw_and_btts is defined %}
+    {% set joint_pct = sab.draw_and_btts %}
+{% elif win_lean == 'A' and sab.away_win_and_btts is defined %}
+    {% set joint_pct = sab.away_win_and_btts %}
+{% endif %}
+{% set btts_value = vb.get('btts_yes') if vb else false %}
+{% set win_value = (vb.get('home') if win_lean == 'H' else (vb.get('draw') if win_lean == 'D' else vb.get('away'))) if vb and win_lean else false %}
 <details class="fixture-card fr-compact {% if fixture.has_value_bet %}value-card value-multi{% if vb_multi %} value-multi-many{% endif %}{% endif %}{% if fixture.is_live %} fr-in-play{% endif %}"
      data-fid="{{ fixture.id }}"
      data-home="{{ fixture.home }}"
@@ -56,10 +83,8 @@
         {% set bo = p.bookmaker_odds %}
         <div class="fr-pred" style="color:var(--muted);font-size:0.72em;">{% if bo is defined and bo.home is not none and bo.draw is not none and bo.away is not none %}No model · 1X2 from books{% elif lo and (lo.btts_yes or lo.over25 or lo.over15) %}No model · side odds{% elif p.prediction_quality_hint is defined and p.prediction_quality_hint and p.prediction_quality_hint.summary %}{{ p.prediction_quality_hint.summary }}{% else %}Prediction unavailable{% endif %}</div>
         {% endif %}
-        {% if fixture.data_quality is defined and fixture.data_quality and fixture.data_quality.score_pct is defined %}
-        {% set dq = fixture.data_quality.score_pct %}
-        <span class="fr-dq {% if dq >= 85 %}ok{% elif dq >= 70 %}mid{% else %}low{% endif %}">{{ dq }}% data</span>
-        {% endif %}
+        {% from '_dq_badge.html' import dq_badge %}
+        {{ dq_badge(fixture, p, compact=true) }}
         <div class="fr-menus" data-summary-control
              onclick="event.stopPropagation();" onpointerdown="event.stopPropagation();" onmousedown="event.stopPropagation();" onmouseup="event.stopPropagation();" ontouchstart="event.stopPropagation();">
             {% set pick_menu = p.pick_menu if p and p.pick_menu is defined and p.pick_menu else [] %}
@@ -109,6 +134,8 @@
             {% if al10 %}<div class="form-strip form-dots-compact">{% for r in al10 %}<span class="fd fd-{{ r.result }}" title="{{ fixture.away }} {{ r.score }}">{{ r.result }}</span>{% endfor %}</div>{% else %}<span class="fr-l10-na">—</span>{% endif %}
         </div>
     </div>
+    <span class="fr-prob fr-prob-btts{% if btts_value %} fr-prob-value{% endif %}" title="{% if btts_value %}Value: BTTS Yes{% else %}Model BTTS Yes{% endif %}{% if btts_pct is not none %} · {{ btts_pct }}%{% endif %}">{% if btts_pct is not none %}<span class="fr-prob-pct">{{ "%.0f"|format(btts_pct) }}%</span>{% else %}<span class="fr-prob-na">—</span>{% endif %}</span>
+    <span class="fr-prob fr-prob-win{% if win_value %} fr-prob-value{% endif %}" title="{% if win_value %}Value: {{ win_lean }} win lean{% else %}Model 1X2 lean{% endif %}{% if win_pct is not none %} · {{ win_lean }} {{ win_pct }}%{% endif %}{% if joint_pct is not none %} · {{ win_lean }}+BTTS {{ joint_pct }}%{% endif %}">{% if win_pct is not none %}<span class="fr-win-lean">{{ win_lean }}</span><span class="fr-prob-pct">{{ "%.0f"|format(win_pct) }}%</span>{% if joint_pct is not none %}<span class="fr-joint-pct" aria-label="{{ win_lean }} win and BTTS joint">{{ "%.0f"|format(joint_pct) }}<span class="fr-joint-lbl">+B</span></span>{% endif %}{% else %}<span class="fr-prob-na">—</span>{% endif %}</span>
     <span class="fr-od fr-od-h{% if vb.get('home') %} fr-od-value{% endif %}" title="{% if vb.get('home') %}Value: Home{% endif %}"{% if p and p.bookmaker_odds.home is not none %} data-odds-dec="{{ p.bookmaker_odds.home }}"{% endif %}>{% if p and p.bookmaker_odds.home is not none %}{{ "%.2f"|format(p.bookmaker_odds.home) }}{% else %}—{% endif %}</span>
     <span class="fr-od fr-od-x{% if vb.get('draw') %} fr-od-value{% endif %}" title="{% if vb.get('draw') %}Value: Draw{% endif %}"{% if p and p.bookmaker_odds.draw is not none %} data-odds-dec="{{ p.bookmaker_odds.draw }}"{% endif %}>{% if p and p.bookmaker_odds.draw is not none %}{{ "%.2f"|format(p.bookmaker_odds.draw) }}{% else %}—{% endif %}</span>
     <span class="fr-od fr-od-a{% if vb.get('away') %} fr-od-value{% endif %}" title="{% if vb.get('away') %}Value: Away{% endif %}"{% if p and p.bookmaker_odds.away is not none %} data-odds-dec="{{ p.bookmaker_odds.away }}"{% endif %}>{% if p and p.bookmaker_odds.away is not none %}{{ "%.2f"|format(p.bookmaker_odds.away) }}{% else %}—{% endif %}</span>

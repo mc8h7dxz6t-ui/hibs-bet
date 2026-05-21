@@ -46,7 +46,7 @@
     }
 
     function welcomeHtml() {
-        return '<div class="hibs-assistant-card"><p class="ac-line">Ask any football or betting question in plain English. I infer the fixture, team, market, or topic from your message and only use available model data.</p><p class="ac-line" style="font-size:0.88em;color:var(--muted);">Try: <em>Hibs deep dive</em>, <em>best bets</em>, <em>mixed acca</em>, <em>BTTS acca</em>, <em>explain Arsenal xG</em>, <em>value bets</em>.</p></div>';
+        return '<div class="hibs-assistant-card"><p class="ac-line">Ask any football or betting question in plain English. I infer the fixture, team, market, or topic from your message and only use available model data.</p><p class="ac-line" style="font-size:0.88em;color:var(--muted);">Try: <em>Hibs deep dive</em>, <em>best bets</em>, <em>mixed acca</em>, <em>review acca</em>, <em>explain Arsenal xG</em>, <em>value bets</em>.</p></div>';
     }
 
     function setBusy(on) {
@@ -63,10 +63,14 @@
         appendUser(q);
         setBusy(true);
         var fid = fixtureContext && fixtureContext.value ? fixtureContext.value : null;
+        var payload = { question: q, fixture_id: fid };
+        if (window.HIBS_ACCA_LEGS && window.HIBS_ACCA_LEGS.length) {
+            payload.legs = window.HIBS_ACCA_LEGS;
+        }
         fetch('/api/assistant/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ question: q, fixture_id: fid })
+            body: JSON.stringify(payload)
         })
             .then(function (r) { return r.json(); })
             .then(function (data) {
@@ -169,7 +173,58 @@
             (block.items || []).forEach(function (p) {
                 appendBot(fixtureCardHtml(p, block.compact));
             });
+            return;
         }
+        if (t === 'acca_review') {
+            appendBot(accaReviewHtml(block.data || {}));
+        }
+    }
+
+    function dqBadgeClass(pct) {
+        if (pct == null) return '';
+        if (pct >= 90) return 'ok';
+        if (pct >= 78) return 'mid';
+        return 'low';
+    }
+
+    function accaReviewHtml(data) {
+        var legs = data.legs || [];
+        var html = '<div class="hibs-assistant-card hibs-acca-review">';
+        if (data.summary) {
+            html += '<p class="ac-line"><strong>Acca review</strong> — ' + esc(data.summary) + '</p>';
+        }
+        legs.forEach(function (leg, i) {
+            var dq = leg.data_quality_pct;
+            var badge = dq != null
+                ? '<span class="fr-dq fr-dq-compact ' + dqBadgeClass(dq) + '">' + dq + '%</span> '
+                : '';
+            var verdictColor = leg.verdict === 'strong' ? 'var(--green)'
+                : (leg.verdict === 'caution' || leg.thin_data) ? '#fde68a' : 'var(--muted)';
+            html += '<div class="acca-review-leg" style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(148,163,184,0.15);">';
+            html += '<p class="ac-line"><strong>Leg ' + (i + 1) + ':</strong> ' + badge + esc(leg.match || '') + ' — <span style="color:var(--neon);">' + esc(leg.market_label || '') + '</span></p>';
+            if (leg.model_pct != null) {
+                html += '<p class="ac-line" style="font-size:0.86em;">Model ' + leg.model_pct + '%';
+                if (leg.implied_pct != null) html += ' vs implied ' + leg.implied_pct + '%';
+                if (leg.edge_pct != null) html += ' · edge ' + (leg.edge_pct >= 0 ? '+' : '') + leg.edge_pct + '%';
+                html += '</p>';
+            }
+            if (leg.xg_snippet) {
+                html += '<p class="ac-line" style="font-size:0.84em;color:var(--muted);">' + esc(leg.xg_snippet) + '</p>';
+            }
+            if (leg.form_snippet) {
+                html += '<p class="ac-line" style="font-size:0.84em;color:var(--muted);">' + esc(leg.form_snippet) + '</p>';
+            }
+            if (leg.data_sources) {
+                html += '<p class="ac-line" style="font-size:0.82em;color:var(--muted);">Sources: ' + esc(leg.data_sources) + '</p>';
+            }
+            html += '<p class="ac-line" style="font-size:0.88em;">' + esc(leg.paragraph || '') + '</p>';
+            if (leg.thin_data || (leg.flags && leg.flags.length)) {
+                html += '<p class="ac-line" style="font-size:0.86em;color:' + verdictColor + ';">Thin data — caution</p>';
+            }
+            html += '</div>';
+        });
+        html += '</div>';
+        return html;
     }
 
     function formatLine(line) {
@@ -196,6 +251,9 @@
         h += '</p>';
         if (leg.is_value && leg.edge_pct != null) {
             h += '<p class="ac-line" style="color:var(--gold);">Value +' + leg.edge_pct + '% edge</p>';
+        }
+        if (leg.pick_detail) {
+            h += '<p class="ac-line" style="font-size:0.88em;">' + formatLine(leg.pick_detail) + '</p>';
         }
         if (leg.rationale && leg.rationale.length) {
             h += '<ul>';
@@ -284,7 +342,17 @@
             html += '<p class="ac-line"><strong>Confidence:</strong> ' + si.confidence_pct + '%</p>';
         }
         if (pkt.data_quality_pct != null) {
-            html += '<p class="ac-line" style="font-size:0.88em;">Data ' + pkt.data_quality_pct + '%</p>';
+            html += '<p class="ac-line" style="font-size:0.88em;">Data <span class="fr-dq fr-dq-compact ' + dqBadgeClass(pkt.data_quality_pct) + '">' + pkt.data_quality_pct + '%</span></p>';
+        }
+        if (pkt.xg_source) {
+            html += '<p class="ac-line" style="font-size:0.84em;color:var(--muted);">xG source: ' + esc(pkt.xg_source) + '</p>';
+        }
+        if (si.rationale_metrics && si.rationale_metrics.length && !compact) {
+            html += '<ul style="font-size:0.86em;">';
+            si.rationale_metrics.slice(0, 4).forEach(function (m) {
+                html += '<li><strong>' + esc(m.label) + ':</strong> ' + esc(m.value) + (m.note ? ' — ' + esc(m.note) : '') + '</li>';
+            });
+            html += '</ul>';
         }
         if (pkt.has_value_bet && pkt.value_bets_display && pkt.value_bets_display[0]) {
             var v = pkt.value_bets_display[0];

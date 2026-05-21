@@ -1515,13 +1515,31 @@ def api_assistant_chat():
     fixture_id = payload.get("fixture_id")
     data = fetch_all_fixtures()
     bundle = _assistant_bundle(data["all"])
+    legs = payload.get("legs")
+    if legs is not None and not isinstance(legs, list):
+        legs = None
     reply = handle_chat(
         question,
         bundle.get("packets") or [],
         recommendations=bundle.get("recommendations"),
         fixture_id=fixture_id,
+        legs=legs,
     )
     return jsonify(reply)
+
+
+@app.route("/api/assistant/acca-review", methods=["POST"])
+def api_assistant_acca_review():
+    """Structured leg-by-leg review for acca / betslip selections."""
+    from hibs_predictor.acca_review import review_acca_legs
+
+    payload = request.get_json(silent=True) or {}
+    legs = payload.get("legs")
+    if not isinstance(legs, list) or not legs:
+        return jsonify({"error": "legs array required"}), 400
+    data = fetch_all_fixtures()
+    packets = _assistant_packets_from_fixtures(data["all"])
+    return jsonify(review_acca_legs(legs, packets))
 
 
 @app.route("/api/audit/summary")

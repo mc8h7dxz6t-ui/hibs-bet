@@ -1,3 +1,4 @@
+{% from '_dq_badge.html' import dq_badge %}
     <div class="expand-panel" data-fixture-id="{{ fixture.id }}">
         {% set p = fixture.prediction %}
         {% set hl10 = fixture.home_last10 %}
@@ -98,7 +99,10 @@
         <div id="{{ tab_gid }}-ov" class="tab-panel active" data-group="{{ tab_gid }}">
         {% if si %}
         <div class="insight-card fixture-rationale-card">
-            <div class="section-title" style="margin-bottom:10px;">Match analysis</div>
+            <div class="section-title ep-hd-row" style="margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span>Match analysis</span>
+                {{ dq_badge(fixture, p, compact=true) }}
+            </div>
             <p style="margin:0 0 6px;font-size:0.85em;color:var(--muted);"><strong style="color:var(--text);">Match:</strong> {{ si.match }}</p>
             <p style="margin:0 0 10px;font-size:0.95em;"><strong style="color:var(--green);">Probability-first pick:</strong> {{ si.pick }}</p>
             {% if si.rationale_metrics %}

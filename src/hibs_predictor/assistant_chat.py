@@ -7,10 +7,16 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from hibs_predictor.acca_review import review_acca_legs
+from hibs_predictor.assistant_context import (
+    build_fixture_context_lines,
+    pick_recommendation_line,
+)
 from hibs_predictor.assistant_recommendations import (
     _exclusion_reason,
     _kickoff_display,
     _match_label,
+    assistant_min_data_pct,
     build_assistant_recommendations,
     build_bet_builder_suggestions,
     build_mixed_market_acca,
@@ -26,6 +32,7 @@ _HELP_LINES = [
     "• “bet builder for this game” for correlated same-game market ideas",
     "• “value bets” / “deep dive all fixtures”",
     "• “stats for Hibs v Hearts”, “analyze Rangers”, “why Arsenal value?”, “xG and form for Chelsea”",
+    "• “review acca” / “review my slip” (on acca builder — use Review button or paste legs)",
     "• “table”, “standings”, “why league position matters”, “team news”, “what is missing?”",
 ]
 
@@ -90,47 +97,20 @@ def _acca_by_type(rec: Dict[str, Any], atype: str) -> List[Dict[str, Any]]:
 
 
 def _stats_reply(pkt: Dict[str, Any]) -> Dict[str, Any]:
+    lines = build_fixture_context_lines(pkt)
+    pick_line = pick_recommendation_line(pkt)
+    if pick_line:
+        lines.append(f"Bet pick (dq ≥ {assistant_min_data_pct():.0f}%): {pick_line}")
+    elif _exclusion_reason(pkt):
+        lines.append(
+            f"No stake-style pick — data/form below assistant bar ({assistant_min_data_pct():.0f}%) "
+            f"or mode { (pkt.get('structured_insight') or {}).get('mode', 'n/a') }."
+        )
     si = pkt.get("structured_insight") or {}
-    ps = pkt.get("probability_scores") or {}
-    lines = [
-        f"**{_match_label(pkt)}**" + (f" · KO {_kickoff_display(pkt)}" if _kickoff_display(pkt) else ""),
-        f"Data coverage: **{pkt.get('data_quality_pct', '—')}%**",
-        f"Structured pick: **{si.get('pick', '—')}**"
-        + (f" ({si.get('confidence_pct')}% conf.)" if si.get("confidence_pct") is not None else ""),
-    ]
-    if pkt.get("trust_label"):
-        lines.append(f"Trust read: **{pkt.get('trust_label')}**")
-    weak = pkt.get("weak_fields") or []
-    if weak:
-        lines.append("Weakest inputs: " + ", ".join(str(x) for x in weak[:3]) + ".")
-    profile = pkt.get("league_model_profile") or {}
-    if profile.get("label"):
-        lines.append(f"League profile: {profile.get('label')} — {profile.get('description')}")
-    if ps.get("home_win_pct") is not None:
-        lines.append(
-            f"1X2 model: H {ps.get('home_win_pct')}% · D {ps.get('draw_pct')}% · A {ps.get('away_win_pct')}%"
-        )
-    for label, key in (
-        ("BTTS", "btts_pct"),
-        ("O1.5", "over15_pct"),
-        ("O2.5", "over25_pct"),
-        ("O3.5", "over35_pct"),
-    ):
-        if ps.get(key) is not None:
-            lines.append(f"{label}: {ps[key]}%")
-    if ps.get("xg_home") is not None:
-        lines.append(f"xG lean: {ps['xg_home']} – {ps.get('xg_away', '?')}")
-    if si.get("predicted_scoreline"):
-        lines.append(f"Scoreline: {si['predicted_scoreline']}")
     if si.get("rationale"):
-        lines.extend(si["rationale"][:3])
-    rejected = pkt.get("value_bets_rejected") or {}
-    if rejected:
-        lines.append(
-            "Value guardrails blocked: "
-            + ", ".join(f"{k} ({v})" for k, v in list(rejected.items())[:3])
-            + "."
-        )
+        for bullet in si["rationale"][:2]:
+            if bullet not in lines:
+                lines.append(bullet)
     return {"lines": lines, "packet": pkt}
 
 
@@ -261,6 +241,8 @@ def parse_intent(question: str) -> Tuple[str, Dict[str, Any]]:
         return "acca", {"type": "over35"}
     if ("win" in q or "winner" in q) and "acca" in q:
         return "acca", {"type": "win"}
+    if any(x in q for x in ("review acca", "review slip", "review my acca", "review betslip", "acca review", "review legs")):
+        return "acca_review", {}
     if any(x in q for x in ("value bet", "value scan", "edge", "ev ")):
         return "value", {}
     if any(x in q for x in ("best single", "best bet", "top bet", "best pick", "strongest bet")):
@@ -279,6 +261,7 @@ def handle_chat(
     packets: List[Dict[str, Any]],
     recommendations: Optional[Dict[str, Any]] = None,
     fixture_id: Optional[Any] = None,
+    legs: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Return structured assistant reply for the UI."""
     rec = _ensure_recommendations(packets, recommendations)
@@ -292,6 +275,25 @@ def handle_chat(
 
     if intent == "help":
         out["blocks"] = [{"type": "text", "lines": _HELP_LINES}]
+        return out
+
+    if intent == "acca_review":
+        if not legs:
+            out["blocks"] = [
+                {
+                    "type": "text",
+                    "lines": [
+                        "Add legs on the **Acca Builder** (/acca), then click **Review acca with AI**.",
+                        "Or POST legs to `/api/assistant/acca-review` with fixture_id, market, and odds per selection.",
+                    ],
+                }
+            ]
+            return out
+        review = review_acca_legs(legs, packets)
+        out["blocks"] = [
+            {"type": "text", "lines": [review.get("summary") or ""]},
+            {"type": "acca_review", "data": review},
+        ]
         return out
 
     if intent == "deep_dive":
@@ -315,7 +317,15 @@ def handle_chat(
         if not singles:
             out["blocks"] = [{"type": "text", "lines": ["No singles cleared the data bar right now. Try “deep dive all”."]}]
         else:
-            out["blocks"] = [{"type": "singles", "items": singles[:8]}]
+            extra: List[Dict[str, Any]] = []
+            for leg in singles[:8]:
+                pkt = next((p for p in packets if str(p.get("id")) == str(leg.get("fixture_id"))), None)
+                if pkt:
+                    pl = pick_recommendation_line(pkt, market_key=leg.get("market_key"), odds=leg.get("odds"), model_pct=leg.get("model_pct"))
+                    if pl:
+                        leg = {**leg, "pick_detail": pl.replace("**", "")}
+                extra.append(leg)
+            out["blocks"] = [{"type": "singles", "items": extra}]
         return out
 
     if intent == "acca":

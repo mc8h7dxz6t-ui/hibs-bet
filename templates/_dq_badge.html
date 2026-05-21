@@ -1,0 +1,15 @@
+{# Compact data-coverage badge: green ≥90, amber 78–89, red below 78 #}
+{% macro dq_badge(fixture, prediction=none, compact=true) %}
+{% set p = prediction if prediction is not none else (fixture.prediction if fixture.prediction is defined else none) %}
+{% set dq = none %}
+{% if fixture.data_quality is defined and fixture.data_quality and fixture.data_quality.score_pct is defined %}
+{% set dq = fixture.data_quality.score_pct|round(0, 'floor')|int %}
+{% elif fixture.data_quality_pct is defined and fixture.data_quality_pct is not none %}
+{% set dq = fixture.data_quality_pct|round(0, 'floor')|int %}
+{% elif p and p.data_quality is defined and p.data_quality and p.data_quality.score_pct is defined %}
+{% set dq = p.data_quality.score_pct|round(0, 'floor')|int %}
+{% endif %}
+{% if dq is not none %}
+<span class="fr-dq fr-dq-badge{% if compact %} fr-dq-compact{% endif %} {% if dq >= 90 %}ok{% elif dq >= 78 %}mid{% else %}low{% endif %}" title="Data input coverage {{ dq }}%{% if fixture.data_quality is defined and fixture.data_quality and fixture.data_quality.weak_keys %} · weak: {{ fixture.data_quality.weak_keys|join(', ') }}{% endif %}">{% if compact %}{{ dq }}%{% else %}{{ dq }}% data{% endif %}</span>
+{% endif %}
+{% endmacro %}

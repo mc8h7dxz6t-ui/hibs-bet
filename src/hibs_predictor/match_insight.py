@@ -797,6 +797,7 @@ def build_assistant_packet(fixture_row: Dict[str, Any]) -> Dict[str, Any]:
         "field_scores": (fixture_row.get("data_quality") or {}).get("field_scores") or {},
         "weak_fields": (fixture_row.get("data_quality") or {}).get("weak_fields") or [],
         "trust_label": (fixture_row.get("data_quality") or {}).get("trust_label"),
+        "supplemental": fixture_row.get("supplemental") or {},
     }
 
 
