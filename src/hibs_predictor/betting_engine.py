@@ -8,6 +8,18 @@ from datetime import datetime
 import numpy as np
 
 from hibs_predictor.calibrated_lambdas import calibrated_match_lambdas
+from hibs_predictor.historic_calibration import (
+    adjust_xg_for_source_quality,
+    apply_calibration_shrink,
+    apply_form_weight_to_features,
+    blend_h2h_into_1x2,
+    compute_bet_confidence,
+    confidence_display_scale,
+    extract_h2h_from_recent,
+    form_sample_weight,
+    league_shrink_for_predict,
+    min_bet_confidence_for_value,
+)
 from hibs_predictor.league_profiles import apply_league_probability_profile, value_margin_extra
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
@@ -1017,8 +1029,22 @@ class BettingEngine:
         if dq_pre_pct > 0 and dq_pre_pct < dq_abstain_floor and not has_book_triplet:
             return prediction_unavailable_payload(fixture, "data_coverage_too_thin")
         features, metadata = self.build_advanced_features(fixture)
+        n_home_early = int(fixture.get("home_recent_n", 0) or 0)
+        n_away_early = int(fixture.get("away_recent_n", 0) or 0)
+        form_w = form_sample_weight(n_home_early, n_away_early)
+        features = apply_form_weight_to_features(features, metadata, form_w)
         xg_home = float(metadata["xg_home"])
         xg_away = float(metadata["xg_away"])
+        league_code = str(fixture.get("league") or "")
+        xg_home, xg_away, xg_quality_dbg = adjust_xg_for_source_quality(
+            xg_home,
+            xg_away,
+            fixture.get("xg_source"),
+            league_code,
+        )
+        metadata["xg_home"] = xg_home
+        metadata["xg_away"] = xg_away
+        fixture = {**fixture, "xg_home": xg_home, "xg_away": xg_away}
         sup_xg_dbg: Optional[Dict[str, Any]] = None
         if os.getenv("HIBS_USE_SUPPLEMENTAL_XG_PRIOR", "1").lower() not in ("0", "false", "no", "off"):
             sup = fixture.get("supplemental") or {}
@@ -1056,7 +1082,6 @@ class BettingEngine:
             else:
                 ml_probs = dict(poisson_probs_raw)
         mode = self._read_1x2_mode()
-        league_code = str(fixture.get("league") or "")
 
         lam_cal_h: Optional[float] = None
         lam_cal_a: Optional[float] = None
@@ -1090,8 +1115,13 @@ class BettingEngine:
             if total > 0:
                 ensemble_probs = {k: v / total for k, v in ensemble_probs.items()}
         ensemble_probs, league_profile_debug = apply_league_probability_profile(ensemble_probs, league_code)
+        cal_shrink, cal_shrink_dbg = league_shrink_for_predict(league_code)
+        if abs(cal_shrink - 1.0) >= 0.001:
+            ensemble_probs = apply_calibration_shrink(ensemble_probs, cal_shrink)
         matchup_context = self._matchup_context(fixture, metadata, xg_home, xg_away)
         ensemble_probs, mismatch_calibration = self._apply_mismatch_calibration(ensemble_probs, matchup_context)
+        h2h_record = extract_h2h_from_recent(fixture)
+        ensemble_probs, h2h_calibration = blend_h2h_into_1x2(ensemble_probs, h2h_record)
         bookmaker_odds = _best_1x2_odds_from_fixture(fixture)
         has_book = len(bookmaker_odds) == 3
         try:
@@ -1178,6 +1208,14 @@ class BettingEngine:
             merged_book["under35"] = float(to35["under"])
         dq_bundle = fixture.get("data_quality") or {}
         dq_pct = float(dq_bundle.get("score_pct") or 0)
+        bet_confidence = compute_bet_confidence(
+            dq_pct,
+            n_home_early,
+            n_away_early,
+            fixture.get("xg_source"),
+        )
+        bet_conf_min = min_bet_confidence_for_value()
+        bet_conf_ok = bet_confidence >= bet_conf_min
         try:
             dq_min_boost = float(os.getenv("HIBS_MIN_DATA_QUALITY_PCT", "58"))
         except ValueError:
@@ -1223,6 +1261,12 @@ class BettingEngine:
         if gated_values:
             value_bets = {}
             rejected_value_bets = {**{k: "data_quality_env_gate" for k in filtered_value_bets}, **rejected_value_bets}
+        elif not bet_conf_ok and value_bets:
+            rejected_value_bets = {
+                **{k: "bet_confidence_below_floor" for k in value_bets},
+                **rejected_value_bets,
+            }
+            value_bets = {}
 
         book_1x2 = dict(bookmaker_odds) if bookmaker_odds else {}
         for _k, _row in value_bets.items():
@@ -1232,7 +1276,7 @@ class BettingEngine:
 
         value_bets_alt: Dict[str, Any] = {}
         alt_rejected: Dict[str, str] = {}
-        if not gated_values and not portfolio_reject:
+        if not gated_values and not portfolio_reject and bet_conf_ok:
             sharp_impl = fixture.get("sharp_anchor_implied") or {}
             alt_raw = (
                 OddsAnalyzer.identify_market_consensus_value(
@@ -1280,6 +1324,7 @@ class BettingEngine:
                 if poisson_p - impl_pk > margin and poisson_p >= _value_consensus_min_model():
                     value_bets[_pk]["poisson_agree"] = True
         confidence = max(ensemble_probs.values())
+        confidence = confidence_display_scale(confidence, n_home_early, n_away_early)
         predicted_outcome = max(ensemble_probs, key=ensemble_probs.get)
         best_bet = max(value_bets, key=lambda x: value_bets[x].get("roi_percent", 0)) if value_bets else None
         best_roi = value_bets[best_bet].get("roi_percent", 0.0) if best_bet else 0.0
@@ -1438,6 +1483,14 @@ class BettingEngine:
             "lambda_calibration": cal_dbg,
             "matchup_calibration": mismatch_calibration,
             "league_model_profile": league_profile_debug,
+            "historic_calibration": {
+                "calibration_shrink": cal_shrink_dbg,
+                "xg_quality": xg_quality_dbg,
+                "h2h": h2h_calibration,
+                "form_sample_weight": round(form_w, 3),
+            },
+            "bet_confidence": bet_confidence,
+            "bet_confidence_min_value": bet_conf_min,
             "blend_weights_1x2": blend_w,
             "poisson_probs_calibrated_pct": (
                 {k: round(v * 100, 1) for k, v in poisson_probs_cal.items()} if poisson_probs_cal else None

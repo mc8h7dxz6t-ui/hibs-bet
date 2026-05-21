@@ -32,6 +32,11 @@ def _enabled() -> bool:
     return os.getenv("HIBS_PREDICTION_LOG_ENABLED", "0").lower() in ("1", "true", "yes")
 
 
+def prediction_log_enabled() -> bool:
+    """Public check for audit DB features (calibration shrink, etc.)."""
+    return _enabled()
+
+
 def _clv_enabled() -> bool:
     load_dotenv()
     return os.getenv("HIBS_CLV_LOG_ENABLED", "0").lower() in ("1", "true", "yes")
@@ -479,6 +484,7 @@ def report_summary_dict() -> Dict[str, Any]:
             "message": "No rows with recorded results yet. Run pred-log-sync.",
             "brier_by_data_quality_bucket": brier_by_data_quality_bucket(),
             "clv_by_league": clv_beat_close_by_league(),
+            "brier_by_league": brier_by_league(),
         }
 
     brier_sum = 0.0
@@ -519,6 +525,7 @@ def report_summary_dict() -> Dict[str, Any]:
             "message": "No rows with parseable 1X2 results yet. Run pred-log-sync after matches finish.",
             "brier_by_data_quality_bucket": brier_by_data_quality_bucket(),
             "clv_by_league": clv_beat_close_by_league(),
+            "brier_by_league": brier_by_league(),
         }
 
     n_eff = max(1, n_used)
@@ -535,6 +542,58 @@ def report_summary_dict() -> Dict[str, Any]:
     if value_attempts:
         out["value_hit_rate"] = round(100.0 * value_wins / value_attempts, 2)
     out["clv_by_league"] = clv_beat_close_by_league()
+    out["brier_by_league"] = brier_by_league()
+    return out
+
+
+def brier_by_league() -> List[Dict[str, Any]]:
+    """Mean 1X2 Brier per league_code for scored snapshots (calibration shrink input)."""
+    if not os.path.isfile(_db_path()):
+        return []
+    init_db()
+    conn = sqlite3.connect(_db_path(), timeout=20)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT league_code, prediction_json, result_outcome
+            FROM prediction_snapshots
+            WHERE result_outcome IS NOT NULL AND result_outcome != ''
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    by_league: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        try:
+            pred = json.loads(r["prediction_json"])
+        except Exception:
+            continue
+        probs = pred.get("probabilities") or {}
+        ph = _safe_prob(probs.get("home"))
+        pd = _safe_prob(probs.get("draw"))
+        pa = _safe_prob(probs.get("away"))
+        oc = (r["result_outcome"] or "").lower()
+        if oc not in ("home", "draw", "away"):
+            continue
+        yh, yd, ya = (1.0, 0.0, 0.0) if oc == "home" else ((0.0, 1.0, 0.0) if oc == "draw" else (0.0, 0.0, 1.0))
+        brier = (ph - yh) ** 2 + (pd - yd) ** 2 + (pa - ya) ** 2
+        lg = str(r["league_code"] or "unknown")
+        bucket = by_league.setdefault(lg, {"n": 0, "brier_sum": 0.0})
+        bucket["n"] += 1
+        bucket["brier_sum"] += brier
+
+    out: List[Dict[str, Any]] = []
+    for lg, b in sorted(by_league.items(), key=lambda x: -x[1]["n"]):
+        n = int(b["n"])
+        out.append(
+            {
+                "league": lg,
+                "n": n,
+                "brier": round(b["brier_sum"] / n, 5) if n else None,
+            }
+        )
     return out
 
 

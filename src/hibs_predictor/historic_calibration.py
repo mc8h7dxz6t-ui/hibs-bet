@@ -1,0 +1,392 @@
+"""Historic-data tweaks: audit Brier shrink, form weight, H2H, xG tier, bet confidence."""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+from typing import Any, Dict, List, Optional, Tuple
+
+_BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_DEFAULT_CALIB_CACHE = os.path.join(_BASE, ".cache", "calibration_v1.json")
+
+# Per-team typical xG when proxy sources are used (shrink toward league pace).
+_LEAGUE_AVG_XG_PER_TEAM: Dict[str, float] = {
+    "EPL": 1.38,
+    "CHAMPIONSHIP": 1.32,
+    "LEAGUE_ONE": 1.28,
+    "LEAGUE_TWO": 1.26,
+    "SCOTLAND": 1.30,
+    "SCOTLAND_CHAMP": 1.24,
+    "LA_LIGA": 1.34,
+    "SERIE_A": 1.32,
+    "BUNDESLIGA": 1.40,
+    "LIGUE_1": 1.33,
+}
+_DEFAULT_LEAGUE_AVG_XG = 1.28
+
+_PROXY_XG_MARKERS = (
+    "goals_proxy",
+    "form_derived",
+    "fbref_avg",
+    "scraped_recent",
+    "sofascore",
+    "statsbomb_goals",
+)
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def calibration_cache_path() -> str:
+    return (os.getenv("HIBS_CALIBRATION_CACHE") or _DEFAULT_CALIB_CACHE).strip()
+
+
+def xg_quality_tier(xg_source: Any) -> str:
+    """high = measured xG feeds; low = goals/form proxies."""
+    s = str(xg_source or "").lower()
+    if not s or s == "unknown":
+        return "low"
+    if "understat" in s and "proxy" not in s:
+        return "high"
+    if any(m in s for m in ("api_fixture_xg", "api_xg", "stats_api_xg", "stats_api")):
+        return "high"
+    if "api" in s and "xg" in s and "proxy" not in s:
+        return "high"
+    if any(m in s for m in _PROXY_XG_MARKERS) or "proxy" in s:
+        return "low"
+    return "medium"
+
+
+def is_proxy_xg_source(xg_source: Any) -> bool:
+    return xg_quality_tier(xg_source) == "low"
+
+
+def league_avg_xg_per_team(league_code: str) -> float:
+    return float(_LEAGUE_AVG_XG_PER_TEAM.get((league_code or "").upper(), _DEFAULT_LEAGUE_AVG_XG))
+
+
+def adjust_xg_for_source_quality(
+    xg_home: float,
+    xg_away: float,
+    xg_source: Any,
+    league_code: str,
+) -> Tuple[float, float, Dict[str, Any]]:
+    """Shrink proxy xG 15% toward league-average pace (Poisson λ trust)."""
+    dbg: Dict[str, Any] = {"tier": xg_quality_tier(xg_source), "adjusted": False}
+    if not is_proxy_xg_source(xg_source):
+        return xg_home, xg_away, dbg
+    try:
+        w = float(os.getenv("HIBS_PROXY_XG_LEAGUE_SHRINK", "0.15"))
+    except ValueError:
+        w = 0.15
+    w = max(0.0, min(0.35, w))
+    avg = league_avg_xg_per_team(league_code)
+    xh = float(xg_home) * (1.0 - w) + avg * w
+    xa = float(xg_away) * (1.0 - w) + avg * w
+    dbg["adjusted"] = True
+    dbg["shrink_weight"] = w
+    dbg["league_avg_xg"] = avg
+    return xh, xa, dbg
+
+
+def form_sample_weight(n_home: int, n_away: int) -> float:
+    """Scale form-driven signals by recent sample depth (0.4–1.0)."""
+    n = min(int(n_home or 0), int(n_away or 0))
+    return max(0.4, min(1.0, n / 10.0))
+
+
+def apply_form_weight_to_features(
+    features: List[float],
+    metadata: Dict[str, Any],
+    weight: float,
+) -> List[float]:
+    """Indices 6–9: home_form, away_form, home_home_factor, away_away_factor."""
+    if weight >= 0.999:
+        return features
+    out = list(features)
+    for idx in (6, 7, 8, 9):
+        if idx < len(out):
+            base = float(out[idx])
+            out[idx] = 0.5 + (base - 0.5) * weight
+    meta_w = max(0.4, weight)
+    metadata["home_form"] = 0.5 + (float(metadata.get("home_form", 0.5)) - 0.5) * meta_w
+    metadata["away_form"] = 0.5 + (float(metadata.get("away_form", 0.5)) - 0.5) * meta_w
+    return out
+
+
+def _team_id_from_fixture_side(side: Any) -> Optional[int]:
+    if isinstance(side, dict):
+        try:
+            return int(side.get("id") or 0) or None
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _opponent_id_in_match(match: Dict[str, Any], team_id: int) -> Optional[int]:
+    teams = match.get("teams") or {}
+    hid = (teams.get("home") or {}).get("id")
+    aid = (teams.get("away") or {}).get("id")
+    try:
+        hid_i = int(hid) if hid is not None else None
+        aid_i = int(aid) if aid is not None else None
+    except (TypeError, ValueError):
+        return None
+    if hid_i == team_id:
+        return aid_i
+    if aid_i == team_id:
+        return hid_i
+    return None
+
+
+def _match_outcome_for_team(match: Dict[str, Any], team_id: int) -> Optional[str]:
+    teams = match.get("teams") or {}
+    goals = match.get("goals") or {}
+    try:
+        hg = int(goals.get("home"))
+        ag = int(goals.get("away"))
+    except (TypeError, ValueError):
+        return None
+    hid = (teams.get("home") or {}).get("id")
+    try:
+        is_home = int(hid) == int(team_id)
+    except (TypeError, ValueError):
+        return None
+    if is_home:
+        if hg > ag:
+            return "home"
+        if hg < ag:
+            return "away"
+        return "draw"
+    if ag > hg:
+        return "home"
+    if ag < hg:
+        return "away"
+    return "draw"
+
+
+def extract_h2h_from_recent(
+    fixture: Dict[str, Any],
+    max_games: int = 10,
+) -> Dict[str, Any]:
+    """Derive head-to-head W/D/L from stored recent match lists when teams met before."""
+    home_id = _team_id_from_fixture_side(fixture.get("home"))
+    away_id = _team_id_from_fixture_side(fixture.get("away"))
+    if not home_id or not away_id:
+        return {"n": 0, "home_wins": 0, "draws": 0, "away_wins": 0, "probs": None}
+
+    seen: set = set()
+    home_w = draw = away_w = 0
+
+    def _scan(matches: List[Dict[str, Any]], perspective_home_id: int) -> None:
+        nonlocal home_w, draw, away_w
+        for m in matches or []:
+            fid = (m.get("fixture") or {}).get("id") or m.get("id")
+            if fid is not None:
+                key = int(fid) if str(fid).isdigit() else str(fid)
+                if key in seen:
+                    continue
+            opp = _opponent_id_in_match(m, perspective_home_id)
+            if opp is None:
+                continue
+            if int(opp) != away_id and int(opp) != home_id:
+                continue
+            if fid is not None:
+                seen.add(key)
+            oc = _match_outcome_for_team(m, perspective_home_id)
+            if oc is None:
+                continue
+            if perspective_home_id == home_id:
+                if oc == "home":
+                    home_w += 1
+                elif oc == "draw":
+                    draw += 1
+                else:
+                    away_w += 1
+            else:
+                if oc == "home":
+                    away_w += 1
+                elif oc == "draw":
+                    draw += 1
+                else:
+                    home_w += 1
+
+    _scan(fixture.get("home_recent") or [], home_id)
+    _scan(fixture.get("away_recent") or [], away_id)
+    n = home_w + draw + away_w
+    probs = None
+    if n > 0:
+        probs = {
+            "home": home_w / n,
+            "draw": draw / n,
+            "away": away_w / n,
+        }
+    return {"n": n, "home_wins": home_w, "draws": draw, "away_wins": away_w, "probs": probs}
+
+
+def blend_h2h_into_1x2(
+    probs: Dict[str, float],
+    h2h: Dict[str, Any],
+    *,
+    max_shift: float = 0.05,
+    min_games: int = 3,
+) -> Tuple[Dict[str, float], Optional[Dict[str, Any]]]:
+    """Blend historic H2H empirical 1X2 into model probs (cap 5% mass shift)."""
+    n = int(h2h.get("n") or 0)
+    h2h_p = h2h.get("probs")
+    if n < min_games or not isinstance(h2h_p, dict):
+        return probs, None
+    try:
+        w = float(os.getenv("HIBS_H2H_BLEND_WEIGHT", str(max_shift)))
+    except ValueError:
+        w = max_shift
+    w = max(0.0, min(max_shift, w * min(1.0, n / 6.0)))
+    out = dict(probs)
+    for k in ("home", "draw", "away"):
+        out[k] = float(out.get(k, 0.0)) * (1.0 - w) + float(h2h_p.get(k, 0.0)) * w
+    t = sum(out.values())
+    if t > 0:
+        out = {k: max(1e-6, v / t) for k, v in out.items()}
+    dbg = {"n_h2h": n, "blend_weight": round(w, 4), "h2h_probs": {k: round(h2h_p[k], 3) for k in h2h_p}}
+    return out, dbg
+
+
+def _clamp_shrink(m: float) -> float:
+    return max(0.92, min(1.08, m))
+
+
+def shrink_multiplier_from_brier(league_brier: float, baseline_brier: float) -> float:
+    """Map league Brier vs baseline to calibration_shrink in [0.92, 1.08]."""
+    if baseline_brier <= 0:
+        return 1.0
+    delta = league_brier - baseline_brier
+    try:
+        sens = float(os.getenv("HIBS_CALIB_BRIER_SENSITIVITY", "2.5"))
+    except ValueError:
+        sens = 2.5
+    return _clamp_shrink(1.0 - delta * sens)
+
+
+def apply_calibration_shrink(
+    probs: Dict[str, float],
+    shrink: float,
+) -> Dict[str, float]:
+    """Pull 1X2 toward uniform when shrink<1; slightly sharpen when shrink>1."""
+    s = _clamp_shrink(float(shrink))
+    uniform = 1.0 / 3.0
+    out = {k: float(probs.get(k, 0.0)) * s + uniform * (1.0 - s) for k in ("home", "draw", "away")}
+    if s > 1.0:
+        fav = max(out, key=out.get)
+        excess = s - 1.0
+        out[fav] = min(0.92, out[fav] + excess * 0.5)
+        others = [k for k in out if k != fav]
+        for k in others:
+            out[k] = max(1e-6, out[k] - excess * 0.25)
+    t = sum(out.values())
+    if t <= 0:
+        return probs
+    return {k: max(1e-6, v / t) for k, v in out.items()}
+
+
+def load_league_shrink_map() -> Dict[str, float]:
+    """Load pre-fit league shrink factors from cache JSON."""
+    path = calibration_cache_path()
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception:
+        return {}
+    leagues = raw.get("leagues") if isinstance(raw, dict) else raw
+    if not isinstance(leagues, dict):
+        return {}
+    out: Dict[str, float] = {}
+    for lg, val in leagues.items():
+        try:
+            if isinstance(val, dict):
+                out[str(lg).upper()] = _clamp_shrink(float(val.get("shrink") or val.get("calibration_shrink") or 1.0))
+            else:
+                out[str(lg).upper()] = _clamp_shrink(float(val))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def league_shrink_for_predict(league_code: str) -> Tuple[float, Dict[str, Any]]:
+    """
+    Resolve calibration_shrink for a league: cache file, else live audit Brier when enabled.
+    """
+    dbg: Dict[str, Any] = {"source": "default", "shrink": 1.0}
+    cached = load_league_shrink_map()
+    code = (league_code or "").upper()
+    if code in cached:
+        dbg["source"] = "cache"
+        dbg["shrink"] = cached[code]
+        return cached[code], dbg
+
+    from hibs_predictor.prediction_log import brier_by_league, prediction_log_enabled
+
+    if not prediction_log_enabled():
+        return 1.0, dbg
+
+    rows = brier_by_league()
+    min_n = _env_int("HIBS_CALIB_MIN_LEAGUE_ROWS", 25)
+    baseline = _env_float("HIBS_CALIB_BASELINE_BRIER", 0.66)
+    league_row = next((r for r in rows if str(r.get("league", "")).upper() == code), None)
+    if not league_row or int(league_row.get("n") or 0) < min_n:
+        global_rows = [r for r in rows if int(r.get("n") or 0) >= min_n]
+        if global_rows:
+            baseline = sum(float(r["brier"]) * int(r["n"]) for r in global_rows) / sum(int(r["n"]) for r in global_rows)
+        return 1.0, {**dbg, "baseline_brier": round(baseline, 4), "min_rows": min_n}
+
+    lb = float(league_row["brier"])
+    shrink = shrink_multiplier_from_brier(lb, baseline)
+    dbg = {
+        "source": "audit_brier",
+        "shrink": round(shrink, 4),
+        "league_brier": round(lb, 5),
+        "baseline_brier": round(baseline, 5),
+        "n_rows": int(league_row["n"]),
+    }
+    return shrink, dbg
+
+
+def compute_bet_confidence(
+    dq_pct: float,
+    n_home: int,
+    n_away: int,
+    xg_source: Any,
+) -> float:
+    """0–100 score combining data quality, form depth, and xG tier."""
+    dq = max(0.0, min(100.0, float(dq_pct or 0)))
+    form_n = min(int(n_home or 0), int(n_away or 0))
+    form_pts = min(30.0, form_n * 3.0)
+    tier = xg_quality_tier(xg_source)
+    xg_pts = {"high": 35.0, "medium": 22.0, "low": 10.0}.get(tier, 15.0)
+    raw = dq * 0.35 + form_pts + xg_pts
+    return round(max(0.0, min(100.0, raw)), 1)
+
+
+def min_bet_confidence_for_value() -> float:
+    return _env_float("HIBS_VALUE_MIN_BET_CONFIDENCE", 42.0)
+
+
+def confidence_display_scale(confidence: float, n_home: int, n_away: int) -> float:
+    """Reduce displayed confidence when form sample is thin."""
+    n = min(int(n_home or 0), int(n_away or 0))
+    if n >= 5:
+        return confidence
+    return confidence * max(0.55, n / 5.0)
