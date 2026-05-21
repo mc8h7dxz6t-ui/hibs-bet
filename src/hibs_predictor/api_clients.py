@@ -1,4 +1,5 @@
 import os
+import time
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -8,6 +9,48 @@ from hibs_predictor.rate_limiter import RateLimiter
 
 
 _API_SPORTS_MISSING_KEY_WARNED = False
+
+
+def _retry_after_seconds(response: requests.Response, attempt: int) -> float:
+    raw = response.headers.get("Retry-After")
+    if raw:
+        try:
+            return min(60.0, max(1.0, float(raw)))
+        except (TypeError, ValueError):
+            pass
+    return min(30.0, 2.0 ** attempt)
+
+
+def _http_get_with_backoff(
+    url: str,
+    *,
+    headers: Dict[str, str],
+    params: Optional[Dict[str, Any]],
+    timeout: float,
+    service_label: str,
+    max_retries: int = 3,
+) -> requests.Response:
+    last_exc: Optional[Exception] = None
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, headers=headers, params=params or {}, timeout=timeout)
+        except requests.RequestException as exc:
+            last_exc = exc
+            if attempt + 1 >= max_retries:
+                raise
+            time.sleep(min(30.0, 2.0 ** attempt))
+            continue
+        if response.status_code in (429, 503):
+            wait = _retry_after_seconds(response, attempt)
+            print(f"[{service_label} HTTP {response.status_code}] backoff {wait:.1f}s (attempt {attempt + 1}/{max_retries})")
+            if attempt + 1 >= max_retries:
+                response.raise_for_status()
+            time.sleep(wait)
+            continue
+        return response
+    if last_exc:
+        raise last_exc
+    raise requests.RequestException(f"{service_label} request failed after retries")
 
 
 def _api_sports_errors_indicate_missing_or_invalid_key(errors: Any) -> bool:
@@ -57,7 +100,13 @@ class BaseApiClient:
             return {"error": "Rate limit exceeded. Try again later."}
 
         url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
-        response = requests.get(url, headers=self._get_headers(), params=params, timeout=20)
+        response = _http_get_with_backoff(
+            url,
+            headers=self._get_headers(),
+            params=params,
+            timeout=20,
+            service_label=self.service_name,
+        )
         response.raise_for_status()
         try:
             data = response.json()
@@ -256,7 +305,13 @@ class ApiSportsFootballClient(BaseApiClient):
 
         url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
         try:
-            response = requests.get(url, headers=self._get_headers(), params=params or {}, timeout=25)
+            response = _http_get_with_backoff(
+                url,
+                headers=self._get_headers(),
+                params=params,
+                timeout=25,
+                service_label="API-Sports",
+            )
             response.raise_for_status()
             data = response.json()
         except requests.RequestException as exc:

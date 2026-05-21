@@ -18,15 +18,39 @@ os.environ.setdefault("HIBS_ENABLE_SUPPLEMENTAL", "1")
 
 def _league_filter() -> list[str] | None:
     raw = (os.getenv("HIBS_MIN_ENRICH_LEAGUES") or "").strip()
-    if not raw:
+    if raw:
+        return [c.strip().upper() for c in raw.split(",") if c.strip()]
+    if os.getenv("HIBS_MIN_ENRICH_AUTO", "").strip().lower() not in ("1", "true", "yes", "on"):
         return None
-    return [c.strip().upper() for c in raw.split(",") if c.strip()]
+    from datetime import datetime, timezone
+
+    from hibs_predictor.config import ALL_LEAGUE_CODES, LEAGUES
+    from hibs_predictor.web import fetch_next_48h_fixtures
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    codes: list[str] = []
+    for code in ALL_LEAGUE_CODES:
+        if code not in LEAGUES:
+            continue
+        try:
+            rows = fetch_next_48h_fixtures(code)
+        except Exception:
+            continue
+        for row in rows or []:
+            kick = str(row.get("kickoff_sort") or row.get("date") or "")
+            if kick.startswith(today):
+                codes.append(code)
+                break
+    return codes or None
 
 
 def run(label: str) -> dict:
     from hibs_predictor.config import ALL_LEAGUE_CODES, LEAGUES
-    from hibs_predictor.data_quality import compute_fixture_data_quality
-    from hibs_predictor.web import fetch_next_48h_fixtures, _safe_enrich
+    from hibs_predictor.data_quality import (
+        compute_fixture_data_quality,
+        compute_fixture_data_quality_from_row,
+    )
+    from hibs_predictor.web import fetch_next_48h_fixtures, _safe_enrich, _slim_row_enrich_fresh
 
     filt = _league_filter()
     codes = [c for c in ALL_LEAGUE_CODES if c in LEAGUES and (not filt or c in filt)]
@@ -50,14 +74,18 @@ def run(label: str) -> dict:
             continue
         for fx in fixtures:
             try:
-                en = _safe_enrich(fx, code)
+                if _slim_row_enrich_fresh(fx):
+                    en = fx
+                    dq = compute_fixture_data_quality_from_row(fx)
+                else:
+                    en = _safe_enrich(fx, code)
+                    dq = compute_fixture_data_quality(en)
             except Exception:
                 continue
-            dq = compute_fixture_data_quality(en)
             pct = float(dq.get("score_pct") or 0)
             n += 1
             by_league[code].append(pct)
-            xg_src[str(en.get("xg_source") or "unknown")] += 1
+            xg_src[str(en.get("xg_source") or fx.get("xg_source") or "unknown")] += 1
             if pct >= 78:
                 g78 += 1
             if pct >= 85:

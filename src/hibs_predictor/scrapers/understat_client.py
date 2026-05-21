@@ -6,6 +6,7 @@ session cookie is set. Legacy HTML ``datesData`` embeds are kept as a fallback o
 
 import json
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -35,6 +36,25 @@ _HEADERS = {
 _AJAX_HEADERS = {**_HEADERS, "X-Requested-With": "XMLHttpRequest"}
 
 _session: Optional[requests.Session] = None
+_league_rows_mem: Dict[str, Tuple[List[Dict[str, Any]], float]] = {}
+_LEAGUE_ROWS_MEM_TTL_SEC = 3600.0
+
+
+def _league_rows_mem_key(league_code: str, season_year: int) -> str:
+    return f"{league_code}_{season_year}"
+
+
+def _league_rows_from_mem(league_code: str, season_year: int) -> Optional[List[Dict[str, Any]]]:
+    key = _league_rows_mem_key(league_code, season_year)
+    hit = _league_rows_mem.get(key)
+    if hit and hit[1] > time.monotonic():
+        return hit[0]
+    return None
+
+
+def _league_rows_to_mem(league_code: str, season_year: int, rows: List[Dict[str, Any]]) -> None:
+    key = _league_rows_mem_key(league_code, season_year)
+    _league_rows_mem[key] = (rows, time.monotonic() + _LEAGUE_ROWS_MEM_TTL_SEC)
 
 
 def _session_get() -> requests.Session:
@@ -88,9 +108,29 @@ def fetch_league_matches(league_code: str, season_year: int) -> List[Dict[str, A
     slug = LEAGUE_SLUG.get(league_code)
     if not slug:
         return []
+    mem = _league_rows_from_mem(league_code, season_year)
+    if mem is not None:
+        return mem
+    try:
+        from hibs_predictor.cache import Cache
+
+        disk_key = f"understat_league_{league_code}_{season_year}"
+        disk = Cache().get(disk_key, ttl_hours=6)
+        if isinstance(disk, list):
+            _league_rows_to_mem(league_code, season_year, disk)
+            return disk
+    except Exception:
+        pass
     try:
         rows = _fetch_league_dates_api(slug, season_year)
         if rows:
+            _league_rows_to_mem(league_code, season_year, rows)
+            try:
+                from hibs_predictor.cache import Cache
+
+                Cache().set(f"understat_league_{league_code}_{season_year}", rows, ttl_hours=6)
+            except Exception:
+                pass
             return rows
     except (requests.RequestException, json.JSONDecodeError, TypeError, ValueError):
         pass
@@ -98,8 +138,15 @@ def fetch_league_matches(league_code: str, season_year: int) -> List[Dict[str, A
     url = f"https://understat.com/league/{slug}/{season_year}"
     r = _session_get().get(url, timeout=25)
     r.raise_for_status()
-    arr = _extract_json_array(r.text)
-    return arr or []
+    arr = _extract_json_array(r.text) or []
+    _league_rows_to_mem(league_code, season_year, arr)
+    try:
+        from hibs_predictor.cache import Cache
+
+        Cache().set(f"understat_league_{league_code}_{season_year}", arr, ttl_hours=6)
+    except Exception:
+        pass
+    return arr
 
 
 def _norm_match_name(name: str) -> str:

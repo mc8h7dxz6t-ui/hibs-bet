@@ -2,9 +2,11 @@
 
 import os
 import re
+import threading
+import time
 import unicodedata
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime
 
 from dotenv import load_dotenv
 
@@ -104,6 +106,33 @@ def _effective_skip_odds_api(clients: Dict[str, Any]) -> bool:
     if "odds_api" not in clients:
         return True
     return _env_flag_truthy("HIBS_SKIP_ODDS_API")
+
+
+def _enrich_fresh_minutes() -> float:
+    try:
+        return max(1.0, float(os.getenv("HIBS_ENRICH_FRESH_MINUTES", "15")))
+    except ValueError:
+        return 15.0
+
+
+def _enrich_api_semaphore_size() -> int:
+    """Cap concurrent API team/history calls during bundle builds (reduces 429 bursts)."""
+    raw = os.getenv("HIBS_ENRICH_API_SEM", "").strip()
+    if raw:
+        try:
+            return max(1, min(16, int(raw)))
+        except ValueError:
+            pass
+    if _env_flag_truthy("HIBS_MAX_DATA"):
+        return 2
+    return 4
+
+
+def _team_recent_mem_ttl_sec() -> float:
+    try:
+        return max(60.0, float(os.getenv("HIBS_TEAM_RECENT_MEM_TTL_SEC", "300")))
+    except ValueError:
+        return 300.0
 
 
 def _effective_skip_rapid_stats_xg(clients: Dict[str, Any]) -> bool:
@@ -451,6 +480,9 @@ class DataAggregator:
         load_dotenv()
         self.cache = Cache()
         self.clients = self._initialize_clients()
+        self._team_recent_mem: Dict[str, Tuple[List[Dict[str, Any]], float]] = {}
+        self._team_recent_lock = threading.Lock()
+        self._api_sem = threading.Semaphore(_enrich_api_semaphore_size())
         if os.getenv("HIBS_CACHE_PRUNE", "1").lower() not in ("0", "false", "no"):
             try:
                 n = self.cache.prune_stale()
@@ -778,11 +810,36 @@ class DataAggregator:
             print(f"[enrich data_quality] {league_code} fid={fixture_id_str}: {exc!r}")
             enriched["data_quality"] = {"score_pct": 0.0, "blocks": [], "full_scope": False, "strong_scope": False}
 
+        enriched["enriched_at"] = datetime.now().isoformat()
         cache_ttl = 2.0
         if self._enriched_needs_recent_refetch(enriched, home_id, away_id):
             cache_ttl = 0.25
         self.cache.set(cache_key, enriched, ttl_hours=cache_ttl)
         return enriched
+
+    @classmethod
+    def _enriched_cache_fresh(
+        cls,
+        enriched: Dict[str, Any],
+        home_id: Optional[int],
+        away_id: Optional[int],
+        *,
+        minutes: Optional[float] = None,
+    ) -> bool:
+        """Skip full re-enrich when recently written and both sides have recent-match data."""
+        if cls._enriched_needs_recent_refetch(enriched, home_id, away_id):
+            return False
+        ts = enriched.get("enriched_at")
+        if not ts:
+            return False
+        try:
+            at = datetime.fromisoformat(str(ts))
+        except (TypeError, ValueError):
+            return False
+        window = timedelta(minutes=minutes if minutes is not None else _enrich_fresh_minutes())
+        if datetime.now() - at > window:
+            return False
+        return True
 
     @staticmethod
     def _enriched_needs_recent_refetch(
@@ -917,6 +974,18 @@ class DataAggregator:
         self.cache.set(cache_key, rows, ttl_hours=12)
         return rows
 
+    def _team_recent_mem_get(self, mem_key: str) -> Optional[List[Dict[str, Any]]]:
+        with self._team_recent_lock:
+            hit = self._team_recent_mem.get(mem_key)
+            if hit and hit[1] > time.monotonic():
+                return hit[0]
+        return None
+
+    def _team_recent_mem_set(self, mem_key: str, matches: List[Dict[str, Any]]) -> None:
+        exp = time.monotonic() + _team_recent_mem_ttl_sec()
+        with self._team_recent_lock:
+            self._team_recent_mem[mem_key] = (matches, exp)
+
     def _fetch_team_recent_matches(
         self,
         team_id: Optional[int],
@@ -929,30 +998,45 @@ class DataAggregator:
 
         provider = "fdo" if fdo_comp else "api"
         cache_key = f"team_recent_{provider}_{team_id}"
+        mem_hit = self._team_recent_mem_get(cache_key)
+        if mem_hit is not None:
+            return mem_hit
+
         cached = self.cache.get(cache_key, ttl_hours=4)
         if cached:
+            self._team_recent_mem_set(cache_key, cached)
             return cached
 
-        matches: List[Dict[str, Any]] = []
-        if "api_sports" in self.clients:
-            try:
-                matches = self.clients["api_sports"].fetch_team_last_matches(team_id, limit=limit)
-            except Exception:
-                pass
+        with self._api_sem:
+            mem_hit = self._team_recent_mem_get(cache_key)
+            if mem_hit is not None:
+                return mem_hit
+            disk_again = self.cache.get(cache_key, ttl_hours=4)
+            if disk_again:
+                self._team_recent_mem_set(cache_key, disk_again)
+                return disk_again
 
-        if not matches and fdo_comp and "football_data_org" in self.clients:
-            try:
-                raw = self.clients["football_data_org"].fetch_team_matches(int(team_id), limit)
-                for m in raw or []:
-                    norm = _fdo_match_to_recent_format(m)
-                    if norm:
-                        matches.append(norm)
-            except Exception:
-                pass
+            matches: List[Dict[str, Any]] = []
+            if "api_sports" in self.clients:
+                try:
+                    matches = self.clients["api_sports"].fetch_team_last_matches(team_id, limit=limit)
+                except Exception:
+                    pass
 
-        if matches:
-            self.cache.set(cache_key, matches, ttl_hours=4)
-        return matches
+            if not matches and fdo_comp and "football_data_org" in self.clients:
+                try:
+                    raw = self.clients["football_data_org"].fetch_team_matches(int(team_id), limit)
+                    for m in raw or []:
+                        norm = _fdo_match_to_recent_format(m)
+                        if norm:
+                            matches.append(norm)
+                except Exception:
+                    pass
+
+            if matches:
+                self.cache.set(cache_key, matches, ttl_hours=4)
+            self._team_recent_mem_set(cache_key, matches)
+            return matches
 
     def _fetch_expected_goals(
         self,

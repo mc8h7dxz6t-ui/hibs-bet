@@ -321,11 +321,28 @@ def _dashboard_page_cache_set(body: bytes) -> str:
 
 
 def _fixture_fetch_workers() -> int:
+    default = "4" if _env_truthy("HIBS_MAX_DATA") else "6"
     try:
-        n = int(os.getenv("HIBS_FIXTURE_FETCH_WORKERS", "6"))
+        n = int(os.getenv("HIBS_FIXTURE_FETCH_WORKERS", default))
     except ValueError:
-        n = 6
+        n = int(default)
     return max(1, min(12, n))
+
+
+def _slim_row_enrich_fresh(row: Dict[str, Any]) -> bool:
+    """True when a cached per-league fixture row can skip another full enrich pass."""
+    from hibs_predictor.data_aggregator import DataAggregator
+
+    home_id = row.get("home_id")
+    away_id = row.get("away_id")
+    if not row.get("home_last10") or not row.get("away_last10"):
+        return False
+    proxy = {
+        "enriched_at": row.get("enriched_at"),
+        "home_recent": row.get("home_last10") or [],
+        "away_recent": row.get("away_last10") or [],
+    }
+    return DataAggregator._enriched_cache_fresh(proxy, home_id, away_id)
 
 
 def _fetch_all_league_fixtures_parallel() -> List[Dict]:
@@ -779,6 +796,7 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
             "league_name": title,
             "competition_meta": comp_meta,
             "league_flag": LEAGUES.get(league_code, {}).get("flag", ""),
+            "enriched_at": enriched.get("enriched_at"),
             "prediction": prediction,
             "home_last10": home_last10,
             "away_last10": away_last10,

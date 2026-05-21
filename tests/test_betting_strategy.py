@@ -201,6 +201,74 @@ def test_enriched_skips_cache_when_recent_missing():
     assert DataAggregator._enriched_needs_recent_refetch(full, 10, 20) is False
 
 
+def test_enriched_cache_fresh_within_window():
+    from datetime import datetime, timedelta
+
+    from hibs_predictor.data_aggregator import DataAggregator
+
+    recent = {
+        "enriched_at": datetime.now().isoformat(),
+        "home_recent": [{"x": 1}],
+        "away_recent": [{"x": 2}],
+    }
+    assert DataAggregator._enriched_cache_fresh(recent, 10, 20) is True
+    stale = {
+        "enriched_at": (datetime.now() - timedelta(hours=2)).isoformat(),
+        "home_recent": [{"x": 1}],
+        "away_recent": [{"x": 2}],
+    }
+    assert DataAggregator._enriched_cache_fresh(stale, 10, 20, minutes=15) is False
+
+
+def test_team_recent_mem_dedupes_within_session(monkeypatch):
+    from hibs_predictor.data_aggregator import DataAggregator
+
+    calls = {"n": 0}
+
+    class FakeApiSports:
+        def fetch_team_last_matches(self, team_id, limit=10):
+            calls["n"] += 1
+            return [{"fixture": {"id": 1}, "teams": {"home": {"id": team_id}}}]
+
+    agg = DataAggregator()
+    agg.clients = {"api_sports": FakeApiSports()}
+    agg.cache = type("C", (), {"get": lambda *a, **k: None, "set": lambda *a, **k: None})()
+
+    first = agg._fetch_team_recent_matches(42)
+    second = agg._fetch_team_recent_matches(42)
+    assert len(first) == 1
+    assert first == second
+    assert calls["n"] == 1
+
+
+def test_understat_league_fetch_cached_in_session(monkeypatch):
+    from hibs_predictor.scrapers import understat_client as us
+
+    us._league_rows_mem.clear()
+    sample = [{"h": {"title": "A"}, "a": {"title": "B"}, "isResult": True, "xG": {"h": 1.1, "a": 0.9}}]
+    calls = {"n": 0}
+
+    def fake_api(slug, season_year):
+        calls["n"] += 1
+        return sample
+
+    monkeypatch.setattr(us, "_fetch_league_dates_api", fake_api)
+    monkeypatch.setattr(
+        "hibs_predictor.cache.Cache.get",
+        lambda self, key, ttl_hours=4.0: None,
+    )
+    monkeypatch.setattr(
+        "hibs_predictor.cache.Cache.set",
+        lambda self, key, value, ttl_hours=4.0: None,
+    )
+    r1 = us.fetch_league_matches("EPL", 2026)
+    r2 = us.fetch_league_matches("EPL", 2026)
+    assert r1 == sample
+    assert r2 == sample
+    assert calls["n"] == 1
+    us._league_rows_mem.clear()
+
+
 def test_clv_enrich_after_sync(tmp_path, monkeypatch):
     from hibs_predictor import prediction_log as pl
 
