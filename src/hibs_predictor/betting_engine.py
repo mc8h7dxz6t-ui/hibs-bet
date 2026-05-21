@@ -1226,7 +1226,7 @@ class BettingEngine:
 
         book_1x2 = dict(bookmaker_odds) if bookmaker_odds else {}
         for _k, _row in value_bets.items():
-            _odds = cls._safe_float(_row.get("odds"), 0.0) or 0.0
+            _odds = self._safe_float(_row.get("odds"), 0.0) or 0.0
             _row["source"] = "model_edge"
             _row["value_tier"] = _value_odds_class(str(_k), _odds, book_1x2)
 
@@ -1261,7 +1261,7 @@ class BettingEngine:
                 row = dict(_row)
                 row["source"] = "market_consensus"
                 row["value_tier"] = _value_odds_class(
-                    str(_k), cls._safe_float(row.get("odds"), 0.0) or 0.0, book_1x2
+                    str(_k), self._safe_float(row.get("odds"), 0.0) or 0.0, book_1x2
                 )
                 value_bets_alt[_k] = row
                 if _k in value_bets:
