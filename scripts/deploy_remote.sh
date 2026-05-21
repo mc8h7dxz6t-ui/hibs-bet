@@ -20,4 +20,10 @@ if [[ ! -x "$VENV/bin/pip" ]]; then
 fi
 
 "$VENV/bin/pip" install -r requirements.txt
+
+CACHE_DIR="${HIBS_CACHE_DIR:-$REPO_ROOT/.cache}"
+if [[ -d "$CACHE_DIR" ]]; then
+  rm -f "$CACHE_DIR"/fixtures_* "$CACHE_DIR"/all_fixtures_* "$CACHE_DIR"/enriched_fixture_* 2>/dev/null || true
+fi
+
 sudo systemctl restart hibs-bet.service

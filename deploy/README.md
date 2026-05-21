@@ -1,5 +1,7 @@
 # Deploy
 
+**GitLab CI (hibs-bet.co.uk):** see [GITLAB_DEPLOY.md](GITLAB_DEPLOY.md) — variables, SSH key, push-to-`main` pipeline.
+
 ## Production (`hibs-bet.service`)
 
 - Gunicorn binds **0.0.0.0:8000** (see `hibs-bet.service`).
