@@ -740,7 +740,7 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
                 except Exception:
                     continue
         except Exception as ex:
-            print(f"[FotMob] {league_code}: {ex!r}")
+            _hibs_debug_log(f"[FotMob] {league_code}: {ex!r}")
 
     api_first = league_code in _API_FIRST_FIXTURE_LEAGUES
     if api_first or not prefer_fdo:

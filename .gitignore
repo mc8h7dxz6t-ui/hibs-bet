@@ -12,8 +12,12 @@ Sky Go.app/
 **/Sky Go.app/
 # Separate app — lives in ~/Projects/cheeky-monkeys-time
 cheeky-monkeys-time/
+.env
+.env.txt
 .env.save
+.pytest-venv/
 .cache-staging/
+.cache-staging-test/
 .env.*.local
 .rate_limit_state.json
 .cache/

@@ -18,8 +18,8 @@ User=www-data
 Group=www-data
 WorkingDirectory=/opt/hibs-bet
 Environment=PYTHONPATH=src
-# Optional: uncomment if you prefer systemd to load env instead of python-dotenv only
-# EnvironmentFile=-/opt/hibs-bet/.env
+Environment=HIBS_CACHE_DIR=/opt/hibs-bet/.cache
+EnvironmentFile=-/opt/hibs-bet/.env
 ExecStart=/opt/hibs-bet/.venv/bin/gunicorn \
   --workers 2 \
   --bind 0.0.0.0:8000 \

@@ -217,9 +217,37 @@ Dashboard: use the **90%+ data only** chip to filter to the high-trust pool with
 ✅ Compare odds across bookmakers  
 ✅ Long-term data matters for accuracy  
 
-## Fixture cache (v19)
+## Fixture cache (v22)
 
-On-disk fixture cache keys use **v19**. After upgrading, clear fixture caches (Refresh on the dashboard or delete `fixtures_*` / `all_fixtures_*` under `.cache`) so Norway/Finland leagues and live score fields load; older cache files may omit Nordic fixtures or in-play fields.
+On-disk fixture cache keys use **v22** (see `_FIXTURE_CACHE_VERSION` in `web.py`). After upgrading, clear fixture caches (dashboard **Refresh**, `POST /api/cache/clear`, or delete `fixtures_*` / `all_fixtures_*` / `enriched_fixture_*` under `HIBS_CACHE_DIR`, default `.cache`) so BTTS/Win columns, deep-enrich fields, and dual value-finder data load; older cache files may omit these fields.
+
+## Production deploy (hibs-bet.co.uk)
+
+Server path: `/opt/hibs-bet` (see `deploy/hibs-bet.service`). Full checklist: [deploy/README.md](deploy/README.md).
+
+```bash
+# On the server (after git pull or rsync)
+cd /opt/hibs-bet
+git pull   # or your deploy sync
+.venv/bin/pip install -r requirements.txt   # if requirements changed
+
+# Secrets: copy from .env.example — never commit .env
+# Recommended prod flags (in /opt/hibs-bet/.env):
+#   HIBS_PREDICTION_LOG_ENABLED=1
+#   HIBS_MAX_DATA=1
+#   HIBS_CACHE_DIR=/opt/hibs-bet/.cache
+
+# Clear stale fixture cache after code/cache-version upgrades (v22)
+rm -f .cache/fixtures_* .cache/all_fixtures_* .cache/enriched_fixture_* 2>/dev/null || true
+# Or use dashboard Refresh / POST /api/cache/clear
+
+sudo cp deploy/hibs-bet.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl restart hibs-bet
+sudo systemctl status hibs-bet
+```
+
+Gunicorn listens on **0.0.0.0:8000**; put nginx/Caddy in front for HTTPS on **hibs-bet.co.uk**.
 
 ## Documentation
 
