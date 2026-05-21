@@ -57,7 +57,10 @@ def augment_health_for_ui(health: Dict[str, Any]) -> Dict[str, Any]:
         )
 
     heavy_enabled = os.getenv("HIBS_ENABLE_HEAVY_SCRAPERS", "1").lower() not in ("0", "false", "no")
-    skip_strong = os.getenv("HIBS_SKIP_HEAVY_WHEN_API_STRONG", "1").lower() not in ("0", "false", "no")
+    always_deep = os.getenv("HIBS_ALWAYS_DEEP_SCRAPE", "1").lower() not in ("0", "false", "no", "off")
+    skip_strong = os.getenv("HIBS_SKIP_HEAVY_WHEN_API_STRONG", "0").lower() not in ("0", "false", "no")
+    if always_deep:
+        skip_strong = False
 
     features: List[Dict[str, Any]] = [
         _pred_audit_line(),
@@ -67,10 +70,12 @@ def augment_health_for_ui(health: Dict[str, Any]) -> Dict[str, Any]:
             "ok": heavy_enabled,
             "ms": None,
             "prediction_effect": (
-                "Default **on**. Per-fixture, heavy is skipped only when APIs already cover odds, xG, form, stats, and table positions (`HIBS_SKIP_HEAVY_WHEN_API_STRONG`, default on). "
+                "Default **on** for every fixture (`HIBS_ALWAYS_DEEP_SCRAPE` default on). "
+                "Set `HIBS_SKIP_HEAVY_WHEN_API_STRONG=1` to skip heavy only when APIs already cover odds, xG, form, stats, and table positions. "
                 "Set `HIBS_ENABLE_HEAVY_SCRAPERS=0` only if heavy HTML is **detrimental** (blocks, ToS, rate limits)."
                 if skip_strong
-                else "Default **on** for every fixture. Set `HIBS_SKIP_HEAVY_WHEN_API_STRONG=1` to skip heavy when APIs fully cover the same inputs."
+                else "Default **on** for every fixture (`HIBS_ALWAYS_DEEP_SCRAPE` / `HIBS_SKIP_HEAVY_WHEN_API_STRONG=0`). "
+                "Set `HIBS_SKIP_HEAVY_WHEN_API_STRONG=1` to skip heavy when APIs fully cover the same inputs."
             ),
         },
     ]
@@ -98,7 +103,7 @@ def augment_health_for_ui(health: Dict[str, Any]) -> Dict[str, Any]:
 
     if heavy_enabled and skip_strong:
         bullets.append(
-            "Heavy scrapers (FBref + full Understat) are on by default; they are skipped only on fixtures where book odds, API xG, 4+ recent games each side, season stats, and league positions already cover what heavy would add."
+            "Heavy scrapers (FBref + full Understat) are on; `HIBS_SKIP_HEAVY_WHEN_API_STRONG=1` skips them only when book odds, API xG, 4+ recent games each side, season stats, and league positions already cover what heavy would add."
         )
     elif heavy_enabled:
         bullets.append("Heavy scrapers run on every fixture when supplemental is on; watch FBref rate limits.")

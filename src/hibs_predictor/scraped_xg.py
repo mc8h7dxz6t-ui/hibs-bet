@@ -128,7 +128,8 @@ def resolve_scraped_xg(
         return None
 
     current = str(enriched.get("xg_source") or "").lower()
-    if current in ("api_fixture_xg", "stats_api_xg"):
+    always_deep = os.getenv("HIBS_ALWAYS_DEEP_SCRAPE", "1").lower() not in ("0", "false", "no", "off")
+    if current in ("api_fixture_xg", "stats_api_xg") and not always_deep:
         return None
 
     from hibs_predictor.fixture_utils import fixture_team_id, fixture_team_name
@@ -249,6 +250,14 @@ def resolve_scraped_xg(
     return None
 
 
+def _xg_source_score(tag: str, enriched: Dict[str, Any]) -> float:
+    from hibs_predictor.data_quality import _xg_points
+
+    n_h = float(enriched.get("home_recent_n") or 0)
+    n_a = float(enriched.get("away_recent_n") or 0)
+    return _xg_points(str(tag or "").lower(), n_h, n_a, enriched)
+
+
 def apply_scraped_xg_to_enriched(
     fixture: Dict[str, Any],
     league_code: str,
@@ -259,6 +268,9 @@ def apply_scraped_xg_to_enriched(
     if not resolved:
         return enriched
     xh, xa, tag, meta = resolved
+    current = str(enriched.get("xg_source") or "").lower()
+    if current and _xg_source_score(tag, enriched) < _xg_source_score(current, enriched):
+        return enriched
     enriched["xg_home"] = float(xh)
     enriched["xg_away"] = float(xa)
     enriched["xg_source"] = tag

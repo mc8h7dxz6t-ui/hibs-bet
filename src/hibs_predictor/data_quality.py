@@ -144,12 +144,11 @@ def _xg_points(src: str, n_h: float, n_a: float, enriched: Optional[Dict[str, An
     if s in ("partial_scraped_xg", "mixed_api_goals_proxy", "partial_single_side", "partial_xg"):
         return 10.0
     if s == "goals_proxy":
-        # Cap proxy credit when a rescored row still carries goals-only xG after a deep pass.
         if n_h >= 8.0 and n_a >= 8.0:
-            return 10.0
+            return 12.0
         if n_h >= 4.0 and n_a >= 4.0:
-            return 8.0
-        return 5.0
+            return 10.0
+        return 6.0
     if s == "unknown":
         return 4.0
     return 6.0

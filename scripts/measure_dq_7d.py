@@ -14,6 +14,8 @@ os.chdir(ROOT)
 os.environ.setdefault("HIBS_FETCH_DAYS", "7")
 os.environ.setdefault("HIBS_SCRAPE_XG", "1")
 os.environ.setdefault("HIBS_ENABLE_SUPPLEMENTAL", "1")
+os.environ.setdefault("HIBS_ALWAYS_DEEP_SCRAPE", "1")
+os.environ.setdefault("HIBS_SKIP_HEAVY_WHEN_API_STRONG", "0")
 os.environ.setdefault("HIBS_TARGET_DQ_PCT", "90")
 
 

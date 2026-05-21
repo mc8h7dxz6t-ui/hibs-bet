@@ -3,7 +3,8 @@
 Env:
   HIBS_ENABLE_SUPPLEMENTAL — default on; set 0 to skip all supplemental HTTP.
   HIBS_ENABLE_HEAVY_SCRAPERS — FBref + full Understat (default **on**). Set to 0 only when heavy HTML is **detrimental** (rate limits, IP blocks, policy).
-  HIBS_SKIP_HEAVY_WHEN_API_STRONG — default 1: per-fixture, skip heavy **only** when APIs already supply book odds, API/Stats xG, 4+ recent games each side, season stats, **and** league positions (same signal FBref/Understat would mainly reinforce).
+  HIBS_ALWAYS_DEEP_SCRAPE — default **on**: always run heavy/light supplemental scrapers when scrape is enabled (see ``HIBS_SCRAPE_XG``).
+  HIBS_SKIP_HEAVY_WHEN_API_STRONG — default **off**: set to 1 to skip FBref/full Understat per-fixture when APIs already cover odds, xG, form, stats, and table positions.
   HIBS_ENABLE_UNDERSTAT_LIGHT — Understat xG row for fixtures in policy window (default **on** for supported leagues).
   HIBS_SCRAPE_XG — after supplemental, apply Understat + Scottish FBref + recent-match xG into ``xg_home`` / ``xg_away`` (default on).
   HIBS_ENABLE_SCOTTISH_FBREF_XG — FBref SPFL schedule xG for SCOTLAND* leagues (default on).
@@ -28,11 +29,18 @@ from hibs_predictor.cache import Cache
 from hibs_predictor.data_quality import _has_stats, _position_ok
 
 
+def _always_deep_scrape() -> bool:
+    """When on (default), never skip heavy scrapers for API-strong fixtures."""
+    return os.getenv("HIBS_ALWAYS_DEEP_SCRAPE", "1").lower() not in ("0", "false", "no", "off")
+
+
 def _skip_heavy_when_api_strong(enriched: Dict[str, Any]) -> tuple:
     """If True, skip FBref / full Understat: APIs already cover the same inputs heavy would reinforce."""
+    if _always_deep_scrape():
+        return False, ""
     if os.getenv("HIBS_MAX_DATA", "").strip().lower() in ("1", "true", "yes", "on"):
         return False, ""
-    if os.getenv("HIBS_SKIP_HEAVY_WHEN_API_STRONG", "1").lower() in ("0", "false", "no"):
+    if os.getenv("HIBS_SKIP_HEAVY_WHEN_API_STRONG", "0").lower() in ("0", "false", "no"):
         return False, ""
     if not enriched.get("odds_available"):
         return False, ""
@@ -81,7 +89,10 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
     key = f"supplemental_{fid}_{league_code}"
     hit = cache.get(key, ttl_hours=6)
     if hit:
-        return hit
+        skip_heavy_now, _ = _skip_heavy_when_api_strong(enriched)
+        stale_skip = isinstance(hit, dict) and hit.get("heavy_skipped") and not skip_heavy_now
+        if not stale_skip:
+            return hit
 
     out: Dict[str, Any] = {}
     from hibs_predictor.fixture_utils import fixture_team_name
