@@ -520,6 +520,7 @@ function doFilter(f, btn){
 
 renderSlip();
 document.addEventListener('hibs-odds-format-change', renderSlip);
+document.addEventListener('hibs-betslip-change', syncAccaLegsGlobal);
 // Default: show value bets
 doFilter('value', document.querySelector('.fbtn.fgold'));
 </script>

@@ -8,11 +8,14 @@ import os
 from typing import Any, Dict, List, Optional
 
 from hibs_predictor.assistant_recommendations import (
+    _build_acca,
     _exclusion_reason,
     _kickoff_display,
     _match_label,
+    _rank_all_legs,
     assistant_min_data_pct,
     assistant_min_form_matches,
+    is_analyzable,
 )
 
 
@@ -246,3 +249,177 @@ def pick_recommendation_line(
     if tier_bits:
         line += f" ({', '.join(tier_bits)})"
     return line
+
+
+def leg_slip_payload(leg: Dict[str, Any]) -> Dict[str, Any]:
+    """Structured leg for assistant UI → HibsBetslip.addSelection."""
+    enriched = dict(leg)
+    enriched["slip"] = {
+        "fixture_id": leg.get("fixture_id"),
+        "home": leg.get("home"),
+        "away": leg.get("away"),
+        "market_key": leg.get("market_key"),
+        "market_label": leg.get("market_label"),
+        "odds": leg.get("odds"),
+        "league": leg.get("league_name") or leg.get("league"),
+    }
+    return enriched
+
+
+def enrich_acca_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for acca in items or []:
+        copy = dict(acca)
+        copy["legs"] = [leg_slip_payload(l) for l in (acca.get("legs") or [])]
+        out.append(copy)
+    return out
+
+
+def enrich_leg_list(legs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [leg_slip_payload(l) for l in legs]
+
+
+def build_acca_window_summary(packets: List[Dict[str, Any]]) -> str:
+    """One-line card summary for acca-first assistant context."""
+    eligible = sum(1 for p in packets if is_analyzable(p))
+    value_n = sum(1 for p in packets if p.get("has_value_bet") and is_analyzable(p))
+    dual = 0
+    for p in packets:
+        for v in p.get("value_bets_display") or []:
+            if isinstance(v, dict) and v.get("value_dual_agree"):
+                dual += 1
+                break
+    scanned = len(packets)
+    if not scanned:
+        return "No fixtures in the current window — widen fetch days or refresh."
+    parts = [f"{scanned} games loaded", f"{eligible} with full model data"]
+    if value_n:
+        parts.append(f"{value_n} value flags")
+    if dual:
+        parts.append(f"{dual} dual-agree value")
+    return " · ".join(parts) + "."
+
+
+def build_acca_candidates(
+    packets: List[Dict[str, Any]],
+    *,
+    limit: int = 24,
+) -> List[Dict[str, Any]]:
+    """Ranked leg options across the card (one best market per fixture, then extras)."""
+    ranked = _rank_all_legs(packets)
+    by_fixture: Dict[Any, List[Dict[str, Any]]] = {}
+    for leg in ranked:
+        fid = leg.get("fixture_id")
+        by_fixture.setdefault(fid, []).append(leg)
+    ordered: List[Dict[str, Any]] = []
+    for fid in sorted(by_fixture.keys(), key=lambda f: -(by_fixture[f][0].get("score") or 0)):
+        for leg in by_fixture[fid][:2]:
+            pkt = next((p for p in packets if p.get("id") == fid), {})
+            leg = dict(leg)
+            leg["rationale"] = _leg_candidate_blurb(pkt, leg)
+            ordered.append(leg_slip_payload(leg))
+            if len(ordered) >= limit:
+                return ordered
+    return ordered
+
+
+def _leg_candidate_blurb(packet: Dict[str, Any], leg: Dict[str, Any]) -> str:
+    bits: List[str] = []
+    mp = leg.get("model_pct")
+    if mp is not None:
+        bits.append(f"model {mp}%")
+    if leg.get("is_value") and leg.get("edge_pct") is not None:
+        bits.append(f"+{leg['edge_pct']:.1f}% edge")
+    dq = packet.get("data_quality_pct")
+    if dq is not None:
+        bits.append(f"dq {dq}%")
+    for v in packet.get("value_bets_display") or []:
+        if isinstance(v, dict) and v.get("market_key") == leg.get("market_key") and v.get("value_dual_agree"):
+            bits.append("dual agree")
+            break
+    ps = packet.get("probability_scores") or {}
+    mk = leg.get("market_key") or ""
+    if mk == "btts_yes" and ps.get("btts_pct") is not None:
+        bits.append(f"BTTS {ps['btts_pct']}%")
+    if mk == "over_25" and ps.get("over25_pct") is not None:
+        bits.append(f"O2.5 {ps['over25_pct']}%")
+    if mk in ("home_win", "away_win") and ps.get("home_win_pct") is not None:
+        bits.append(
+            f"1X2 H{ps.get('home_win_pct')}% D{ps.get('draw_pct')}% A{ps.get('away_win_pct')}%"
+        )
+    return " · ".join(bits) if bits else "meets data bar"
+
+
+def _acca_rank_score(acca: Dict[str, Any]) -> float:
+    conf = float(acca.get("joint_confidence_pct") or 0)
+    legs = acca.get("legs") or []
+    leg_scores = sum(float(l.get("score") or l.get("model_pct") or 0) for l in legs)
+    thin_penalty = sum(12.0 for l in legs if (l.get("data_quality_pct") or 100) < assistant_min_data_pct())
+    combined = float(acca.get("combined_odds") or 1.0)
+    price_bonus = min(8.0, max(0.0, (combined - 2.5) * 2.0))
+    return conf * 0.55 + leg_scores * 0.08 + price_bonus - thin_penalty
+
+
+def build_best_acca_ideas(
+    recommendations: Dict[str, Any],
+    *,
+    max_ideas: int = 5,
+    min_legs: int = 2,
+    max_legs: int = 4,
+    prefer_safer: bool = False,
+    target_legs: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Rank 2–4 leg pre-built accas from suggestions + top singles combos."""
+    ideas: List[Dict[str, Any]] = []
+    seen: set = set()
+
+    def _sig(acca: Dict[str, Any]) -> tuple:
+        return tuple(
+            (str(l.get("fixture_id")), str(l.get("market_key")))
+            for l in (acca.get("legs") or [])
+        )
+
+    for acca in recommendations.get("acca_suggestions") or []:
+        lc = acca.get("leg_count") or len(acca.get("legs") or [])
+        if lc < min_legs or lc > max_legs:
+            continue
+        if target_legs is not None and lc != target_legs:
+            continue
+        sig = _sig(acca)
+        if sig in seen:
+            continue
+        seen.add(sig)
+        ideas.append(dict(acca))
+
+    singles = recommendations.get("best_singles") or []
+    for n in range(min_legs, max_legs + 1):
+        if target_legs is not None and n != target_legs:
+            continue
+        chunk = singles[:n]
+        if len(chunk) < n:
+            continue
+        fids = [str(l.get("fixture_id")) for l in chunk]
+        if len(set(fids)) < n:
+            continue
+        title = f"Top {n}-fold ({'safer stats' if prefer_safer and n <= 3 else 'mixed markets'})"
+        built = _build_acca(title, "best_pick", chunk, ["Strongest ranked legs from today's card."], min_legs=n, max_legs=n)
+        if built:
+            sig = _sig(built)
+            if sig not in seen:
+                seen.add(sig)
+                ideas.append(built)
+
+    if prefer_safer:
+        ideas.sort(key=lambda a: (-_acca_rank_score(a), float(a.get("combined_odds") or 99)))
+    else:
+        ideas.sort(key=lambda a: (-_acca_rank_score(a), -float(a.get("combined_odds") or 0)))
+
+    return enrich_acca_items(ideas[:max_ideas])
+
+
+def acca_greeting_lines(packets: List[Dict[str, Any]]) -> List[str]:
+    return [
+        "I can build accas from today's card — want 2–5 legs, safer or bigger price?",
+        "Try **best acca**, **acca tips**, **suggest legs**, or **BTTS acca** / **mixed acca**.",
+        build_acca_window_summary(packets),
+    ]

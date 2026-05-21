@@ -46,7 +46,7 @@
     }
 
     function welcomeHtml() {
-        return '<div class="hibs-assistant-card"><p class="ac-line">Ask any football or betting question in plain English. I infer the fixture, team, market, or topic from your message and only use available model data.</p><p class="ac-line" style="font-size:0.88em;color:var(--muted);">Try: <em>Hibs deep dive</em>, <em>best bets</em>, <em>mixed acca</em>, <em>review acca</em>, <em>explain Arsenal xG</em>, <em>value bets</em>.</p></div>';
+        return '<div class="hibs-assistant-card"><p class="ac-line">I can build accas from today\'s card — want 2–5 legs, safer or bigger price?</p><p class="ac-line" style="font-size:0.88em;color:var(--muted);">Try <em>best acca</em>, <em>acca tips</em>, <em>suggest legs</em>, <em>BTTS acca</em>, or name a fixture for a single-game read.</p></div>';
     }
 
     function setBusy(on) {
@@ -103,17 +103,18 @@
     function renderBlock(block) {
         var t = block.type;
         if (t === 'text') {
-            var html = '<div class="hibs-assistant-card"><ul>';
+            var html = '<div class="hibs-assistant-card">';
             (block.lines || []).forEach(function (line) {
-                html += '<li>' + formatLine(line) + '</li>';
+                if (!line) return;
+                html += '<p class="ac-line">' + formatLine(line) + '</p>';
             });
-            html += '</ul></div>';
+            html += '</div>';
             appendBot(html);
             return;
         }
         if (t === 'summary') {
             var s = block.data || {};
-            var h = '<div class="hibs-assistant-card"><p class="ac-line"><strong>Deep dive</strong></p>';
+            var h = '<div class="hibs-assistant-card"><p class="ac-line"><strong>Card scan</strong></p>';
             h += '<p class="ac-line">' + esc(s.summary_line || '') + '</p>';
             if (s.excluded_by_reason) {
                 var parts = [];
@@ -130,6 +131,13 @@
             appendBot('<p class="ac-line"><strong>Best singles</strong></p>');
             (block.items || []).forEach(function (leg) {
                 appendBot(singleCardHtml(leg));
+            });
+            return;
+        }
+        if (t === 'suggest_legs') {
+            appendBot('<p class="ac-line"><strong>Leg options</strong> — add any to your slip</p>');
+            (block.items || []).forEach(function (leg) {
+                appendBot(suggestLegCardHtml(leg));
             });
             return;
         }
@@ -151,7 +159,7 @@
                 if (!rows.length) return;
                 appendBot('<p class="ac-line" style="font-weight:700;margin-top:6px;">' + esc(bucketLabel(bucket)) + '</p>');
                 rows.slice(0, 3).forEach(function (leg) {
-                    appendBot('<p class="ac-line">' + legHtml(leg) + '</p>');
+                    appendBot(suggestLegCardHtml(leg));
                 });
             });
             return;
@@ -178,6 +186,80 @@
         if (t === 'acca_review') {
             appendBot(accaReviewHtml(block.data || {}));
         }
+    }
+
+    function mapMarketToOutcome(marketKey) {
+        var m = { home_win: 'home', away_win: 'away', draw: 'draw' };
+        return m[marketKey] || marketKey;
+    }
+
+    function legFromPayload(leg) {
+        if (!leg) return null;
+        var slip = leg.slip || leg;
+        if (!slip.fixture_id && !leg.fixture_id) return null;
+        return {
+            fixture_id: slip.fixture_id || leg.fixture_id,
+            home: slip.home || leg.home,
+            away: slip.away || leg.away,
+            league: slip.league || leg.league_name || leg.league || '',
+            market_key: slip.market_key || leg.market_key,
+            market_label: slip.market_label || leg.market_label,
+            odds: slip.odds != null ? slip.odds : leg.odds
+        };
+    }
+
+    function addLegToSlip(leg, openDrawer) {
+        if (!window.HibsBetslip || typeof HibsBetslip.addSelection !== 'function') {
+            alert('Betslip not loaded on this page.');
+            return false;
+        }
+        var p = legFromPayload(leg);
+        if (!p || !p.odds || parseFloat(p.odds) <= 1) {
+            alert('No book price on this leg.');
+            return false;
+        }
+        HibsBetslip.addSelection({
+            fid: String(p.fixture_id),
+            home: p.home,
+            away: p.away,
+            league: p.league,
+            outcome: mapMarketToOutcome(p.market_key),
+            odds: parseFloat(p.odds),
+            label: p.market_label
+        });
+        if (openDrawer !== false) {
+            HibsBetslip.openDrawer();
+        }
+        syncAccaLegsFromBetslip();
+        return true;
+    }
+
+    function addAccaLegsToSlip(legs) {
+        var added = 0;
+        (legs || []).forEach(function (leg) {
+            if (addLegToSlip(leg, false)) added += 1;
+        });
+        if (added && window.HibsBetslip) {
+            HibsBetslip.openDrawer();
+        }
+        return added;
+    }
+
+    function syncAccaLegsFromBetslip() {
+        if (!window.HibsBetslip || typeof HibsBetslip.loadSlip !== 'function') return;
+        var slip = HibsBetslip.loadSlip();
+        var outcomeLabels = { home: 'Home Win', draw: 'Draw', away: 'Away Win' };
+        window.HIBS_ACCA_LEGS = Object.keys(slip).map(function (fid) {
+            var s = slip[fid];
+            return {
+                fixture_id: fid,
+                home: s.home,
+                away: s.away,
+                market_key: s.outcome,
+                market_label: s.label || outcomeLabels[s.outcome] || s.outcome,
+                odds: s.odds
+            };
+        });
     }
 
     function dqBadgeClass(pct) {
@@ -241,6 +323,45 @@
         return '<span data-odds-dec="' + dec + '">' + txt + '</span>';
     }
 
+    function legPayloadAttr(leg) {
+        try {
+            return encodeURIComponent(JSON.stringify(legFromPayload(leg) || leg));
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function parseLegPayload(raw) {
+        if (!raw) return null;
+        try {
+            return JSON.parse(decodeURIComponent(raw));
+        } catch (e) {
+            try {
+                return JSON.parse(raw);
+            } catch (e2) {
+                return null;
+            }
+        }
+    }
+
+    function addToSlipButtonHtml(leg) {
+        return '<button type="button" class="hibs-assistant-send hibs-leg-slip" data-leg="' + legPayloadAttr(leg) + '">Add to slip</button>';
+    }
+
+    function suggestLegCardHtml(leg) {
+        var h = '<div class="hibs-assistant-card hibs-leg-card">';
+        h += '<p class="ac-line">' + legHtml(leg) + '</p>';
+        if (leg.rationale) {
+            h += '<p class="ac-line" style="font-size:0.86em;color:var(--muted);">' + esc(leg.rationale) + '</p>';
+        }
+        if (leg.data_quality_pct != null) {
+            h += '<p class="ac-line" style="font-size:0.84em;">Data <span class="fr-dq fr-dq-compact ' + dqBadgeClass(leg.data_quality_pct) + '">' + leg.data_quality_pct + '%</span></p>';
+        }
+        h += '<p class="ac-line" style="margin-top:6px;">' + addToSlipButtonHtml(leg) + '</p>';
+        h += '</div>';
+        return h;
+    }
+
     function singleCardHtml(leg) {
         var h = '<div class="hibs-assistant-card">';
         h += '<p class="ac-line"><strong>' + esc(leg.match || (leg.home + ' v ' + leg.away)) + '</strong>';
@@ -260,12 +381,14 @@
             leg.rationale.forEach(function (b) { h += '<li>' + esc(b) + '</li>'; });
             h += '</ul>';
         }
+        h += '<p class="ac-line" style="margin-top:6px;">' + addToSlipButtonHtml(leg) + '</p>';
         h += '</div>';
         return h;
     }
 
     function accaCardHtml(acca) {
-        var html = '<div class="hibs-assistant-card hibs-acca-card">';
+        var legsAttr = encodeURIComponent(JSON.stringify((acca.legs || []).map(legFromPayload)));
+        var html = '<div class="hibs-assistant-card hibs-acca-card" data-acca-legs="' + legsAttr + '">';
         html += '<p class="ac-line"><strong>' + esc(acca.title) + '</strong> · ' + acca.leg_count + ' legs</p>';
         if (acca.combined_odds) {
             html += '<p class="ac-line">Combined <strong style="color:var(--gold);">' + oddsHtml(acca.combined_odds) + '</strong>';
@@ -276,17 +399,17 @@
         }
         html += '<ol class="hibs-acca-legs">';
         (acca.legs || []).forEach(function (leg) {
-            html += '<li>' + legHtml(leg) + '</li>';
+            html += '<li class="hibs-acca-leg-row">' + legHtml(leg);
+            html += ' ' + addToSlipButtonHtml(leg);
+            html += '</li>';
         });
         html += '</ol>';
         if (acca.rationale && acca.rationale.length) {
-            html += '<ul style="margin-top:6px;">';
-            acca.rationale.forEach(function (b) {
-                html += '<li style="font-size:0.88em;color:var(--muted);">' + esc(b) + '</li>';
-            });
-            html += '</ul>';
+            html += '<p class="ac-line" style="font-size:0.88em;color:var(--muted);margin-top:6px;">';
+            html += acca.rationale.slice(0, 2).map(function (b) { return esc(b); }).join(' ');
+            html += '</p>';
         }
-        html += '<p class="ac-line" style="margin-top:8px;"><button type="button" class="hibs-assistant-send hibs-acca-slip" data-acca-slip="1">Add legs to betslip</button></p>';
+        html += '<p class="ac-line" style="margin-top:8px;"><button type="button" class="hibs-assistant-send hibs-acca-slip" data-acca-slip="1">Add all legs to slip</button></p>';
         html += '</div>';
         return html;
     }
@@ -303,17 +426,13 @@
         });
         html += '</ol>';
         if (builder.estimated_independent_odds) {
-            html += '<p class="ac-line" style="font-size:0.86em;color:var(--muted);">Component odds multiply to ~' + oddsHtml(builder.estimated_independent_odds) + ', but same-game markets are correlated so get a live bookmaker quote.</p>';
+            html += '<p class="ac-line" style="font-size:0.86em;color:var(--muted);">Component odds multiply to ~' + oddsHtml(builder.estimated_independent_odds) + ' (correlated — get a book quote).</p>';
         }
         if (builder.joint_confidence_pct != null) {
             html += '<p class="ac-line">Model builder confidence: <strong>' + builder.joint_confidence_pct + '%</strong></p>';
         }
         if (builder.rationale && builder.rationale.length) {
-            html += '<ul style="margin-top:6px;">';
-            builder.rationale.forEach(function (b) {
-                html += '<li style="font-size:0.88em;color:var(--muted);">' + esc(b) + '</li>';
-            });
-            html += '</ul>';
+            html += '<p class="ac-line" style="font-size:0.88em;color:var(--muted);">' + esc(builder.rationale[0]) + '</p>';
         }
         if (builder.disclaimer) {
             html += '<p class="ac-line" style="font-size:0.78em;color:var(--muted);">' + esc(builder.disclaimer) + '</p>';
@@ -402,18 +521,24 @@
             el.textContent = html;
         }
         body.appendChild(el);
-        wireAccaSlipButtons(el);
+        wireSlipButtons(el);
         body.scrollTop = body.scrollHeight;
     }
 
-    function wireAccaSlipButtons(root) {
-        if (!root || !window.HibsBetslip) return;
+    function wireSlipButtons(root) {
+        if (!root) return;
+        root.querySelectorAll('.hibs-leg-slip').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var leg = parseLegPayload(btn.getAttribute('data-leg'));
+                if (leg) addLegToSlip(leg, true);
+            });
+        });
         root.querySelectorAll('[data-acca-slip]').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 var card = btn.closest('.hibs-acca-card');
                 if (!card) return;
-                /* legs parsed from DOM is fragile — user can use pick menus on dashboard */
-                HibsBetslip.openDrawer();
+                var legs = parseLegPayload(card.getAttribute('data-acca-legs'));
+                if (legs && legs.length) addAccaLegsToSlip(legs);
             });
         });
     }
@@ -436,5 +561,13 @@
     document.addEventListener('DOMContentLoaded', function () {
         init();
         if (!packets.length) refreshFromApi();
+        document.addEventListener('hibs-betslip-change', syncAccaLegsFromBetslip);
+        syncAccaLegsFromBetslip();
     });
+
+    window.HibsAssistant = {
+        addLegToSlip: addLegToSlip,
+        addAccaLegsToSlip: addAccaLegsToSlip,
+        syncAccaLegsFromBetslip: syncAccaLegsFromBetslip
+    };
 })();

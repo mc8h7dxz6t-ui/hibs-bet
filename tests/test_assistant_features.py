@@ -128,6 +128,97 @@ def test_acca_review_endpoint_returns_legs_array(monkeypatch):
     assert "model_pct" in leg or leg.get("implied_pct") is not None
 
 
+def _sample_packets_multi():
+    base = {
+        "kickoff_time": "15:00",
+        "data_quality_pct": 88.0,
+        "home_recent_n": 8,
+        "away_recent_n": 8,
+        "structured_insight": {"mode": "prediction", "pick": "BTTS Yes", "confidence_pct": 60},
+        "probability_scores": {
+            "home_win_pct": 45,
+            "draw_pct": 28,
+            "away_win_pct": 27,
+            "btts_pct": 62,
+            "over25_pct": 58,
+        },
+        "home_form_summary": {"played": 5, "wins": 3, "draws": 1, "losses": 1, "gf": 8, "ga": 5, "btts": 3, "over25": 3},
+        "away_form_summary": {"played": 5, "wins": 2, "draws": 1, "losses": 2, "gf": 6, "ga": 6, "btts": 4, "over25": 2},
+    }
+    return [
+        {
+            **base,
+            "id": 1,
+            "home": "Arsenal",
+            "away": "Burnley",
+            "pick_menu": [
+                {"key": "btts_yes", "label": "BTTS Yes", "model_pct": 62.0, "odds": 1.72, "is_value": True, "edge_pct": 4.0},
+                {"key": "over_25", "label": "Over 2.5", "model_pct": 58.0, "odds": 1.85},
+            ],
+        },
+        {
+            **base,
+            "id": 2,
+            "home": "Celtic",
+            "away": "Rangers",
+            "pick_menu": [
+                {"key": "home_win", "label": "Home Win", "model_pct": 55.0, "odds": 2.05},
+                {"key": "btts_yes", "label": "BTTS Yes", "model_pct": 60.0, "odds": 1.65},
+            ],
+        },
+        {
+            **base,
+            "id": 3,
+            "home": "Liverpool",
+            "away": "Fulham",
+            "pick_menu": [
+                {"key": "over_25", "label": "Over 2.5", "model_pct": 64.0, "odds": 1.7},
+                {"key": "over_15", "label": "Over 1.5", "model_pct": 80.0, "odds": 1.22},
+            ],
+        },
+    ]
+
+
+def test_best_acca_includes_slip_payload_on_legs():
+    from hibs_predictor.assistant_chat import handle_chat
+    from hibs_predictor.assistant_recommendations import build_assistant_recommendations
+
+    packets = _sample_packets_multi()
+    rec = build_assistant_recommendations(packets)
+    reply = handle_chat("best acca", packets, recommendations=rec)
+    assert reply["intent"] == "best_acca"
+    acca_blocks = [b for b in reply["blocks"] if b.get("type") == "accas"]
+    assert acca_blocks
+    legs = acca_blocks[0]["items"][0]["legs"]
+    assert legs
+    slip = legs[0].get("slip") or legs[0]
+    for key in ("fixture_id", "home", "away", "market_key", "market_label", "odds"):
+        assert key in slip
+
+
+def test_suggest_legs_intent_returns_candidates():
+    from hibs_predictor.assistant_chat import handle_chat
+    from hibs_predictor.assistant_context import build_acca_candidates
+
+    packets = _sample_packets_multi()
+    reply = handle_chat("suggest legs", packets)
+    assert reply["intent"] == "suggest_legs"
+    leg_blocks = [b for b in reply["blocks"] if b.get("type") == "suggest_legs"]
+    assert leg_blocks and leg_blocks[0]["items"]
+    assert build_acca_candidates(packets)
+
+
+def test_assistant_add_to_slip_hook(monkeypatch):
+    """JS exports HibsAssistant.addLegToSlip — verify leg payload shape for betslip."""
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / "static" / "hibs_assistant.js").read_text(encoding="utf-8")
+    assert "HibsBetslip.addSelection" in js
+    assert "addLegToSlip" in js
+    assert "data-leg" in js
+    assert "HibsAssistant" in js
+
+
 def test_acca_review_flags_thin_data(monkeypatch):
     from hibs_predictor.acca_review import review_acca_legs
 

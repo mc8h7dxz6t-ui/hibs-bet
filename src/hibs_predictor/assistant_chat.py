@@ -9,7 +9,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from hibs_predictor.acca_review import review_acca_legs
 from hibs_predictor.assistant_context import (
+    acca_greeting_lines,
+    build_acca_candidates,
+    build_acca_window_summary,
+    build_best_acca_ideas,
     build_fixture_context_lines,
+    enrich_acca_items,
     pick_recommendation_line,
 )
 from hibs_predictor.assistant_recommendations import (
@@ -24,16 +29,10 @@ from hibs_predictor.assistant_recommendations import (
 )
 
 _HELP_LINES = [
-    "Ask in plain English — I use the same live model, odds, and data-quality gates as the dashboard.",
-    "Examples:",
-    "• “best bets” or “top singles by stats”",
-    "• “BTTS acca” / “over 2.5 acca” / “win acca” / “over 1.5” / “over 3.5”",
-    "• “mixed acca” or “multi market acca” (strongest leg per match, any market)",
-    "• “bet builder for this game” for correlated same-game market ideas",
-    "• “value bets” / “deep dive all fixtures”",
-    "• “stats for Hibs v Hearts”, “analyze Rangers”, “why Arsenal value?”, “xG and form for Chelsea”",
-    "• “review acca” / “review my slip” (on acca builder — use Review button or paste legs)",
-    "• “table”, “standings”, “why league position matters”, “team news”, “what is missing?”",
+    "Acca-first — same model and dq gates as the dashboard.",
+    "best acca · acca tips · suggest legs · BTTS acca · mixed acca · 3-leg safer acca",
+    "review acca (on /acca) · value bets · best singles",
+    "Single-game: stats / table / bet builder for Team A v Team B",
 ]
 
 
@@ -217,12 +216,34 @@ def _selected_deep_dive_blocks(pkt: Dict[str, Any]) -> List[Dict[str, Any]]:
     return blocks
 
 
+def _parse_leg_count(q: str) -> Optional[int]:
+    m = re.search(r"\b([2-5])\s*[- ]?\s*leg", q)
+    if m:
+        return int(m.group(1))
+    if "double" in q or "2-fold" in q:
+        return 2
+    if "treble" in q or "3-fold" in q:
+        return 3
+    if "4-fold" in q or "fourfold" in q:
+        return 4
+    return None
+
+
 def parse_intent(question: str) -> Tuple[str, Dict[str, Any]]:
     q = _norm(question)
     if not q:
-        return "help", {}
+        return "acca_builder", {}
     if any(x in q for x in ("help", "what can you", "how do i", "commands")):
         return "help", {}
+    if any(x in q for x in ("best acca", "acca tips", "acca tip", "top acca", "acca ideas", "acca picks")):
+        return "best_acca", {}
+    if any(x in q for x in ("suggest legs", "leg options", "pick legs", "acca legs", "choose legs", "leg picker")):
+        return "suggest_legs", {}
+    if any(x in q for x in ("build acca", "make acca", "acca builder", "stack acca")) or (
+        "acca" in q and any(x in q for x in ("safer", "bigger", "price", "odds", "leg"))
+    ):
+        prefer_safer = any(x in q for x in ("safer", "safe", "lower odds", "banker"))
+        return "acca_builder", {"prefer_safer": prefer_safer, "leg_count": _parse_leg_count(q)}
     if any(x in q for x in ("deep dive", "deep-dive", "scan all", "all fixtures", "full scan")):
         return "deep_dive", {}
     if any(x in q for x in ("bet builder", "builder", "same game", "sgm", "game line", "game-line")):
@@ -274,7 +295,67 @@ def handle_chat(
     }
 
     if intent == "help":
-        out["blocks"] = [{"type": "text", "lines": _HELP_LINES}]
+        out["blocks"] = [
+            {"type": "text", "lines": acca_greeting_lines(packets)},
+            {"type": "text", "lines": _HELP_LINES},
+        ]
+        return out
+
+    if intent == "best_acca":
+        ideas = build_best_acca_ideas(rec, max_ideas=5)
+        lines = ["Here are the strongest acca ideas on today's card (2–4 legs each)."]
+        thin = [
+            l.get("market_label")
+            for a in ideas
+            for l in (a.get("legs") or [])
+            if (l.get("data_quality_pct") or 100) < assistant_min_data_pct()
+        ]
+        if thin:
+            lines.append(f"Caution: thin dq on — {', '.join(thin[:3])}.")
+        if not ideas:
+            lines.append("Not enough priced legs right now — try suggest legs or mixed acca.")
+            out["blocks"] = [{"type": "text", "lines": lines}]
+        else:
+            out["blocks"] = [
+                {"type": "text", "lines": lines},
+                {"type": "accas", "items": ideas},
+            ]
+        return out
+
+    if intent == "acca_builder":
+        n = params.get("leg_count")
+        ideas = build_best_acca_ideas(
+            rec,
+            max_ideas=4,
+            target_legs=n,
+            prefer_safer=bool(params.get("prefer_safer")),
+        )
+        tone = "safer" if params.get("prefer_safer") else "bigger price"
+        leg_hint = f"{n}-leg " if n else ""
+        lines = [f"Built {leg_hint}acca ideas leaning {tone} — tap Add to slip on any leg or add the whole acca."]
+        if not ideas:
+            lines.append("Could not stack enough legs — try suggest legs or lower the data bar.")
+            out["blocks"] = [{"type": "text", "lines": lines}]
+        else:
+            out["blocks"] = [
+                {"type": "text", "lines": lines},
+                {"type": "accas", "items": ideas},
+                {"type": "suggest_legs", "items": build_acca_candidates(packets, limit=14)},
+            ]
+        return out
+
+    if intent == "suggest_legs":
+        candidates = build_acca_candidates(packets)
+        out["blocks"] = [
+            {
+                "type": "text",
+                "lines": [
+                    "Leg options from today's card — mix your own acca (one pick per game on the slip).",
+                    build_acca_window_summary(packets),
+                ],
+            },
+            {"type": "suggest_legs", "items": candidates},
+        ]
         return out
 
     if intent == "acca_review":
@@ -306,7 +387,7 @@ def handle_chat(
             return out
         out["blocks"] = [
             {"type": "summary", "data": rec.get("deep_dive_summary")},
-            {"type": "accas", "items": rec.get("acca_suggestions") or []},
+            {"type": "accas", "items": enrich_acca_items(rec.get("acca_suggestions") or [])},
             {"type": "builders", "items": rec.get("bet_builder_suggestions") or []},
             {"type": "highlights", "data": rec.get("market_highlights") or {}},
         ]
@@ -342,7 +423,7 @@ def handle_chat(
                             "Here is a multi-market acca using the strongest stats per match instead:",
                         ],
                     },
-                    {"type": "accas", "items": [mixed]},
+                    {"type": "accas", "items": enrich_acca_items([mixed])},
                 ]
             else:
                 out["blocks"] = [
@@ -355,7 +436,7 @@ def handle_chat(
                     }
                 ]
         else:
-            out["blocks"] = [{"type": "accas", "items": accas}]
+            out["blocks"] = [{"type": "accas", "items": enrich_acca_items(accas)}]
         return out
 
     if intent == "mixed_acca":
@@ -367,7 +448,7 @@ def handle_chat(
         if not mixed:
             out["blocks"] = [{"type": "text", "lines": ["Could not build a 3+ leg multi-market acca — refresh fixtures or lower data bar in .env."]}]
         else:
-            out["blocks"] = [{"type": "accas", "items": mixed}]
+            out["blocks"] = [{"type": "accas", "items": enrich_acca_items(mixed)}]
         return out
 
     if intent == "bet_builder":
@@ -423,9 +504,18 @@ def handle_chat(
                 ]
                 return out
             if intent == "general":
+                ideas = build_best_acca_ideas(rec, max_ideas=3)
                 out["blocks"] = [
-                    {"type": "text", "lines": _HELP_LINES[:2] + ["Could not match a team or fixture — name a team or both sides."]}
+                    {"type": "text", "lines": acca_greeting_lines(packets)},
                 ]
+                if ideas:
+                    out["blocks"].append({"type": "accas", "items": ideas})
+                out["blocks"].append(
+                    {
+                        "type": "text",
+                        "lines": ["Name a team or fixture for a single-game read, or ask best acca / suggest legs."],
+                    }
+                )
             else:
                 out["blocks"] = [{"type": "text", "lines": ["No matching fixture — select one above or name both teams (e.g. Hibs v Hearts)."]}]
             return out
@@ -462,7 +552,7 @@ def handle_chat(
             blocks.append(
                 {
                     "type": "text",
-                    "lines": ["Tip: ask “mixed acca”, “best bets”, or “BTTS acca” for built slips."],
+                    "lines": ["For accas: best acca, suggest legs, or BTTS / mixed acca."],
                 }
             )
         out["blocks"] = blocks

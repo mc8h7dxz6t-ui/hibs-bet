@@ -1413,12 +1413,14 @@ def _assistant_packets_from_fixtures(fixtures: List[Dict[str, Any]]) -> List[Dic
 
 
 def _assistant_bundle(fixtures: List[Dict[str, Any]]) -> Dict[str, Any]:
+    from hibs_predictor.assistant_context import build_acca_candidates
     from hibs_predictor.assistant_recommendations import build_assistant_recommendations
 
     packets = _assistant_packets_from_fixtures(fixtures)
     return {
         "packets": packets,
         "recommendations": build_assistant_recommendations(packets),
+        "acca_candidates": build_acca_candidates(packets),
         "count": len(packets),
     }
 
