@@ -27,6 +27,23 @@ sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d hibs-bet.co.uk -d www.hibs-bet.co.uk
 ```
 
+
+### Safer full data (~2GB VPS)
+
+Balanced profile: 7-day fixture window, `HIBS_MAX_DATA=1`, live dashboard (`HIBS_DASHBOARD_LITE=0`), skip heavy scrapes when APIs are strong, 3 fixture workers, warm cache, player/injury insight flags. Gunicorn **2 workers**, **180s** timeout.
+
+```bash
+sudo bash /opt/hibs-bet/deploy/apply-vps-safe-production.sh
+```
+
+**From your Mac:** SSH must use your deploy key (`root@77.68.89.73`). If you see `Permission denied (publickey,password)`, the Cursor agent sandbox cannot use your Mac keychain — run the script locally:
+
+```bash
+ssh root@77.68.89.73 'cd /opt/hibs-bet && git pull && sudo bash deploy/apply-vps-safe-production.sh'
+```
+
+Or pipe the script: `ssh root@77.68.89.73 'bash -s' < deploy/apply-vps-safe-production.sh` (after `git pull` on the server so the script exists).
+
 ### 1 GB VPS tuning (worker timeout / OOM)
 
 Default unit uses **1 worker** and **300s** timeout. After deploy, on the server:
