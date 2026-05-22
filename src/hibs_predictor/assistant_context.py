@@ -690,7 +690,7 @@ def build_best_acca_ideas(
 
 def acca_greeting_lines(packets: List[Dict[str, Any]]) -> List[str]:
     return [
-        "I can build accas from today's card — want 2–5 legs, safer or bigger price?",
-        "Try **best acca**, **acca tips**, **suggest legs**, or **BTTS acca** / **mixed acca**.",
+        "I cover today's full fixture card — leagues, dq, value flags, and live games — not just one match.",
+        "Card-wide: **live**, **value bets**, **deep dive all** · Accas: **best acca**, **suggest legs**, **BTTS acca**.",
         build_acca_window_summary(packets),
     ]

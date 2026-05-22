@@ -935,12 +935,61 @@ def _safe_int_value(value: Any, default: int = 0) -> int:
 
 def _team_key(name: Any) -> str:
     import re
+    import unicodedata
 
-    text = re.sub(r"[^a-z0-9]+", " ", str(name or "").lower()).strip()
-    for suffix in (" fc", " afc", " cf", " sc"):
+    text = unicodedata.normalize("NFKD", str(name or ""))
+    text = "".join(c for c in text if not unicodedata.combining(c)).lower()
+    text = re.sub(r"[^a-z0-9]+", " ", text).strip()
+    for suffix in (" fc", " afc", " cf", " sc", " united", " city"):
         if text.endswith(suffix):
             text = text[: -len(suffix)].strip()
     return text
+
+
+def _team_names_match(a: str, b: str) -> bool:
+    """Loose match for fixture display names vs standings (e.g. Hibs vs Hibernian)."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if a in b or b in a:
+        return True
+    ap = a.split()
+    bp = b.split()
+    if ap and bp and ap[0] == bp[0] and len(ap[0]) > 3:
+        return True
+    for prefix in ("sc ", "fc ", "ac ", "as ", "sv ", "sk ", "rc ", "cd ", "cf "):
+        if a.startswith(prefix):
+            core = a[len(prefix) :].strip()
+            if core and (core == b or core in b or b in core):
+                return True
+        if b.startswith(prefix):
+            core = b[len(prefix) :].strip()
+            if core and (core == a or core in a or a in core):
+                return True
+    return False
+
+
+def _find_table_row_index(
+    rows: List[Dict[str, Any]],
+    team: str,
+    position_hint: Optional[Dict[str, Any]] = None,
+) -> Optional[int]:
+    key = _team_key(team)
+    if key:
+        for i, row in enumerate(rows):
+            if _team_key(row.get("team")) == key:
+                return i
+        for i, row in enumerate(rows):
+            if _team_names_match(key, _team_key(row.get("team"))):
+                return i
+    if position_hint and position_hint.get("position") not in (None, "", "?"):
+        pos = _safe_int_value(position_hint.get("position"), 999)
+        if pos != 999:
+            for i, row in enumerate(rows):
+                if _safe_int_value(row.get("position"), 999) == pos:
+                    return i
+    return None
 
 
 def _table_row_from_position(team: str, position: Dict[str, Any], source: str = "fixture") -> Optional[Dict[str, Any]]:
@@ -1163,29 +1212,39 @@ def _build_league_tables(fixtures: List[Dict[str, Any]], *, include_live: bool =
     return tables
 
 
-def _snapshot_for_team(rows: List[Dict[str, Any]], team: str) -> List[Dict[str, Any]]:
-    key = _team_key(team)
-    if not key:
-        return []
-    idx = next((i for i, row in enumerate(rows) if _team_key(row.get("team")) == key), None)
-    if idx is None:
-        return []
-    start = max(0, idx - 1)
-    end = min(len(rows), idx + 2)
-    snapshot = []
-    for i, row in enumerate(rows[start:end], start=start):
+def _snapshot_for_team(
+    rows: List[Dict[str, Any]],
+    team: str,
+    position_hint: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    idx = _find_table_row_index(rows, team, position_hint)
+    if idx is not None:
+        start = max(0, idx - 1)
+        end = min(len(rows), idx + 2)
+        snapshot = []
+        for i, row in enumerate(rows[start:end], start=start):
+            out = dict(row)
+            out["is_focus"] = i == idx
+            snapshot.append(out)
+        return snapshot
+    row = _table_row_from_position(team, position_hint or {})
+    if row:
         out = dict(row)
-        out["is_focus"] = i == idx
-        snapshot.append(out)
-    return snapshot
+        out["is_focus"] = True
+        return [out]
+    return []
 
 
 def _attach_table_snapshots(fixtures: List[Dict[str, Any]], tables: List[Dict[str, Any]]) -> None:
     by_code = {t["code"]: t.get("rows") or [] for t in tables}
     for fixture in fixtures:
         rows = by_code.get(fixture.get("league") or "", [])
-        fixture["home_table_snapshot"] = _snapshot_for_team(rows, str(fixture.get("home") or ""))
-        fixture["away_table_snapshot"] = _snapshot_for_team(rows, str(fixture.get("away") or ""))
+        fixture["home_table_snapshot"] = _snapshot_for_team(
+            rows, str(fixture.get("home") or ""), fixture.get("home_position")
+        )
+        fixture["away_table_snapshot"] = _snapshot_for_team(
+            rows, str(fixture.get("away") or ""), fixture.get("away_position")
+        )
 
 
 def _finalize_fixture_bundle(all_fixtures: List[Dict[str, Any]], *, attach_live: bool = False) -> Dict[str, Any]:

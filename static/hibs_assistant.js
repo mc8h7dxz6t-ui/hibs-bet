@@ -49,7 +49,7 @@
     }
 
     function welcomeHtml() {
-        return '<div class="hibs-assistant-card"><p class="ac-line">I can build accas from today\'s card — want 2–5 legs, safer or bigger price?</p><p class="ac-line" style="font-size:0.88em;color:var(--muted);">Try <em>best acca</em>, <em>acca tips</em>, <em>suggest legs</em>, <em>BTTS acca</em>, or name a fixture for a single-game read.</p></div>';
+        return '<div class="hibs-assistant-card"><p class="ac-line">Ask about today\'s full card — leagues, value, live — or build accas (2–5 legs).</p><p class="ac-line" style="font-size:0.88em;color:var(--muted);">Try <em>live</em>, <em>value bets</em>, <em>best acca</em>, <em>suggest legs</em>, or name a fixture for stats / table.</p></div>';
     }
 
     function setBusy(on) {

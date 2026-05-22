@@ -218,6 +218,56 @@ def _sample_table_fixture_bundle():
     return _finalize_fixture_bundle(fixtures)
 
 
+def test_table_snapshot_name_alias():
+    """League table dropdown matches standings when fixture uses a short name (Hibs vs Hibernian)."""
+    print("\nTesting table snapshot team name alias...")
+    try:
+        from hibs_predictor.web import _snapshot_for_team
+
+        rows = [
+            {
+                "position": 3,
+                "team": "Hibernian",
+                "played": 30,
+                "won": 14,
+                "drawn": 8,
+                "lost": 8,
+                "goals_for": 44,
+                "goals_against": 33,
+                "goal_diff": 11,
+                "points": 50,
+                "source": "test",
+            },
+            {
+                "position": 4,
+                "team": "Hearts",
+                "played": 30,
+                "won": 12,
+                "drawn": 8,
+                "lost": 10,
+                "goals_for": 40,
+                "goals_against": 38,
+                "goal_diff": 2,
+                "points": 44,
+                "source": "test",
+            },
+        ]
+        snap = _snapshot_for_team(
+            rows,
+            "Hibs",
+            {"position": 3, "played": 30, "points": 50, "won": 14, "drawn": 8, "lost": 8},
+        )
+        assert snap, "expected snapshot rows"
+        focus = [r for r in snap if r.get("is_focus")]
+        assert focus and focus[0]["team"] == "Hibernian"
+        assert "Hibernian" in {r["team"] for r in snap}
+        print("  ✓ Hibs fixture name resolves to Hibernian table row")
+        return True
+    except Exception as e:
+        print(f"  ✗ Table snapshot alias test failed: {e}")
+        return False
+
+
 def test_insights_tables_routes_and_snapshots():
     """Insights, tables, and compact table snapshots render with fixture-row fallback."""
     print("\nTesting insights/tables routes and table snapshots...")
@@ -2042,7 +2092,7 @@ def test_assistant_freeform_clarifies_ambiguity():
         res = handle_chat("analyze Arsenal", packets, recommendations={"disclaimer": ""})
         text = " ".join(" ".join(b.get("lines", [])) for b in res.get("blocks", []))
         assert "more than one" in text.lower()
-        assert "Arsenal v Burnley" in text or "Chelsea v Arsenal" in text
+        assert "Arsenal vs Burnley" in text or "Chelsea vs Arsenal" in text
         print("  ✓ Assistant asks concise clarification")
         return True
     except Exception as e:
@@ -2199,6 +2249,7 @@ def main():
         test_main_cli_help,
         test_flask_routes,
         test_insights_tables_routes_and_snapshots,
+        test_table_snapshot_name_alias,
         test_api_health_prediction_quality,
         test_api_cache_clear,
         test_structured_insight,

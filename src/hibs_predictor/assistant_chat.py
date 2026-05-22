@@ -15,6 +15,7 @@ from hibs_predictor.assistant_context import (
     build_acca_window_summary,
     build_best_acca_ideas,
     build_fixture_context_lines,
+    build_fixtures_summary,
     enrich_acca_items,
     pick_recommendation_line,
 )
@@ -30,11 +31,26 @@ from hibs_predictor.assistant_recommendations import (
 )
 
 _HELP_LINES = [
-    "Acca-first — same model and dq gates as the dashboard.",
-    "best acca · acca tips · suggest legs · BTTS acca · mixed acca · 3-leg safer acca",
-    "review acca (on /acca) · value bets · best singles",
-    "Single-game: stats / table / bet builder for Team A v Team B",
+    "Today's card — leagues loaded, value flags, live games (same dq gates as the dashboard).",
+    "Accas: best acca · acca tips · suggest legs · BTTS acca · mixed acca · 3-leg safer acca",
+    "Singles & review: value bets · best singles · review acca (on /acca)",
+    "One fixture: stats / table / bet builder for Team A v Team B",
 ]
+
+_CARD_WIDE_INTENTS = frozenset(
+    {
+        "help",
+        "general",
+        "best_acca",
+        "suggest_legs",
+        "acca_builder",
+        "live",
+        "value",
+        "mixed_acca",
+        "acca",
+        "best_singles",
+    }
+)
 
 
 def _norm(s: str) -> str:
@@ -43,6 +59,45 @@ def _norm(s: str) -> str:
 
 def _tokens(q: str) -> List[str]:
     return [t for t in re.split(r"[^a-z0-9]+", _norm(q)) if len(t) >= 2]
+
+
+def _effective_fixture_id(
+    question: str,
+    fixture_id: Optional[Any],
+    intent: str,
+) -> Optional[Any]:
+    """Use dashboard fixture context only when the question is fixture-scoped."""
+    if fixture_id is None or not str(fixture_id).strip():
+        return None
+    if intent not in _CARD_WIDE_INTENTS:
+        return fixture_id
+    q = _norm(question)
+    if not q:
+        return fixture_id
+    if intent == "deep_dive" and any(x in q for x in ("this game", "this match", "this fixture")):
+        return fixture_id
+    if _tokens(question):
+        return None
+    return fixture_id
+
+
+def _card_overview_blocks(packets: List[Dict[str, Any]], rec: Dict[str, Any]) -> List[Dict[str, Any]]:
+    summary = rec.get("deep_dive_summary") or {}
+    lines = [
+        build_acca_window_summary(packets),
+        summary.get("summary_line") or f"**{len(packets)}** fixture(s) in the assistant window.",
+    ]
+    live_n = sum(1 for p in packets if p.get("is_live"))
+    value_n = sum(1 for p in packets if p.get("has_value_bet") and is_analyzable(p))
+    if live_n:
+        lines.append(f"**{live_n}** in play — ask **live** for scores.")
+    if value_n:
+        lines.append(f"**{value_n}** with value flags — ask **value bets**.")
+    blocks: List[Dict[str, Any]] = [{"type": "text", "lines": lines}]
+    card = build_fixtures_summary(packets, max_n=12)
+    if card:
+        blocks.append({"type": "fixtures", "items": card, "compact": True})
+    return blocks
 
 
 def _find_packets(packets: List[Dict[str, Any]], query: str, fixture_id: Optional[Any] = None) -> List[Dict[str, Any]]:
@@ -233,7 +288,7 @@ def _parse_leg_count(q: str) -> Optional[int]:
 def parse_intent(question: str) -> Tuple[str, Dict[str, Any]]:
     q = _norm(question)
     if not q:
-        return "acca_builder", {}
+        return "general", {}
     if any(x in q for x in ("help", "what can you", "how do i", "commands")):
         return "help", {}
     if any(x in q for x in ("best acca", "acca tips", "acca tip", "top acca", "acca ideas", "acca picks")):
@@ -292,6 +347,7 @@ def handle_chat(
     """Return structured assistant reply for the UI."""
     rec = _ensure_recommendations(packets, recommendations)
     intent, params = parse_intent(question)
+    fixture_id = _effective_fixture_id(question, fixture_id, intent)
     out: Dict[str, Any] = {
         "intent": intent,
         "question": question,
@@ -537,16 +593,17 @@ def handle_chat(
                 ]
                 return out
             if intent == "general":
-                ideas = build_best_acca_ideas(rec, max_ideas=3)
-                out["blocks"] = [
-                    {"type": "text", "lines": acca_greeting_lines(packets)},
-                ]
+                out["blocks"] = _card_overview_blocks(packets, rec)
+                ideas = build_best_acca_ideas(rec, max_ideas=2)
                 if ideas:
                     out["blocks"].append({"type": "accas", "items": ideas})
                 out["blocks"].append(
                     {
                         "type": "text",
-                        "lines": ["Name a team or fixture for a single-game read, or ask best acca / suggest legs."],
+                        "lines": [
+                            "Ask about the whole card (live, value, leagues) or name a fixture for stats / table / bet builder.",
+                            "Accas: **best acca**, **suggest legs**, **BTTS acca**.",
+                        ],
                     }
                 )
             else:
