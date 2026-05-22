@@ -22,8 +22,20 @@ Team Strength = (Attack 40% + Defence 20% + Form 30% + Home/Away 10%)
 ```
 - **Attack Strength**: Goals scored vs expected goals
 - **Defence Strength**: Goals conceded vs expected goals against
-- **Form Strength**: Last 10 games W/D/L + xG differential
-- **Home/Away Factor**: Performance multiplier by venue
+- **Form Strength**: Last 10 games W/D/L + xG differential (all venues)
+- **Home/Away Factor**: `home_home_factor` / `away_away_factor` from home-only or away-only results in recent API matches (10% of strength)
+
+**Already wired vs not**
+
+| Input | Enrich | Engine ML | UI / `structured_insight` | Notes |
+|-------|--------|-----------|---------------------------|-------|
+| `home_last10` / `away_last10` | via `web.py` bundle | — | Form tab, H/A badges | Parsed from API recent fixtures |
+| `home_form` / `away_form` | `data_aggregator` | features 6–7, `form_home`/`form_away` % | Strength tile | All-match form, not venue-only |
+| `home_home_factor` / `away_away_factor` | `data_aggregator` | features 8–9 | `venue_form` block (new) | Venue split for today’s home/away sides |
+| Player / top scorers | — | — | — | No player-prop or scorer feed; FBref squad table is team aggregates only |
+| `supplemental` / `scraped_xg` | `supplemental.py`, `scraped_xg.py` | xG blend, DQ | xG source badge | Understat, FBref SPFL, recent-match proxy |
+| `historic_calibration` | audit log | shrink, H2H, proxy xG | packet debug | `HIBS_PREDICTION_LOG_ENABLED` |
+| `bet_confidence` | — | value gate | UI % | Uses DQ + form depth + xG tier; optional venue depth (`HIBS_BET_CONF_VENUE_FORM`) |
 
 ### 2. **Advanced Feature Engineering (23 features)**
 - Attack/Defence/Form metrics for both teams

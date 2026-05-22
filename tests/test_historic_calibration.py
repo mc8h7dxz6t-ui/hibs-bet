@@ -55,6 +55,58 @@ def test_bet_confidence_floor():
     assert min_bet_confidence_for_value() >= 30.0
 
 
+def test_bet_confidence_venue_form_depth(monkeypatch):
+    from hibs_predictor.historic_calibration import compute_bet_confidence, venue_form_sample_counts
+
+    monkeypatch.setenv("HIBS_BET_CONF_VENUE_FORM", "1")
+    full = compute_bet_confidence(80.0, 10, 10, "stats_api_xg", n_home_venue=10, n_away_venue=10)
+    thin_venue = compute_bet_confidence(80.0, 10, 10, "stats_api_xg", n_home_venue=2, n_away_venue=3)
+    assert full > thin_venue
+    nh, na = venue_form_sample_counts(
+        {
+            "home_last10": [{"home_away": "H"}, {"home_away": "A"}],
+            "away_last10": [{"home_away": "A"}, {"home_away": "H"}, {"home_away": "A"}],
+        }
+    )
+    assert nh == 1
+    assert na == 2
+
+
+def test_structured_insight_venue_form():
+    from hibs_predictor.match_insight import build_structured_insight
+
+    fixture = {
+        "home": "Hibs",
+        "away": "Hearts",
+        "home_home_factor": 1.15,
+        "away_away_factor": 0.92,
+        "home_recent_n": 5,
+        "away_recent_n": 5,
+        "data_quality": {"score_pct": 85.0},
+        "home_last10": [
+            {"result": "W", "home_away": "H", "score": "2-0"},
+            {"result": "L", "home_away": "A", "score": "0-1"},
+        ],
+        "away_last10": [{"result": "D", "home_away": "A", "score": "1-1"}],
+    }
+    prediction = {
+        "probabilities": {"home": 0.45, "draw": 0.28, "away": 0.27},
+        "probabilities_pct": {"home": 45.0, "draw": 28.0, "away": 27.0},
+        "btts_probability": 0.55,
+        "over25_probability_pct": 52.0,
+        "expected_goals_home": 1.4,
+        "expected_goals_away": 1.1,
+        "form_home": 62.0,
+        "form_away": 48.0,
+    }
+    card = build_structured_insight(fixture, prediction)
+    assert card.get("venue_form")
+    assert card["venue_form"]["home_at_home"]["n"] == 1
+    assert card["venue_form"]["away_on_road"]["n"] == 1
+    labels = [m["label"] for m in card.get("rationale_metrics") or []]
+    assert "Venue form" in labels
+
+
 def test_brier_by_league_from_mock_db(monkeypatch, tmp_path):
     from hibs_predictor import prediction_log as pl
 

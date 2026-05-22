@@ -364,15 +364,42 @@ def league_shrink_for_predict(league_code: str) -> Tuple[float, Dict[str, Any]]:
     return shrink, dbg
 
 
+def venue_form_sample_counts(fixture: Dict[str, Any]) -> Tuple[int, int]:
+    """Home-side home games and away-side away games in parsed last-10 rows."""
+    nh = sum(
+        1
+        for r in fixture.get("home_last10") or []
+        if str(r.get("home_away") or "").upper() == "H"
+    )
+    na = sum(
+        1
+        for r in fixture.get("away_last10") or []
+        if str(r.get("home_away") or "").upper() == "A"
+    )
+    return nh, na
+
+
+def _bet_conf_use_venue_form() -> bool:
+    return os.getenv("HIBS_BET_CONF_VENUE_FORM", "1").lower() not in ("0", "false", "no", "off")
+
+
 def compute_bet_confidence(
     dq_pct: float,
     n_home: int,
     n_away: int,
     xg_source: Any,
+    *,
+    n_home_venue: Optional[int] = None,
+    n_away_venue: Optional[int] = None,
 ) -> float:
     """0–100 score combining data quality, form depth, and xG tier."""
     dq = max(0.0, min(100.0, float(dq_pct or 0)))
-    form_n = min(int(n_home or 0), int(n_away or 0))
+    overall_n = min(int(n_home or 0), int(n_away or 0))
+    if _bet_conf_use_venue_form() and (n_home_venue is not None or n_away_venue is not None):
+        venue_n = min(int(n_home_venue or 0), int(n_away_venue or 0))
+        form_n = min(overall_n, venue_n) if overall_n > 0 else venue_n
+    else:
+        form_n = overall_n
     form_pts = min(30.0, form_n * 3.0)
     tier = xg_quality_tier(xg_source)
     xg_pts = {"high": 35.0, "medium": 22.0, "low": 10.0}.get(tier, 15.0)

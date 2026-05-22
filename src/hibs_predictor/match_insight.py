@@ -326,6 +326,9 @@ def _build_rationale_metrics(
                 ),
             }
         )
+    venue_metric = _venue_form_metric_line(fixture, prediction)
+    if venue_metric:
+        optional.append(venue_metric)
     return (core + optional)[:6]
 
 
@@ -488,6 +491,9 @@ def _rationale_bullets(
         ab = float(fixture.get("away_btts_rate") or 0) * 100
         if hb or ab:
             bullets.append(f"Form (last {n_h}/{n_a}): BTTS {hb:.0f}% / {ab:.0f}%.")
+    venue_metric = _venue_form_metric_line(fixture, prediction)
+    if venue_metric:
+        bullets.append(f"{venue_metric['label']}: {venue_metric['value']}.")
     hp = fixture.get("home_position") or {}
     ap = fixture.get("away_position") or {}
     if hp.get("position") and ap.get("position"):
@@ -586,11 +592,13 @@ def build_structured_insight(
         fixture, prediction, pick_key, lam_h, lam_a, pick_label, conf
     )
     scoreline = _most_likely_scoreline(lam_h, lam_a)
+    venue_form = build_venue_form_block(fixture, prediction)
 
     return {
         "match": match_line,
         "pick": pick_label,
         "pick_key": pick_key,
+        "venue_form": venue_form,
         "rationale": rationale,
         "rationale_metrics": _build_rationale_metrics(
             fixture, prediction, pick_key, lam_h, lam_a, conf
@@ -723,6 +731,90 @@ def _compact_result_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             }
         )
     return out
+
+
+def _wdl_counts(rows: List[Dict[str, Any]]) -> Dict[str, int]:
+    counts = {"wins": 0, "draws": 0, "losses": 0}
+    for r in rows or []:
+        res = str(r.get("result") or "").upper()
+        if res == "W":
+            counts["wins"] += 1
+        elif res == "D":
+            counts["draws"] += 1
+        elif res == "L":
+            counts["losses"] += 1
+    return counts
+
+
+def build_venue_form_block(
+    fixture: Dict[str, Any],
+    prediction: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Venue-specific form already used in team strength (home_home_factor / away_away_factor)."""
+    pred = prediction or {}
+    home_factor = fixture.get("home_home_factor")
+    away_factor = fixture.get("away_away_factor")
+    if home_factor is None and away_factor is None:
+        return None
+    home_rows = [
+        r
+        for r in fixture.get("home_last10") or []
+        if str(r.get("home_away") or "").upper() == "H"
+    ]
+    away_rows = [
+        r
+        for r in fixture.get("away_last10") or []
+        if str(r.get("home_away") or "").upper() == "A"
+    ]
+    block: Dict[str, Any] = {}
+    if home_factor is not None:
+        hc = _wdl_counts(home_rows)
+        block["home_at_home"] = {
+            "factor": round(float(home_factor), 3),
+            "n": len(home_rows),
+            "wdl": _wdl_string(home_rows),
+            **hc,
+            "form_pct": pred.get("form_home"),
+        }
+    if away_factor is not None:
+        ac = _wdl_counts(away_rows)
+        block["away_on_road"] = {
+            "factor": round(float(away_factor), 3),
+            "n": len(away_rows),
+            "wdl": _wdl_string(away_rows),
+            **ac,
+            "form_pct": pred.get("form_away"),
+        }
+    return block or None
+
+
+def _venue_form_metric_line(fixture: Dict[str, Any], prediction: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    vf = build_venue_form_block(fixture, prediction)
+    if not vf:
+        return None
+    parts: List[str] = []
+    notes: List[str] = []
+    h = vf.get("home_at_home") or {}
+    a = vf.get("away_on_road") or {}
+    if h.get("n"):
+        parts.append(f"H@H {h.get('wdl') or '—'} (n={h['n']})")
+        if h.get("factor") is not None:
+            notes.append(f"home factor {h['factor']}")
+    if a.get("n"):
+        parts.append(f"A@A {a.get('wdl') or '—'} (n={a['n']})")
+        if a.get("factor") is not None:
+            notes.append(f"away factor {a['factor']}")
+    fh = prediction.get("form_home")
+    fa = prediction.get("form_away")
+    if fh is not None and fa is not None:
+        notes.append(f"overall form {fh}% / {fa}%")
+    if not parts:
+        return None
+    return {
+        "label": "Venue form",
+        "value": " · ".join(parts),
+        "note": "; ".join(notes) + "." if notes else "Home/away splits from last 10.",
+    }
 
 
 def _form_summary(rows: List[Dict[str, Any]]) -> Dict[str, Any]:

@@ -14,6 +14,7 @@ from hibs_predictor.historic_calibration import (
     apply_form_weight_to_features,
     blend_h2h_into_1x2,
     compute_bet_confidence,
+    venue_form_sample_counts,
     confidence_display_scale,
     extract_h2h_from_recent,
     form_sample_weight,
@@ -1208,11 +1209,14 @@ class BettingEngine:
             merged_book["under35"] = float(to35["under"])
         dq_bundle = fixture.get("data_quality") or {}
         dq_pct = float(dq_bundle.get("score_pct") or 0)
+        n_home_venue, n_away_venue = venue_form_sample_counts(fixture)
         bet_confidence = compute_bet_confidence(
             dq_pct,
             n_home_early,
             n_away_early,
             fixture.get("xg_source"),
+            n_home_venue=n_home_venue,
+            n_away_venue=n_away_venue,
         )
         bet_conf_min = min_bet_confidence_for_value()
         bet_conf_ok = bet_confidence >= bet_conf_min
