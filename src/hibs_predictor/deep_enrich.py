@@ -371,7 +371,7 @@ def deep_enrich_pass(
     league = LEAGUES.get(league_code, {})
     league_api_id = league.get("api_sports_id")
     fdo_comp = league.get("football_data_org_id")
-    season = _season_candidates(datetime.now())[0]
+    season = _season_candidates(datetime.now(), league_code=league_code)[0]
     league_strength = float(league.get("strength_factor") or 1.0)
 
     for _ in range(retries):

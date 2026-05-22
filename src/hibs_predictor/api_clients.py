@@ -476,6 +476,8 @@ class OddsApiClient(BaseApiClient):
         "DENMARK_SL": "soccer_denmark_superliga",
         "GREECE_SL": "soccer_greece_super_league",
         "AUSTRIA_BL": "soccer_austria_bundesliga",
+        "NORWAY_ELITESERIEN": "soccer_norway_eliteserien",
+        "FINLAND_VEIKKAUSLIIGA": "soccer_finland_veikkausliiga",
         "WORLD_CUP": "soccer_fifa_world_cup",
         "EUROS": "soccer_uefa_european_championship",
         "NATIONS_LEAGUE": "soccer_uefa_nations_league",

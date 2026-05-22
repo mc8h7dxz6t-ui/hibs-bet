@@ -24,7 +24,7 @@ Coverage scoring: `src/hibs_predictor/data_quality.py` (`full_scope` ≥ **85%**
 | The Odds API | 1X2 + cross-book lines | `ODDS_API_KEY`; skip via `HIBS_SKIP_ODDS_API` |
 | RapidAPI stats (api-football.com host) | Fixture-level xG | `STATS_API_KEY` + `HIBS_MAX_DATA=1` (default skips Rapid xG) |
 | Understat | Per-match xG for top leagues via `/getLeagueData` | `HIBS_ENABLE_UNDERSTAT_LIGHT`, `HIBS_SCRAPE_XG` |
-| FBref | Squad tables (heavy); schedule xG for Scottish + EFL + top/mid-tier EU | `HIBS_ENABLE_FBREF_SCHEDULE_XG` (default on) |
+| FBref | Squad tables (heavy); schedule xG for Scottish + EFL + top/mid-tier EU + Norway/Finland | `HIBS_ENABLE_FBREF_SCHEDULE_XG` (default on) |
 | Wikipedia | Standings when API thin | `HIBS_PREFER_SCRAPED_STANDINGS=1`; Norway, Finland, cups |
 | SoccerStats | League table positions after Wikipedia | `HIBS_PREFER_SCRAPED_STANDINGS=1` |
 | FotMob | Fixture calendar fallback | `HIBS_ENABLE_FOTMOB_FIXTURES=1`; `/api/data/matches?date=&timezone=` |

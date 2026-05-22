@@ -43,6 +43,8 @@ FBREF_SCHEDULE_EXTRA: Dict[str, Tuple[str, str]] = {
     "DENMARK_SL": ("50", "Superliga"),
     "GREECE_SL": ("27", "Super-League-Greece"),
     "AUSTRIA_BL": ("56", "Austrian-Bundesliga"),
+    "NORWAY_ELITESERIEN": ("28", "Eliteserien"),
+    "FINLAND_VEIKKAUSLIIGA": ("43", "Veikkausliiga"),
 }
 
 FBREF_SCHEDULE_LEAGUES: Dict[str, Tuple[str, str]] = {**FBREF_SCOTTISH_LEAGUE, **FBREF_SCHEDULE_EXTRA}
@@ -179,19 +181,30 @@ def fetch_schedule_rows(
     if not meta:
         return []
     comp_id, slug = meta
+    from hibs_predictor.season import fbref_season_labels
+
     now = datetime.now()
-    sl = season_label or _season_label(now.year, now.month)
+    labels = [season_label] if season_label else fbref_season_labels(league_code, now)
     c = cache or Cache()
-    key = f"fbref_scot_sched_{league_code}_{sl}"
-    hit = c.get(key, ttl_hours=12.0)
-    if isinstance(hit, list):
-        return hit
-    url = f"https://fbref.com/en/comps/{comp_id}/{sl}/schedule/{slug}-Scores-and-Fixtures"
-    r = requests.get(url, headers=_HEADERS, timeout=30)
-    r.raise_for_status()
-    rows = _parse_schedule_rows(r.text)
-    c.set(key, rows, ttl_hours=12.0)
-    return rows
+    last_exc: Optional[Exception] = None
+    for sl in labels:
+        key = f"fbref_scot_sched_{league_code}_{sl}"
+        hit = c.get(key, ttl_hours=12.0)
+        if isinstance(hit, list):
+            return hit
+        url = f"https://fbref.com/en/comps/{comp_id}/{sl}/schedule/{slug}-Scores-and-Fixtures"
+        try:
+            r = requests.get(url, headers=_HEADERS, timeout=30)
+            r.raise_for_status()
+            rows = _parse_schedule_rows(r.text)
+            c.set(key, rows, ttl_hours=12.0)
+            return rows
+        except Exception as exc:
+            last_exc = exc
+            continue
+    if last_exc:
+        raise last_exc
+    return []
 
 
 def find_fixture_xg(

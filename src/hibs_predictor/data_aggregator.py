@@ -68,11 +68,11 @@ def _env_flag_truthy(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def _season_candidates(now: Optional[datetime] = None) -> List[int]:
+def _season_candidates(now: Optional[datetime] = None, league_code: Optional[str] = None) -> List[int]:
     """Current domestic season id plus previous season for completed/thin windows."""
-    d = now or datetime.now()
-    primary = d.year if d.month >= 7 else d.year - 1
-    return [primary, primary - 1]
+    from hibs_predictor.season import season_candidates
+
+    return season_candidates(now, league_code=league_code)
 
 
 def _norm_team_name(name: Any) -> str:
@@ -579,7 +579,7 @@ class DataAggregator:
         league_api_id = league.get("api_sports_id")
         fdo_comp = league.get("football_data_org_id")
         now = datetime.now()
-        season = _season_candidates(now)[0]
+        season = _season_candidates(now, league_code=league_code)[0]
 
         home_id = fixture_team_id(fixture, "home")
         away_id = fixture_team_id(fixture, "away")
