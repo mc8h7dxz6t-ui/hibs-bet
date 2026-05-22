@@ -7,6 +7,8 @@
 # Create a venv once: cd /opt/hibs-bet && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 # Put secrets in /opt/hibs-bet/.env (never commit .env); the app loads it from repo root.
 # Staging side-by-side: see deploy/README.md and hibs-bet-staging.service (:8001).
+#
+# 1 GB VPS: use --workers 1 --timeout 300 (see deploy/apply-vps-production-tuning.sh).
 
 [Unit]
 Description=hibs-bet Flask application (gunicorn)
@@ -17,11 +19,13 @@ Type=simple
 User=www-data
 Group=www-data
 WorkingDirectory=/opt/hibs-bet
+Environment=HOME=/opt/hibs-bet
 Environment=PYTHONPATH=src
 Environment=HIBS_CACHE_DIR=/opt/hibs-bet/.cache
 EnvironmentFile=-/opt/hibs-bet/.env
 ExecStart=/opt/hibs-bet/.venv/bin/gunicorn \
-  --workers 2 \
+  --workers 1 \
+  --timeout 300 \
   --bind 0.0.0.0:8000 \
   hibs_predictor.web:app
 Restart=on-failure

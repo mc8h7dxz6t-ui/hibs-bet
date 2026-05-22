@@ -794,6 +794,16 @@ class DataAggregator:
         else:
             enriched["fixture_injuries"] = []
         try:
+            from hibs_predictor.team_news_enrich import apply_team_news_fields
+
+            apply_team_news_fields(enriched)
+        except Exception as exc:
+            print(f"[enrich team_news] {league_code} fid={fixture_id_str}: {exc!r}")
+        try:
+            self._maybe_attach_player_insight(enriched, league_code, season)
+        except Exception as exc:
+            print(f"[enrich player_insight] {league_code} fid={fixture_id_str}: {exc!r}")
+        try:
             enriched["supplemental"] = collect_supplemental(fixture, league_code, enriched)
         except Exception as exc:
             print(f"[enrich supplemental] {league_code} fid={fixture_id_str}: {exc!r}")
@@ -948,6 +958,64 @@ class DataAggregator:
 
         self.cache.set(cache_key, stats, ttl_hours=12)
         return stats
+
+    def _maybe_attach_player_insight(
+        self, enriched: Dict[str, Any], league_code: str, season: int
+    ) -> None:
+        """Top scorers per side (display-only; 24h league cache)."""
+        if os.getenv("HIBS_ENABLE_PLAYER_INSIGHT", "").strip().lower() not in ("1", "true", "yes", "on"):
+            return
+        if os.getenv("HIBS_SKIP_API_PLAYER_STATS", "0").strip().lower() in ("1", "true", "yes", "on"):
+            return
+        league = LEAGUES.get(league_code, {})
+        league_api_id = league.get("api_sports_id")
+        if not league_api_id or "api_sports" not in self.clients:
+            return
+        home_id = enriched.get("home_id")
+        away_id = enriched.get("away_id")
+        try:
+            rows = self.clients["api_sports"].fetch_top_scorers(int(league_api_id), int(season))
+        except Exception:
+            rows = []
+        if not rows:
+            return
+
+        def _goals(entry: Dict[str, Any]) -> int:
+            stats = entry.get("statistics") or []
+            if not stats:
+                return 0
+            g = (stats[0] or {}).get("goals") or {}
+            try:
+                return int(g.get("total") or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        def _team_top(team_id: Optional[int], limit: int = 3) -> List[Dict[str, Any]]:
+            if not team_id:
+                return []
+            out: List[Dict[str, Any]] = []
+            for entry in rows:
+                if not isinstance(entry, dict):
+                    continue
+                stats = entry.get("statistics") or []
+                tid = None
+                if stats and isinstance(stats[0], dict):
+                    tid = (stats[0].get("team") or {}).get("id")
+                try:
+                    if int(tid or 0) != int(team_id):
+                        continue
+                except (TypeError, ValueError):
+                    continue
+                pl = entry.get("player") or {}
+                name = str(pl.get("name") or "").strip()
+                if not name:
+                    continue
+                out.append({"name": name, "goals": _goals(entry)})
+            out.sort(key=lambda r: -(r.get("goals") or 0))
+            return out[:limit]
+
+        enriched["home_top_scorers"] = _team_top(home_id)
+        enriched["away_top_scorers"] = _team_top(away_id)
 
     def _fetch_team_position(self, team_id: Optional[int], league_api_id: int, season: int) -> Dict[str, Any]:
         """Fetch team's current league position."""

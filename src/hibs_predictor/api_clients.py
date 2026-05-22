@@ -352,6 +352,20 @@ class ApiSportsFootballClient(BaseApiClient):
         data = self._get_json(endpoint, params=params)
         return data.get("response", []) if isinstance(data.get("response"), list) else []
 
+    def fetch_top_scorers(self, league_id: int, season: int) -> List[Dict[str, Any]]:
+        """League top scorers (API-Football players/topscorers). Cached 24h."""
+        cache_key = f"top_scorers_{league_id}_{season}"
+        cached = self.cache.get(cache_key, ttl_hours=24)
+        if cached is not None:
+            return cached if isinstance(cached, list) else []
+        endpoint = "players/topscorers"
+        params = {"league": league_id, "season": season}
+        data = self._get_json(endpoint, params=params, use_cache=False)
+        resp = data.get("response", [])
+        rows = resp if isinstance(resp, list) else []
+        self.cache.set(cache_key, rows, ttl_hours=24)
+        return rows
+
     def fetch_odds(self, fixture_id: int) -> List[Dict[str, Any]]:
         endpoint = "odds"
         params = {"fixture": fixture_id}

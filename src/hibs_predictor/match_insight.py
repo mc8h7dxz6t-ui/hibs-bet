@@ -455,6 +455,38 @@ def _odds_only_summary(fixture: Dict[str, Any], prediction: Dict[str, Any]) -> s
     return " ".join(parts)
 
 
+def _injury_rationale_line(fixture: Dict[str, Any]) -> Optional[str]:
+    """One-line squad availability when injury feed + availability scores exist."""
+    meta = fixture.get("team_news_meta") or {}
+    h_n = int(meta.get("home_absences") or 0)
+    a_n = int(meta.get("away_absences") or 0)
+    if h_n == 0 and a_n == 0:
+        return None
+    h_av = fixture.get("attack_availability_home")
+    a_av = fixture.get("attack_availability_away")
+    if h_av is None and a_av is None:
+        return None
+    parts = []
+    if h_n:
+        parts.append(f"home {h_n} out ({int(float(h_av or 1) * 100)}% attack avail)")
+    if a_n:
+        parts.append(f"away {a_n} out ({int(float(a_av or 1) * 100)}% attack avail)")
+    return "Squad news: " + ", ".join(parts) + "."
+
+
+def build_player_insight_block(fixture: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Top league scorers per side for structured_insight (display only)."""
+    home = fixture.get("home_top_scorers") or []
+    away = fixture.get("away_top_scorers") or []
+    if not home and not away:
+        return None
+    return {
+        "home": home[:3],
+        "away": away[:3],
+        "source": "api_sports_topscorers",
+    }
+
+
 def _rationale_bullets(
     fixture: Dict[str, Any],
     prediction: Dict[str, Any],
@@ -494,6 +526,9 @@ def _rationale_bullets(
     venue_metric = _venue_form_metric_line(fixture, prediction)
     if venue_metric:
         bullets.append(f"{venue_metric['label']}: {venue_metric['value']}.")
+    inj_line = _injury_rationale_line(fixture)
+    if inj_line:
+        bullets.append(inj_line)
     hp = fixture.get("home_position") or {}
     ap = fixture.get("away_position") or {}
     if hp.get("position") and ap.get("position"):
@@ -593,8 +628,9 @@ def build_structured_insight(
     )
     scoreline = _most_likely_scoreline(lam_h, lam_a)
     venue_form = build_venue_form_block(fixture, prediction)
+    player_insight = build_player_insight_block(fixture)
 
-    return {
+    out: Dict[str, Any] = {
         "match": match_line,
         "pick": pick_label,
         "pick_key": pick_key,
@@ -611,6 +647,9 @@ def build_structured_insight(
         "mode": "prediction",
         "disclaimer": "Conservative, data-backed view — not financial advice. Gamble responsibly 18+.",
     }
+    if player_insight:
+        out["player_insight"] = player_insight
+    return out
 
 
 def build_pick_menu(fixture: Dict[str, Any], prediction: Dict[str, Any]) -> List[Dict[str, Any]]:

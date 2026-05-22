@@ -1045,6 +1045,24 @@ class BettingEngine:
         )
         metadata["xg_home"] = xg_home
         metadata["xg_away"] = xg_away
+        if os.getenv("HIBS_USE_INJURY_LAMBDA_ADJUST", "").strip().lower() in ("1", "true", "yes", "on"):
+            try:
+                max_cut = min(0.08, max(0.0, float(os.getenv("HIBS_INJURY_LAMBDA_MAX_CUT", "0.08"))))
+            except ValueError:
+                max_cut = 0.08
+
+            def _injury_factor(avail: Any) -> float:
+                try:
+                    a = float(avail)
+                except (TypeError, ValueError):
+                    return 1.0
+                a = max(0.5, min(1.0, a))
+                return max(1.0 - max_cut, a)
+
+            xg_home *= _injury_factor(fixture.get("attack_availability_home"))
+            xg_away *= _injury_factor(fixture.get("attack_availability_away"))
+            metadata["xg_home"] = xg_home
+            metadata["xg_away"] = xg_away
         fixture = {**fixture, "xg_home": xg_home, "xg_away": xg_away}
         sup_xg_dbg: Optional[Dict[str, Any]] = None
         if os.getenv("HIBS_USE_SUPPLEMENTAL_XG_PRIOR", "1").lower() not in ("0", "false", "no", "off"):

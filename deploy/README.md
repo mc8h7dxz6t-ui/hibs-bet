@@ -14,6 +14,29 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now hibs-bet
 ```
 
+### HTTPS (nginx + Let's Encrypt)
+
+Gunicorn only listens on **:8000**. For `https://hibs-bet.co.uk`:
+
+```bash
+sudo apt-get install -y nginx certbot python3-certbot-nginx
+sudo cp deploy/hibs-bet.nginx.conf /etc/nginx/sites-available/hibs-bet
+sudo ln -sf /etc/nginx/sites-available/hibs-bet /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d hibs-bet.co.uk -d www.hibs-bet.co.uk
+```
+
+### 1 GB VPS tuning (worker timeout / OOM)
+
+Default unit uses **1 worker** and **300s** timeout. After deploy, on the server:
+
+```bash
+sudo bash /opt/hibs-bet/deploy/apply-vps-production-tuning.sh
+```
+
+Sets `www-data` ownership on `.cache`, appends lite `.env` flags (`HIBS_DASHBOARD_LITE`, `HIBS_WARM_FIXTURE_CACHE`, …), patches nginx timeouts, restarts `hibs-bet`.
+
 ## Staging (`hibs-bet-staging.service`)
 
 Run staging **beside** production on a different port and cache directory so you can test `HIBS_MAX_DATA=1`, Scottish FBref xG, and UI changes without touching live traffic.

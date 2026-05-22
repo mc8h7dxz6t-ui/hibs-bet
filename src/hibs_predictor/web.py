@@ -324,13 +324,36 @@ def _dashboard_page_cache_set(body: bytes) -> str:
     return etag
 
 
+def _dashboard_lite_mode() -> bool:
+    """Lighter first paint: skip assistant bundle build; fewer parallel league fetches."""
+    return _env_truthy("HIBS_DASHBOARD_LITE")
+
+
 def _fixture_fetch_workers() -> int:
-    default = "4" if _env_truthy("HIBS_MAX_DATA") else "6"
+    if _dashboard_lite_mode():
+        default = "3"
+    else:
+        default = "4" if _env_truthy("HIBS_MAX_DATA") else "6"
     try:
         n = int(os.getenv("HIBS_FIXTURE_FETCH_WORKERS", default))
     except ValueError:
         n = int(default)
     return max(1, min(12, n))
+
+
+def _maybe_warm_fixture_cache() -> None:
+    """Background warm of all_fixtures disk cache (production cold start)."""
+    if not _env_truthy("HIBS_WARM_FIXTURE_CACHE"):
+        return
+    import threading
+
+    def _run() -> None:
+        try:
+            fetch_all_fixtures(attach_live=False)
+        except Exception as exc:
+            print(f"[Fixture warm] {exc!r}")
+
+    threading.Thread(target=_run, name="hibs-fixture-warm", daemon=True).start()
 
 
 def _slim_row_enrich_fresh(row: Dict[str, Any]) -> bool:
@@ -1446,9 +1469,14 @@ def index():
             resp.headers["Cache-Control"] = "private, max-age=30"
             return _set_fetch_days_cookie_if_requested(resp)
 
-    data = fetch_all_fixtures(attach_live=True)
-    assistant_bundle = _assistant_bundle(data["all"])
-    assistant_packets = assistant_bundle["packets"]
+    attach_live = not _dashboard_lite_mode()
+    data = fetch_all_fixtures(attach_live=attach_live)
+    if _dashboard_lite_mode():
+        assistant_packets: List[Dict[str, Any]] = []
+        assistant_bundle: Dict[str, Any] = {"packets": [], "recommendations": [], "acca_candidates": [], "count": 0}
+    else:
+        assistant_bundle = _assistant_bundle(data["all"])
+        assistant_packets = assistant_bundle["packets"]
     fixture_coverage = data.get("fixture_coverage", {})
     html = render_template(
         "dashboard.html",
@@ -1702,6 +1730,9 @@ def acca_builder():
 def api_status_page():
     """Dedicated API + scraper status (same probes as /api/health)."""
     return render_template("api_status.html")
+
+
+_maybe_warm_fixture_cache()
 
 
 if __name__ == "__main__":
