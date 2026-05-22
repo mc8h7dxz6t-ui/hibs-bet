@@ -9,6 +9,8 @@ def _api_strong_enriched() -> dict:
     return {
         "odds_available": True,
         "xg_source": "api_fixture_xg",
+        "xg_home": 1.45,
+        "xg_away": 1.12,
         "home_recent_n": 8,
         "away_recent_n": 8,
         "home_stats": {"played": 20, "goals_for": 30, "goals_against": 25},
@@ -32,6 +34,17 @@ def test_skip_heavy_when_explicit_opt_in(monkeypatch):
     skip, reason = _skip_heavy_when_api_strong(_api_strong_enriched())
     assert skip is True
     assert reason == "api_strong_skip_heavy"
+
+
+def test_skip_heavy_requires_xg_values(monkeypatch):
+    monkeypatch.setenv("HIBS_SKIP_HEAVY_WHEN_API_STRONG", "1")
+    monkeypatch.setenv("HIBS_ALWAYS_DEEP_SCRAPE", "0")
+    weak = _api_strong_enriched()
+    weak["xg_home"] = 0.0
+    weak["xg_away"] = 0.0
+    skip, reason = _skip_heavy_when_api_strong(weak)
+    assert skip is False
+    assert reason == ""
 
 
 def test_always_deep_overrides_skip_flag(monkeypatch):

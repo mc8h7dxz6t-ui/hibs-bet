@@ -20,7 +20,7 @@ from hibs_predictor.api_clients import (
 from hibs_predictor.betting_engine import TeamStrengthCalculator
 from hibs_predictor.config import LEAGUES
 from hibs_predictor.cache import Cache
-from hibs_predictor.data_quality import compute_fixture_data_quality
+from hibs_predictor.data_quality import _has_stats, compute_fixture_data_quality
 from hibs_predictor.scrapers.supplemental import collect_supplemental
 from hibs_predictor.fixture_utils import coerce_team_id, fixture_team_id, fixture_team_name
 from hibs_predictor.scrapers import wikipedia_standings as wiki_standings
@@ -956,7 +956,10 @@ class DataAggregator:
             stats.setdefault("expected_goals", float(stats.get("goals_for", 0)) * 0.92)
             stats.setdefault("expected_goals_against", float(stats.get("goals_against", 0)) * 0.92)
 
-        self.cache.set(cache_key, stats, ttl_hours=12)
+        if _has_stats(stats):
+            self.cache.set(cache_key, stats, ttl_hours=12)
+        else:
+            self.cache.set(cache_key, stats, ttl_hours=0.2)
         return stats
 
     def _maybe_attach_player_insight(

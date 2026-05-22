@@ -26,6 +26,27 @@ def test_calendar_season_candidates_may_2026():
     assert 2025 in seasons
 
 
+def test_fixture_fetch_season_jul_league_may_2026():
+    from hibs_predictor.web import _fixture_fetch_season_candidates
+
+    now = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc)
+    seasons = _fixture_fetch_season_candidates(
+        "PL", "2026-05-20", "2026-05-25", now, league_code="EPL"
+    )
+    assert seasons[0] == 2025
+    assert 2026 not in seasons[:1]
+
+
+def test_fixture_fetch_season_nordic_may_2026():
+    from hibs_predictor.web import _fixture_fetch_season_candidates
+
+    now = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc)
+    seasons = _fixture_fetch_season_candidates(
+        None, "2026-05-20", "2026-05-25", now, league_code="NORWAY_ELITESERIEN"
+    )
+    assert seasons[0] == 2026
+
+
 def test_fbref_calendar_season_label():
     now = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc)
     labels = fbref_season_labels("NORWAY_ELITESERIEN", now)

@@ -1425,8 +1425,14 @@ def test_calendar_year_season_candidate():
         from hibs_predictor.web import _fixture_fetch_season_candidates
 
         now = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc)
-        seasons = _fixture_fetch_season_candidates(None, "2026-05-20", "2026-05-25", now)
-        assert seasons[0] == 2026, seasons
+        nordic = _fixture_fetch_season_candidates(
+            None, "2026-05-20", "2026-05-25", now, league_code="NORWAY_ELITESERIEN"
+        )
+        assert nordic[0] == 2026, nordic
+        epl = _fixture_fetch_season_candidates(
+            "PL", "2026-05-20", "2026-05-25", now, league_code="EPL"
+        )
+        assert epl[0] == 2025, epl
         print("  ✓ Calendar-year season candidate OK")
         return True
     except Exception as e:

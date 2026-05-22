@@ -104,14 +104,21 @@ def _years_touched_by_date_range(date_from_s: str, date_to_s: str) -> List[int]:
 
 
 def _fixture_fetch_season_candidates(
-    football_data_comp_id: Optional[str], date_from_s: str, date_to_s: str, now: datetime
+    football_data_comp_id: Optional[str],
+    date_from_s: str,
+    date_to_s: str,
+    now: datetime,
+    *,
+    league_code: Optional[str] = None,
 ) -> List[int]:
     """Season years to try for fixtures. Domestic leagues use Jul-based season id; WC/EC/UNL also use calendar years in the fetch window."""
+    from hibs_predictor.season import CALENDAR_YEAR_LEAGUES
+
     primary = _api_football_season_year(now)
     if not football_data_comp_id or football_data_comp_id not in _FDO_CALENDAR_COMPS:
         out = [primary, primary - 1]
-        # Calendar-year leagues (Nordics, etc.): API season id is the calendar year (e.g. 2026 in May 2026).
-        if now.month < 7 and now.year not in out:
+        code = (league_code or "").strip().upper()
+        if code in CALENDAR_YEAR_LEAGUES and now.month < 7 and now.year not in out:
             out.insert(0, now.year)
         return out
     window_years = _years_touched_by_date_range(date_from_s, date_to_s)
@@ -666,7 +673,9 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     date_from = window_start.strftime("%Y-%m-%d")
     date_to = cutoff.strftime("%Y-%m-%d")
     fdo_comp = league.get("football_data_org_id")
-    season_candidates = _fixture_fetch_season_candidates(fdo_comp, date_from, date_to, now)
+    season_candidates = _fixture_fetch_season_candidates(
+        fdo_comp, date_from, date_to, now, league_code=league_code
+    )
 
     def add(candidate: Dict) -> None:
         key = _fixture_key(candidate)

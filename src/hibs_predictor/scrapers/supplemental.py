@@ -48,6 +48,13 @@ def _skip_heavy_when_api_strong(enriched: Dict[str, Any]) -> tuple:
     if src not in ("api_fixture_xg", "stats_api_xg"):
         return False, ""
     try:
+        xh = float(enriched.get("xg_home") or 0)
+        xa = float(enriched.get("xg_away") or 0)
+    except (TypeError, ValueError):
+        return False, ""
+    if xh < 0.05 or xa < 0.05:
+        return False, ""
+    try:
         nh = int(float(enriched.get("home_recent_n") or 0))
         na = int(float(enriched.get("away_recent_n") or 0))
     except (TypeError, ValueError):

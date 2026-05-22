@@ -39,7 +39,11 @@ def _raw_counts(league_code: str, days: int) -> dict:
     date_to = cutoff.strftime("%Y-%m-%d")
     agg = DataAggregator()
     seasons = _fixture_fetch_season_candidates(
-        league.get("football_data_org_id"), date_from, date_to, now
+        league.get("football_data_org_id"),
+        date_from,
+        date_to,
+        now,
+        league_code=league_code,
     )
     out = {"api_sports": 0, "fdo": 0, "fotmob": 0, "errors": []}
 
