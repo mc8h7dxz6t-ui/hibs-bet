@@ -304,7 +304,7 @@ def test_insights_tables_routes_and_snapshots():
         body = dashboard.get_data(as_text=True)
         assert "Aberdeen" in body and "Hibs" in body and "Dundee" in body
         assert "What this page does" in body
-        assert "1 leagues loaded" in body
+        assert "<strong>1</strong> leagues loaded" in body
         assert "Scottish Premiership" in body
         assert "Table N/A" not in body
         print("  ✓ /insights, /tables, /settings, and dashboard context render")
