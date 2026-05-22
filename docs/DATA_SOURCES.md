@@ -3,6 +3,18 @@
 Planning catalog: `src/hibs_predictor/scrapers/source_registry.py`  
 Coverage scoring: `src/hibs_predictor/data_quality.py` (`full_scope` ≥ **85%**; UI default `HIBS_UI_FULL_DATA_MIN_PCT=85`)
 
+## Live probe status (typical)
+
+| Source | Status | Notes |
+|--------|--------|-------|
+| API-Football, Football-Data.org, Odds API | working | Requires keys in `.env` |
+| Understat, FotMob, Wikipedia, SoccerStats, StatsBomb open | working | Best-effort HTML/JSON scrapes |
+| FBref | working* | Squad HTML; may 403 from some networks — see `/api/health` |
+| SofaScore | blocked | HTTP 403 common; optional rolling xG only when reachable |
+| Transfermarkt, xGStat, BeSoccer | deferred | Probe-only; not in enrichment pipeline |
+
+\* Run `PYTHONPATH=src python3 -c "from hibs_predictor.health_probe import gather_health; ..."` or open **API status** in the app.
+
 ## Wired today
 
 | Source | Role | Env / notes |

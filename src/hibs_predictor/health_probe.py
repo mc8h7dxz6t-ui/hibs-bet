@@ -9,6 +9,7 @@ import requests
 from dotenv import load_dotenv
 
 from hibs_predictor.data_aggregator import _env_first_usable
+from hibs_predictor.scraper_health import http_status_from_exc, scraper_error_code, scraper_row
 from hibs_predictor.scrapers.statsbomb_open import OPEN_BASE
 
 
@@ -195,39 +196,42 @@ def gather_health() -> Dict[str, Any]:
         data = r.json() if ok and r.content else []
         n = len(data) if isinstance(data, list) else 0
         if ok and n > 0:
-            err_c = None
-            err_t = None
-            ok_flag = True
+            scrapers.append(scraper_row(sid="statsbomb_open", label="StatsBomb (open)", ms=ms, ok=True))
         elif ok:
-            err_c = "LAYOUT_BROKEN"
-            err_t = "Empty or invalid competitions payload"
-            ok_flag = False
+            scrapers.append(
+                scraper_row(
+                    sid="statsbomb_open",
+                    label="StatsBomb (open)",
+                    ms=ms,
+                    ok=False,
+                    error="Empty or invalid competitions payload",
+                    layout_broken=True,
+                )
+            )
         else:
-            err_c = "ERROR"
-            err_t = f"HTTP {r.status_code}"
-            ok_flag = False
-        scrapers.append(
-            {
-                "id": "statsbomb_open",
-                "label": "StatsBomb (open)",
-                "ms": ms,
-                "ok": ok_flag,
-                "error_code": err_c,
-                "error": err_t,
-            }
-        )
+            scrapers.append(
+                scraper_row(
+                    sid="statsbomb_open",
+                    label="StatsBomb (open)",
+                    ms=ms,
+                    ok=False,
+                    error=f"HTTP {r.status_code}",
+                    http_status=r.status_code,
+                )
+            )
     except Exception as exc:
         msg = str(exc)
-        code = "LAYOUT_BROKEN" if "LAYOUT_BROKEN" in msg.upper() else "ERROR"
+        layout = "LAYOUT_BROKEN" in msg.upper()
         scrapers.append(
-            {
-                "id": "statsbomb_open",
-                "label": "StatsBomb (open)",
-                "ms": None,
-                "ok": False,
-                "error_code": code,
-                "error": msg[:160],
-            }
+            scraper_row(
+                sid="statsbomb_open",
+                label="StatsBomb (open)",
+                ms=None,
+                ok=False,
+                error=msg[:160],
+                http_status=http_status_from_exc(exc),
+                layout_broken=layout,
+            )
         )
 
     # --- Understat (AJAX league data; try current + previous season) ---
@@ -245,27 +249,27 @@ def gather_health() -> Dict[str, Any]:
         ms = _ms_since(t0)
         ok = len(rows) > 20
         scrapers.append(
-            {
-                "id": "understat",
-                "label": "Understat",
-                "ms": ms,
-                "ok": ok,
-                "error_code": None if ok else "LAYOUT_BROKEN",
-                "error": None if ok else f"League AJAX returned {len(rows)} rows (expected 20+)",
-            }
+            scraper_row(
+                sid="understat",
+                label="Understat",
+                ms=ms,
+                ok=ok,
+                error=None if ok else f"League AJAX returned {len(rows)} rows (expected 20+)",
+                layout_broken=not ok,
+            )
         )
     except Exception as exc:
         msg = str(exc)
-        code = "LAYOUT_BROKEN" if "LAYOUT_BROKEN" in msg.upper() else "ERROR"
         scrapers.append(
-            {
-                "id": "understat",
-                "label": "Understat",
-                "ms": _ms_since(t0),
-                "ok": False,
-                "error_code": code,
-                "error": msg[:160],
-            }
+            scraper_row(
+                sid="understat",
+                label="Understat",
+                ms=_ms_since(t0),
+                ok=False,
+                error=msg[:160],
+                http_status=http_status_from_exc(exc),
+                layout_broken="LAYOUT_BROKEN" in msg.upper(),
+            )
         )
 
     # --- Sofascore public search (light; often 403 off residential IP too) ---
@@ -276,50 +280,41 @@ def gather_health() -> Dict[str, Any]:
         hit, blocked = ss.probe_team_search("Arsenal")
         ms = _ms_since(t0)
         if hit:
-            scrapers.append(
-                {
-                    "id": "sofascore",
-                    "label": "Sofascore",
-                    "ms": ms,
-                    "ok": True,
-                    "error_code": None,
-                    "error": None,
-                }
-            )
+            scrapers.append(scraper_row(sid="sofascore", label="Sofascore", ms=ms, ok=True))
         elif blocked:
             scrapers.append(
-                {
-                    "id": "sofascore",
-                    "label": "Sofascore",
-                    "ms": ms,
-                    "ok": False,
-                    "error_code": "BLOCKED",
-                    "error": "HTTP 403 — API blocked from this network (optional; core 1X2 unaffected)",
-                }
+                scraper_row(
+                    sid="sofascore",
+                    label="Sofascore",
+                    ms=ms,
+                    ok=False,
+                    blocked=True,
+                    error="HTTP 403 — API blocked from this network (optional; core 1X2 unaffected)",
+                )
             )
         else:
             scrapers.append(
-                {
-                    "id": "sofascore",
-                    "label": "Sofascore",
-                    "ms": ms,
-                    "ok": False,
-                    "error_code": "ERROR",
-                    "error": "empty search result",
-                }
+                scraper_row(
+                    sid="sofascore",
+                    label="Sofascore",
+                    ms=ms,
+                    ok=False,
+                    error="empty search result",
+                )
             )
     except Exception as exc:
         msg = str(exc)
-        code = "LAYOUT_BROKEN" if "LAYOUT_BROKEN" in msg.upper() else "ERROR"
         scrapers.append(
-            {
-                "id": "sofascore",
-                "label": "Sofascore",
-                "ms": _ms_since(t0),
-                "ok": False,
-                "error_code": code,
-                "error": msg[:160],
-            }
+            scraper_row(
+                sid="sofascore",
+                label="Sofascore",
+                ms=_ms_since(t0),
+                ok=False,
+                error=msg[:160],
+                http_status=http_status_from_exc(exc),
+                blocked="403" in msg,
+                layout_broken="LAYOUT_BROKEN" in msg.upper(),
+            )
         )
 
     # --- FotMob daily matches (date + timezone) ---
@@ -330,26 +325,63 @@ def gather_health() -> Dict[str, Any]:
         pr = probe_matches_api()
         ms = _ms_since(t0)
         ok = bool(pr.get("ok"))
+        http_status = pr.get("http_status")
+        try:
+            http_status = int(http_status) if http_status is not None else None
+        except (TypeError, ValueError):
+            http_status = None
         scrapers.append(
-            {
-                "id": "fotmob",
-                "label": "FotMob",
-                "ms": ms,
-                "ok": ok,
-                "error_code": None if ok else "LAYOUT_BROKEN",
-                "error": None if ok else pr.get("error") or f"leagues={pr.get('league_count', 0)}",
-            }
+            scraper_row(
+                sid="fotmob",
+                label="FotMob",
+                ms=ms,
+                ok=ok,
+                error=None if ok else pr.get("error") or f"leagues={pr.get('league_count', 0)}",
+                http_status=http_status,
+                layout_broken=not ok and http_status in (None, 200),
+            )
         )
     except Exception as exc:
         scrapers.append(
-            {
-                "id": "fotmob",
-                "label": "FotMob",
-                "ms": _ms_since(t0),
-                "ok": False,
-                "error_code": "ERROR",
-                "error": str(exc)[:160],
-            }
+            scraper_row(
+                sid="fotmob",
+                label="FotMob",
+                ms=_ms_since(t0),
+                ok=False,
+                error=str(exc)[:160],
+                http_status=http_status_from_exc(exc),
+            )
+        )
+
+    # --- FBref squad table (EPL sample; heavy scraper path) ---
+    t0 = time.perf_counter()
+    try:
+        from hibs_predictor.scrapers.fbref_client import fetch_squad_stats_table
+
+        rows = fetch_squad_stats_table("EPL")
+        ms = _ms_since(t0)
+        ok = len(rows) >= 5
+        scrapers.append(
+            scraper_row(
+                sid="fbref",
+                label="FBref",
+                ms=ms,
+                ok=ok,
+                error=None if ok else f"squad_rows={len(rows)}",
+                layout_broken=not ok,
+            )
+        )
+    except Exception as exc:
+        scrapers.append(
+            scraper_row(
+                sid="fbref",
+                label="FBref",
+                ms=_ms_since(t0),
+                ok=False,
+                error=str(exc)[:160],
+                http_status=http_status_from_exc(exc),
+                layout_broken="LAYOUT_BROKEN" in str(exc).upper(),
+            )
         )
 
     # --- Wikipedia standings (EPL table sample) ---
@@ -361,25 +393,25 @@ def gather_health() -> Dict[str, Any]:
         ms = _ms_since(t0)
         ok = len(rows) >= 10
         scrapers.append(
-            {
-                "id": "wikipedia",
-                "label": "Wikipedia",
-                "ms": ms,
-                "ok": ok,
-                "error_code": None if ok else "LAYOUT_BROKEN",
-                "error": None if ok else f"rows={len(rows)}",
-            }
+            scraper_row(
+                sid="wikipedia",
+                label="Wikipedia",
+                ms=ms,
+                ok=ok,
+                error=None if ok else f"rows={len(rows)}",
+                layout_broken=not ok,
+            )
         )
     except Exception as exc:
         scrapers.append(
-            {
-                "id": "wikipedia",
-                "label": "Wikipedia",
-                "ms": _ms_since(t0),
-                "ok": False,
-                "error_code": "ERROR",
-                "error": str(exc)[:160],
-            }
+            scraper_row(
+                sid="wikipedia",
+                label="Wikipedia",
+                ms=_ms_since(t0),
+                ok=False,
+                error=str(exc)[:160],
+                http_status=http_status_from_exc(exc),
+            )
         )
 
     # --- SoccerStats latest.asp ---
@@ -391,25 +423,25 @@ def gather_health() -> Dict[str, Any]:
         ms = _ms_since(t0)
         ok = len(rows) >= 10
         scrapers.append(
-            {
-                "id": "soccerstats",
-                "label": "SoccerStats",
-                "ms": ms,
-                "ok": ok,
-                "error_code": None if ok else "LAYOUT_BROKEN",
-                "error": None if ok else f"rows={len(rows)}",
-            }
+            scraper_row(
+                sid="soccerstats",
+                label="SoccerStats",
+                ms=ms,
+                ok=ok,
+                error=None if ok else f"rows={len(rows)}",
+                layout_broken=not ok,
+            )
         )
     except Exception as exc:
         scrapers.append(
-            {
-                "id": "soccerstats",
-                "label": "SoccerStats",
-                "ms": _ms_since(t0),
-                "ok": False,
-                "error_code": "ERROR",
-                "error": str(exc)[:160],
-            }
+            scraper_row(
+                sid="soccerstats",
+                label="SoccerStats",
+                ms=_ms_since(t0),
+                ok=False,
+                error=str(exc)[:160],
+                http_status=http_status_from_exc(exc),
+            )
         )
 
     # --- Deferred / probe-only sources ---
@@ -425,27 +457,28 @@ def gather_health() -> Dict[str, Any]:
             mod = importlib.import_module(mod_path)
             pr = getattr(mod, fn)()
             ms = _ms_since(t0)
-            deferred = str(pr.get("status") or "") == "deferred" or str(pr.get("status") or "") == "not_available"
+            deferred = str(pr.get("status") or "") in ("deferred", "not_available")
+            ok = bool(pr.get("ok")) and not deferred
             scrapers.append(
-                {
-                    "id": sid,
-                    "label": label,
-                    "ms": ms,
-                    "ok": bool(pr.get("ok")) if not deferred else False,
-                    "error_code": "DEFERRED" if deferred else (None if pr.get("ok") else "ERROR"),
-                    "error": pr.get("note") or pr.get("error"),
-                }
+                scraper_row(
+                    sid=sid,
+                    label=label,
+                    ms=ms,
+                    ok=ok,
+                    error=pr.get("note") or pr.get("error"),
+                    deferred=deferred,
+                )
             )
         except Exception as exc:
             scrapers.append(
-                {
-                    "id": sid,
-                    "label": label,
-                    "ms": _ms_since(t0),
-                    "ok": False,
-                    "error_code": "ERROR",
-                    "error": str(exc)[:160],
-                }
+                scraper_row(
+                    sid=sid,
+                    label=label,
+                    ms=_ms_since(t0),
+                    ok=False,
+                    error=str(exc)[:160],
+                    http_status=http_status_from_exc(exc),
+                )
             )
 
     return {

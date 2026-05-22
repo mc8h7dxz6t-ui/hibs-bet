@@ -106,7 +106,21 @@ def probe_matches_api(day: Optional[date] = None) -> Dict[str, Any]:
         payload = fetch_matches_for_date(day, cache=Cache())
         leagues = payload.get("leagues") or []
         n = len(leagues) if isinstance(leagues, list) else 0
-        return {"ok": n >= 5, "league_count": n, "date": day.isoformat()}
+        return {"ok": n >= 5, "league_count": n, "date": day.isoformat(), "http_status": 200}
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else None
+        hint = (
+            "HTTP 404 — use /api/data/matches (legacy /api/matches is dead)"
+            if status == 404
+            else str(exc)[:160]
+        )
+        return {
+            "ok": False,
+            "league_count": 0,
+            "http_status": status,
+            "error": hint,
+            "date": day.isoformat(),
+        }
     except Exception as exc:
         return {"ok": False, "league_count": 0, "error": str(exc)[:160]}
 

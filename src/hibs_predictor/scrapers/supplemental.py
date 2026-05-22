@@ -63,6 +63,15 @@ def _skip_heavy_when_api_strong(enriched: Dict[str, Any]) -> tuple:
     return True, "api_strong_skip_heavy"
 
 
+def _record_miss(out: Dict[str, Any], key: str, detail: str) -> None:
+    """Surface best-effort scrape attempts that returned nothing (visible in supplemental JSON)."""
+    misses = out.get("supplemental_misses")
+    if not isinstance(misses, dict):
+        misses = {}
+        out["supplemental_misses"] = misses
+    misses[key] = detail
+
+
 def _understat_season_years_for_fixture(fixture: Dict[str, Any]) -> List[int]:
     """Understat league URLs use the season end year (2025/26 → 2026). Avoid futile y+1 probes mid-season."""
     from hibs_predictor.data_source_policy import parse_fixture_datetime_utc
@@ -136,6 +145,8 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
                             if umeta.get("away_n") is not None:
                                 out["understat_light_away_n"] = umeta.get("away_n")
                         break
+                if "understat_light" not in out:
+                    _record_miss(out, "understat_light", "no_row_or_rolling_xg")
         except Exception as exc:
             out["understat_light_error"] = str(exc)
 
@@ -216,6 +227,8 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
                             "home": bool(wr),
                             "away": bool(ar),
                         }
+                    elif rows:
+                        _record_miss(out, "wikipedia_positions", "team_name_no_match")
     except Exception as exc:
         out["wikipedia_error"] = str(exc)[:120]
 
@@ -235,6 +248,8 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
                             "home": bool(sr_h),
                             "away": bool(sr_a),
                         }
+                    elif ss_rows:
+                        _record_miss(out, "soccerstats_positions", "team_name_no_match")
     except Exception as exc:
         out["soccerstats_error"] = str(exc)[:120]
 
@@ -269,11 +284,14 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
         from hibs_predictor.scrapers import sofascore_client as ss
 
         if fixture_in_policy_window(fixture):
-            ent = ss.first_team_hit(home)
-            if ent and ent.get("id"):
+            ent, blocked = ss.probe_team_search(home)
+            if blocked:
+                out["sofascore_blocked"] = True
+                _record_miss(out, "sofascore", "http_403_blocked")
+            elif ent and ent.get("id"):
                 ev = ss.team_last_xg_summary(int(ent["id"]))
                 out["sofascore_team_events"] = ev[:5]
-            if ss.sofascore_xg_enabled():
+            if ss.sofascore_xg_enabled() and not blocked:
                 away_nm = fixture_team_name(fixture, "away")
                 hp = ss.team_xg_profile_for_name(home)
                 ap = ss.team_xg_profile_for_name(away_nm) if away_nm else None

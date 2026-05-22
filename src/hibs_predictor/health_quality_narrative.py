@@ -17,6 +17,9 @@ _SCRAPER_EFFECT: Dict[str, str] = {
     "statsbomb_open": "Open-data JSON (no key). Competition list always; optional per-fixture goals-in-window proxy when enabled. Rarely shifts 1X2 unless blended priors are on.",
     "understat": "League-page xG when the embed parses. Heavy + light paths can feed optional xG blend in the betting engine.",
     "fbref": "Squad aggregates from HTML when heavy scrapers run (or when not skipped). May 403 from some networks; core 1X2 still runs on APIs.",
+    "fotmob": "Daily match JSON fixture fallback when API lists are empty. Uses /api/data/matches (not legacy /api/matches).",
+    "wikipedia": "Scraped league tables when API standings are thin; Norway/Finland/cups supported.",
+    "soccerstats": "HTML table positions after Wikipedia; Scotland L1–L2 and other mapped leagues.",
     "sofascore": "Recent-match listing from public endpoints. Often 403 outside a browser; no core impact when absent.",
 }
 

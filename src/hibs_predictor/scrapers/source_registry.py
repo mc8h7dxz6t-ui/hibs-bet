@@ -36,7 +36,7 @@ SOURCE_CATALOG: List[Dict[str, Any]] = [
         "focus": "Public daily match JSON used as a conservative fixture fallback",
         "status": "wired",
         "module": "hibs_predictor.scrapers.fotmob_client",
-        "notes": "``/api/data/matches?date=&timezone=`` (2025+); expanded league id map; fixture fallback when APIs empty.",
+        "notes": "``/api/data/matches?date=&timezone=`` (2025+; legacy ``/api/matches`` is 404). Health probe + ``HIBS_ENABLE_FOTMOB_FIXTURES=1``.",
     },
     {
         "id": "fbref",

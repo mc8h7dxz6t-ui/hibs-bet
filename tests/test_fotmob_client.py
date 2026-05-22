@@ -53,3 +53,4 @@ def test_probe_matches_api_ok():
         mock_fetch.return_value = {"leagues": [{}] * 8}
         pr = fm.probe_matches_api()
     assert pr["ok"] is True
+    assert pr.get("http_status") == 200
