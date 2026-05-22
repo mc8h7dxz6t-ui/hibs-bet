@@ -1359,6 +1359,36 @@ def test_kickoff_display_tz():
         return False
 
 
+def test_domestic_cups_configured():
+    """Major domestic cups (incl. Coupe de France) are in dashboard league set."""
+    print("\nTesting domestic cup config...")
+    try:
+        from hibs_predictor.config import LEAGUES, ALL_LEAGUE_CODES, LEAGUE_REGIONS, league_dashboard_region
+
+        cups = (
+            "COUPE_DE_FRANCE",
+            "DFB_POKAL",
+            "COPPA_ITALIA",
+            "COPA_DEL_REY",
+            "LEAGUE_CUP",
+        )
+        for code in cups:
+            assert code in LEAGUES, code
+            assert LEAGUES[code]["api_sports_id"], code
+            assert code in ALL_LEAGUE_CODES, code
+        assert LEAGUES["COUPE_DE_FRANCE"]["api_sports_id"] == 66
+        euro = LEAGUE_REGIONS.get("🏆 European", [])
+        for code in ("COUPE_DE_FRANCE", "DFB_POKAL", "COPPA_ITALIA", "COPA_DEL_REY"):
+            assert code in euro, code
+        assert league_dashboard_region("COUPE_DE_FRANCE") == "european"
+        assert league_dashboard_region("LEAGUE_CUP") == "uk"
+        print("  ✓ Domestic cups configured")
+        return True
+    except Exception as e:
+        print(f"  ✗ Domestic cup config failed: {e}")
+        return False
+
+
 def test_nordic_leagues_configured():
     """Norway Eliteserien and Finland Veikkausliiga are in dashboard league set."""
     print("\nTesting Nordic league config...")
@@ -2267,6 +2297,7 @@ def main():
         test_user_fetch_days_five_or_seven,
         test_seven_day_window_includes_day_six_kickoff,
         test_settings_fixture_window_ui,
+        test_domestic_cups_configured,
         test_nordic_leagues_configured,
         test_calendar_year_season_candidate,
         test_uefa_season_candidates_api_primary_first,

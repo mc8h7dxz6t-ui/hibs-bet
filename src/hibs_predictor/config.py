@@ -103,6 +103,16 @@ LEAGUES = {
         "sportsmonk_id": None,
         "strength_factor": 0.90,
     },
+    "LEAGUE_CUP": {
+        "name": "EFL Cup",
+        "country": "England",
+        "region": "UK",
+        "flag": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+        "football_data_org_id": None,
+        "api_sports_id": 48,
+        "sportsmonk_id": None,
+        "strength_factor": 0.88,
+    },
     # European
     "UCL": {
         "name": "Champions League",
@@ -144,6 +154,16 @@ LEAGUES = {
         "sportsmonk_id": 564,
         "strength_factor": 1.0,
     },
+    "COPA_DEL_REY": {
+        "name": "Copa del Rey",
+        "country": "Spain",
+        "region": "European",
+        "flag": "🇪🇸",
+        "football_data_org_id": "CDR",
+        "api_sports_id": 143,
+        "sportsmonk_id": None,
+        "strength_factor": 0.90,
+    },
     "SERIE_A": {
         "name": "Serie A",
         "country": "Italy",
@@ -153,6 +173,16 @@ LEAGUES = {
         "api_sports_id": 135,
         "sportsmonk_id": 384,
         "strength_factor": 0.95,
+    },
+    "COPPA_ITALIA": {
+        "name": "Coppa Italia",
+        "country": "Italy",
+        "region": "European",
+        "flag": "🇮🇹",
+        "football_data_org_id": None,
+        "api_sports_id": 137,
+        "sportsmonk_id": None,
+        "strength_factor": 0.90,
     },
     "BUNDESLIGA": {
         "name": "Bundesliga",
@@ -164,6 +194,16 @@ LEAGUES = {
         "sportsmonk_id": 364,
         "strength_factor": 1.0,
     },
+    "DFB_POKAL": {
+        "name": "DFB Pokal",
+        "country": "Germany",
+        "region": "European",
+        "flag": "🇩🇪",
+        "football_data_org_id": "DFB",
+        "api_sports_id": 81,
+        "sportsmonk_id": None,
+        "strength_factor": 0.90,
+    },
     "LIGUE_1": {
         "name": "Ligue 1",
         "country": "France",
@@ -173,6 +213,16 @@ LEAGUES = {
         "api_sports_id": 61,
         "sportsmonk_id": 10,
         "strength_factor": 0.90,
+    },
+    "COUPE_DE_FRANCE": {
+        "name": "Coupe de France",
+        "country": "France",
+        "region": "European",
+        "flag": "🇫🇷",
+        "football_data_org_id": None,
+        "api_sports_id": 66,
+        "sportsmonk_id": None,
+        "strength_factor": 0.88,
     },
     "EREDIVISIE": {
         "name": "Eredivisie",
@@ -302,10 +352,15 @@ ALL_LEAGUE_CODES = [
     "LEAGUE_ONE",
     "LEAGUE_TWO",
     "FA_CUP",
+    "LEAGUE_CUP",
     "LA_LIGA",
+    "COPA_DEL_REY",
     "SERIE_A",
+    "COPPA_ITALIA",
     "BUNDESLIGA",
+    "DFB_POKAL",
     "LIGUE_1",
+    "COUPE_DE_FRANCE",
     "EREDIVISIE",
     "PRIMEIRA",
     "BELGIUM_FIRST",
@@ -326,9 +381,10 @@ DASHBOARD_LEAGUE_ORDER = list(ALL_LEAGUE_CODES)
 
 LEAGUE_REGIONS = {
     "🏴󠁧󠁢󠁳󠁣󠁴󠁿 Scotland": ["SCOTLAND", "SCOTLAND_CHAMP", "SCOTLAND_L1", "SCOTLAND_L2", "SCOTTISH_CUP"],
-    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 England": ["EPL", "CHAMPIONSHIP", "LEAGUE_ONE", "LEAGUE_TWO", "FA_CUP"],
+    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 England": ["EPL", "CHAMPIONSHIP", "LEAGUE_ONE", "LEAGUE_TWO", "FA_CUP", "LEAGUE_CUP"],
     "🏆 European": [
-        "LA_LIGA", "SERIE_A", "BUNDESLIGA", "LIGUE_1", "EREDIVISIE", "PRIMEIRA",
+        "LA_LIGA", "COPA_DEL_REY", "SERIE_A", "COPPA_ITALIA", "BUNDESLIGA", "DFB_POKAL",
+        "LIGUE_1", "COUPE_DE_FRANCE", "EREDIVISIE", "PRIMEIRA",
         "BELGIUM_FIRST", "DENMARK_SL", "GREECE_SL", "AUSTRIA_BL",
         "NORWAY_ELITESERIEN", "FINLAND_VEIKKAUSLIIGA",
         "UCL", "EUROPA_LEAGUE", "UECL",
@@ -349,14 +405,19 @@ _DASHBOARD_REGION_UK = frozenset(
         "LEAGUE_ONE",
         "LEAGUE_TWO",
         "FA_CUP",
+        "LEAGUE_CUP",
     }
 )
 _DASHBOARD_REGION_EUROPEAN = frozenset(
     {
         "LA_LIGA",
+        "COPA_DEL_REY",
         "SERIE_A",
+        "COPPA_ITALIA",
         "BUNDESLIGA",
+        "DFB_POKAL",
         "LIGUE_1",
+        "COUPE_DE_FRANCE",
         "EREDIVISIE",
         "PRIMEIRA",
         "BELGIUM_FIRST",

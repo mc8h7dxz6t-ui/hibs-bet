@@ -32,7 +32,23 @@ STATSBOMB_LEAGUE_OPEN: Dict[str, Tuple[str, Optional[str]]] = {
 }
 
 # Cups / internationals: enable goals-proxy supplemental by default (opt-out via env).
-STATSBOMB_CUP_LEAGUES = frozenset({"UCL", "EUROPA_LEAGUE", "UECL", "WORLD_CUP", "EUROS", "NATIONS_LEAGUE"})
+STATSBOMB_CUP_LEAGUES = frozenset(
+    {
+        "UCL",
+        "EUROPA_LEAGUE",
+        "UECL",
+        "WORLD_CUP",
+        "EUROS",
+        "NATIONS_LEAGUE",
+        "SCOTTISH_CUP",
+        "FA_CUP",
+        "LEAGUE_CUP",
+        "COUPE_DE_FRANCE",
+        "DFB_POKAL",
+        "COPPA_ITALIA",
+        "COPA_DEL_REY",
+    }
+)
 
 
 def _season_sort_key(row: Dict[str, Any]) -> Tuple[int, int]:

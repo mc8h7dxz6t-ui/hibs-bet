@@ -459,6 +459,8 @@ class OddsApiClient(BaseApiClient):
         "LEAGUE_ONE": "soccer_england_league1",
         "LEAGUE_TWO": "soccer_england_league2",
         "FA_CUP": "soccer_fa_cup",
+        "COUPE_DE_FRANCE": "soccer_france_coupe_de_france",
+        "DFB_POKAL": "soccer_germany_dfb_pokal",
         "SCOTLAND": "soccer_scotland_premiership",
         "SCOTLAND_CHAMP": "soccer_scotland_championship",
         "UCL": "soccer_uefa_champs_league",

@@ -36,6 +36,8 @@ def test_cup_leagues_in_open_map():
     assert "UCL" in sb.STATSBOMB_LEAGUE_OPEN
     assert "WORLD_CUP" in sb.STATSBOMB_LEAGUE_OPEN
     assert "UCL" in sb.STATSBOMB_CUP_LEAGUES
+    assert "COUPE_DE_FRANCE" in sb.STATSBOMB_CUP_LEAGUES
+    assert "FA_CUP" in sb.STATSBOMB_CUP_LEAGUES
 
 
 def test_cup_fixture_gets_statsbomb_xg_source(monkeypatch):
