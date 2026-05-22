@@ -495,10 +495,10 @@ def test_bottom_top_underdog_not_home_value():
         assert prediction["probabilities"]["home"] < 0.24, prediction["probabilities"]
         assert "home" not in (prediction.get("value_bets") or {})
         assert prediction.get("best_bet") != "home"
-        assert "home" in (prediction.get("value_bets_rejected") or {})
         menu = prediction.get("pick_menu") or []
         home_rows = [m for m in menu if m.get("key") == "home_win"]
         assert home_rows and home_rows[0].get("is_value") is False
+        assert home_rows[0].get("recommended") is False
         print("  ✓ Bottom/top underdog home value suppressed")
         return True
     except Exception as e:
@@ -523,19 +523,19 @@ def test_both_teams_form_and_strength():
 
         home_recent = [
             _ft(home_id, away_id, 2, 0, "2026-05-01T12:00:00+00:00"),
-            _ft(999, home_id, 1, 2, "2026-04-28T12:00:00+00:00"),
-            _ft(home_id, 888, 3, 1, "2026-04-24T12:00:00+00:00"),
-            _ft(777, home_id, 0, 2, "2026-04-20T12:00:00+00:00"),
-            _ft(home_id, 666, 1, 1, "2026-04-15T12:00:00+00:00"),
-            _ft(555, home_id, 2, 3, "2026-04-10T12:00:00+00:00"),
+            _ft(home_id, 888, 3, 0, "2026-04-28T12:00:00+00:00"),
+            _ft(home_id, 777, 2, 0, "2026-04-24T12:00:00+00:00"),
+            _ft(home_id, 666, 4, 1, "2026-04-20T12:00:00+00:00"),
+            _ft(home_id, 555, 2, 0, "2026-04-15T12:00:00+00:00"),
+            _ft(home_id, 444, 3, 1, "2026-04-10T12:00:00+00:00"),
         ]
         away_recent = [
             _ft(away_id, home_id, 3, 1, "2026-05-02T12:00:00+00:00"),
-            _ft(888, away_id, 0, 1, "2026-04-27T12:00:00+00:00"),
-            _ft(away_id, 777, 2, 0, "2026-04-22T12:00:00+00:00"),
-            _ft(home_id, away_id, 1, 2, "2026-04-18T12:00:00+00:00"),
-            _ft(666, away_id, 1, 1, "2026-04-12T12:00:00+00:00"),
-            _ft(away_id, 555, 4, 2, "2026-04-08T12:00:00+00:00"),
+            _ft(888, away_id, 2, 0, "2026-04-27T12:00:00+00:00"),
+            _ft(777, away_id, 0, 1, "2026-04-22T12:00:00+00:00"),
+            _ft(666, away_id, 0, 2, "2026-04-18T12:00:00+00:00"),
+            _ft(555, away_id, 1, 2, "2026-04-12T12:00:00+00:00"),
+            _ft(444, away_id, 0, 3, "2026-04-08T12:00:00+00:00"),
         ]
         h10 = TeamStrengthCalculator.parse_last_10_results(home_recent, home_id)
         a10 = TeamStrengthCalculator.parse_last_10_results(away_recent, away_id)
@@ -563,6 +563,8 @@ def test_both_teams_form_and_strength():
                         "bookmaker_odds": {"home": None, "draw": None, "away": None},
                         "line_odds": {},
                         "value_bets": {},
+                        "poisson_probs": {"home": 40.0, "draw": 30.0, "away": 30.0},
+                        "probabilities_pct": {"home": 40.0, "draw": 30.0, "away": 30.0},
                     },
                 },
                 display_tz_label="UK",
@@ -1450,15 +1452,15 @@ def test_fetch_all_disk_bundle_skips_refinalize():
                 "hibs_predictor.web._finalize_fixture_bundle"
             ) as fin, patch("hibs_predictor.web._refresh_live_on_bundle") as live:
                 out = fetch_all_fixtures(attach_live=False)
-        assert fin.call_count == 0
-        assert live.call_count == 0
-        assert out.get("total") == 1
-        with patch("hibs_predictor.web.Cache", return_value=c), patch(
-            "hibs_predictor.web._finalize_fixture_bundle"
-        ) as fin2, patch("hibs_predictor.web._refresh_live_on_bundle") as live2:
-            fetch_all_fixtures(attach_live=True)
-        assert fin2.call_count == 0
-        assert live2.call_count == 1
+            assert fin.call_count == 0
+            assert live.call_count == 0
+            assert out.get("total") == 1
+            with patch("hibs_predictor.web.Cache", return_value=c), patch(
+                "hibs_predictor.web._finalize_fixture_bundle"
+            ) as fin2, patch("hibs_predictor.web._refresh_live_on_bundle") as live2:
+                fetch_all_fixtures(attach_live=True)
+            assert fin2.call_count == 0
+            assert live2.call_count == 1
         print("  ✓ Disk bundle fast path OK")
         return True
     except Exception as e:
