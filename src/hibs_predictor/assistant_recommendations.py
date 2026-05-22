@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
+from hibs_predictor.assistant_facts import enrich_leg_with_packet_facts
 from hibs_predictor.match_insight import _value_bet_key
 
 _DISCLAIMER = (
@@ -655,6 +656,18 @@ def build_detailed_leg_rationale(
         for bullet in si["rationale"][:2]:
             if bullet and bullet not in bullets:
                 bullets.append(str(bullet))
+    for metric in (si.get("rationale_metrics") or [])[:2]:
+        if not isinstance(metric, dict):
+            continue
+        label = metric.get("label")
+        value = metric.get("value")
+        if label and value is not None:
+            note = metric.get("note")
+            line = f"{label}: **{value}**"
+            if note:
+                line += f" ({note})"
+            if line not in bullets:
+                bullets.append(line)
     return bullets[:max_bullets]
 
 
@@ -678,12 +691,9 @@ def build_ranked_btts_legs(
         if fid in used:
             continue
         used.add(fid)
-        leg = dict(best)
+        leg = enrich_leg_with_packet_facts(dict(best), pkt)
         leg["match"] = _match_label(pkt)
         leg["rationale"] = build_detailed_leg_rationale(pkt, leg, max_bullets=5 if detailed else 3)
-        ps = pkt.get("probability_scores") or {}
-        if ps.get("btts_pct") is not None:
-            leg["btts_pct"] = ps["btts_pct"]
         ranked.append(leg)
     ranked.sort(key=lambda x: -float(x.get("score") or 0))
     return ranked[:limit]
@@ -771,7 +781,7 @@ def build_win_btts_combo_suggestions(
             mp = item.get("model_pct")
             if mp is None or float(mp) < _min_model_pct_for_key(key):
                 continue
-            leg = _leg_from_menu_item(pkt, item)
+            leg = enrich_leg_with_packet_facts(_leg_from_menu_item(pkt, item), pkt)
             leg["score"] = _leg_score(leg)
             leg["match"] = _match_label(pkt)
             leg["rationale"] = build_detailed_leg_rationale(

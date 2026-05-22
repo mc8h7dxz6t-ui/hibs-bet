@@ -45,6 +45,21 @@ SEASON_COVERAGE: List[Dict[str, Any]] = [
 ]
 
 
+def assistant_data_policy() -> Dict[str, Any]:
+    """Guards for betting assistant surfaces — snapshot fields only."""
+    return {
+        "no_invented_stats": True,
+        "no_placeholder_odds": True,
+        "no_default_btts_pct": True,
+        "no_player_props": True,
+        "refusal_when_snapshot_empty": True,
+        "note": (
+            "Assistants and bet builders use only live fixture packets (odds, model %, xG, form, "
+            "injuries, rationale_metrics). Missing fields yield 'not enough data' — never fabricated picks."
+        ),
+    }
+
+
 def data_coverage_status() -> Dict[str, Any]:
     """Return source audit metadata for UI/API surfaces."""
     wired = [s for s in SOURCE_CATALOG if s.get("status") == "wired"]
@@ -60,4 +75,5 @@ def data_coverage_status() -> Dict[str, Any]:
         },
         "no_player_props": True,
         "player_prop_note": "No player-prop source is wired; bet builders are limited to real 1X2, BTTS, totals and double-chance markets when priced.",
+        "assistant": assistant_data_policy(),
     }

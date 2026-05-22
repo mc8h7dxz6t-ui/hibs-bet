@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional
 
+from hibs_predictor.assistant_facts import enrich_leg_with_packet_facts
 from hibs_predictor.assistant_recommendations import (
     _build_acca,
     _exclusion_reason,
@@ -536,8 +537,17 @@ def enrich_acca_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
-def enrich_leg_list(legs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    return [leg_slip_payload(l) for l in legs]
+def enrich_leg_list(
+    legs: List[Dict[str, Any]],
+    packets: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    by_id = {p.get("id"): p for p in (packets or [])}
+    out: List[Dict[str, Any]] = []
+    for leg in legs or []:
+        pkt = by_id.get(leg.get("fixture_id")) or {}
+        merged = enrich_leg_with_packet_facts(leg, pkt) if pkt else dict(leg)
+        out.append(leg_slip_payload(merged))
+    return out
 
 
 def build_acca_window_summary(packets: List[Dict[str, Any]]) -> str:
@@ -616,14 +626,19 @@ def _leg_candidate_blurb(packet: Dict[str, Any], leg: Dict[str, Any]) -> str:
         bits.append(
             f"1X2 H{ps.get('home_win_pct')}% D{ps.get('draw_pct')}% A{ps.get('away_win_pct')}%"
         )
-    return " · ".join(bits) if bits else "meets data bar"
+    return " · ".join(bits) if bits else "priced leg from snapshot (see model/dq when listed)"
 
 
 def _acca_rank_score(acca: Dict[str, Any]) -> float:
     conf = float(acca.get("joint_confidence_pct") or 0)
     legs = acca.get("legs") or []
     leg_scores = sum(float(l.get("score") or l.get("model_pct") or 0) for l in legs)
-    thin_penalty = sum(12.0 for l in legs if (l.get("data_quality_pct") or 100) < assistant_min_data_pct())
+    thin_penalty = sum(
+        12.0
+        for l in legs
+        if l.get("data_quality_pct") is not None
+        and float(l["data_quality_pct"]) < assistant_min_data_pct()
+    )
     dual_bonus = sum(3.0 for l in legs if l.get("value_dual_agree") or l.get("has_value_dual_agree"))
     bet_conf_bonus = sum(
         min(4.0, max(0.0, (float(l.get("bet_confidence") or 0) - 70.0) * 0.1))

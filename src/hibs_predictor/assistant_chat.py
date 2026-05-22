@@ -20,6 +20,7 @@ from hibs_predictor.assistant_context import (
     enrich_leg_list,
     pick_recommendation_line,
 )
+from hibs_predictor.assistant_facts import INSUFFICIENT_DATA_LINE, snapshot_refusal_line
 from hibs_predictor.assistant_recommendations import (
     _exclusion_reason,
     _kickoff_display,
@@ -431,6 +432,16 @@ def parse_intent(question: str) -> Tuple[str, Dict[str, Any]]:
     return "general", {}
 
 
+def _refusal_blocks(line: str) -> List[Dict[str, Any]]:
+    return [{"type": "text", "lines": [line]}]
+
+
+def _dq_below_bar(dq: Any) -> bool:
+    if dq is None:
+        return True
+    return float(dq) < assistant_min_data_pct()
+
+
 def handle_chat(
     question: str,
     packets: List[Dict[str, Any]],
@@ -449,6 +460,11 @@ def handle_chat(
         "blocks": [],
     }
 
+    refusal = snapshot_refusal_line(packets, intent, params)
+    if refusal:
+        out["blocks"] = _refusal_blocks(refusal)
+        return out
+
     if intent == "help":
         out["blocks"] = [
             {"type": "text", "lines": acca_greeting_lines(packets)},
@@ -463,12 +479,12 @@ def handle_chat(
             l.get("market_label")
             for a in ideas
             for l in (a.get("legs") or [])
-            if (l.get("data_quality_pct") or 100) < assistant_min_data_pct()
+            if _dq_below_bar(l.get("data_quality_pct"))
         ]
         if thin:
             lines.append(f"Caution: thin dq on — {', '.join(thin[:3])}.")
         if not ideas:
-            lines.append("Not enough priced legs right now — try suggest legs or mixed acca.")
+            lines.append(INSUFFICIENT_DATA_LINE)
             out["blocks"] = [{"type": "text", "lines": lines}]
         else:
             out["blocks"] = [
@@ -581,7 +597,7 @@ def handle_chat(
             else:
                 out["blocks"] = [
                     {"type": "text", "lines": lines},
-                    {"type": "suggest_legs", "items": enrich_leg_list(legs)},
+                    {"type": "suggest_legs", "items": enrich_leg_list(legs, packets)},
                 ]
             return out
         built = build_multi_leg_btts_acca(packets, target_legs=n, detailed=detailed)
@@ -622,7 +638,7 @@ def handle_chat(
         else:
             out["blocks"] = [
                 {"type": "text", "lines": lines},
-                {"type": "suggest_legs", "items": enrich_leg_list(combos)},
+                {"type": "suggest_legs", "items": enrich_leg_list(combos, packets)},
             ]
         return out
 

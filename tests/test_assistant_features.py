@@ -658,6 +658,116 @@ def test_assistant_js_mentions_btts_fold_examples():
     assert "rationaleListHtml" in js
 
 
+def _reply_text(reply: dict) -> str:
+    parts = []
+    for block in reply.get("blocks") or []:
+        if block.get("type") == "text":
+            parts.extend(block.get("lines") or [])
+        for key in ("items",):
+            for item in block.get(key) or []:
+                for leg in item.get("legs") or [item]:
+                    parts.append(str(leg.get("home") or ""))
+                    parts.append(str(leg.get("away") or ""))
+                    parts.append(str(leg.get("match") or ""))
+                    rat = leg.get("rationale")
+                    if isinstance(rat, list):
+                        parts.extend(str(b) for b in rat)
+                    elif rat:
+                        parts.append(str(rat))
+    return " ".join(parts)
+
+
+def test_fact_from_packet_never_invents_btts_or_odds():
+    from hibs_predictor.assistant_facts import fact_from_packet
+
+    pkt = {"home": "Hibs", "away": "Hearts", "probability_scores": {}}
+    facts = fact_from_packet(pkt)
+    assert facts.get("home") == "Hibs"
+    assert "btts_prob" not in facts
+    assert "btts_pct" not in facts
+    assert "odds" not in facts
+
+
+def test_empty_snapshot_refuses_best_acca():
+    from hibs_predictor.assistant_chat import handle_chat
+    from hibs_predictor.assistant_facts import INSUFFICIENT_DATA_LINE
+
+    reply = handle_chat("best acca", [])
+    text = _reply_text(reply).lower()
+    assert "not enough" in text or "won't invent" in text
+    assert INSUFFICIENT_DATA_LINE.split("—")[0].strip().lower()[:20] in text or "not enough live" in text
+    assert not [b for b in reply["blocks"] if b.get("type") == "accas"]
+
+
+def test_low_data_packet_refuses_btts_acca_not_fake_picks():
+    from hibs_predictor.assistant_chat import handle_chat
+
+    thin = _rich_assistant_packet(
+        data_quality_pct=52.0,
+        home_recent_n=0,
+        away_recent_n=0,
+        structured_insight={"mode": "odds_only", "pick": "Odds only"},
+        pick_menu=[],
+        probability_scores={},
+    )
+    reply = handle_chat("btts 3 fold", [thin])
+    text = _reply_text(reply).lower()
+    assert "not enough" in text
+    leg_blocks = [b for b in reply["blocks"] if b.get("type") in ("accas", "suggest_legs")]
+    if leg_blocks:
+        items = leg_blocks[0].get("items") or []
+        for acca in items:
+            for leg in acca.get("legs") or [acca]:
+                assert leg.get("odds") is None or leg.get("model_pct") is None
+
+
+def test_assistant_reply_uses_only_snapshot_team_names():
+    from hibs_predictor.assistant_chat import handle_chat
+
+    pkt = _rich_assistant_packet(home="Hibs", away="Hearts")
+    invented = ("Celtic", "Arsenal", "Liverpool", "Burnley", "Fulham", "Rangers")
+    for question in (
+        "stats for Hibs v Hearts",
+        "best acca",
+        "btts 3 fold",
+        "suggest legs",
+    ):
+        reply = handle_chat(question, [pkt])
+        text = _reply_text(reply)
+        for name in invented:
+            assert name not in text, f"{name} appeared for {question!r}"
+
+
+def test_enrich_leg_list_attaches_packet_btts_prob():
+    from hibs_predictor.assistant_context import enrich_leg_list
+
+    pkt = _rich_assistant_packet(
+        id=7,
+        probability_scores={"btts_pct": 61, "xg_home": 1.4, "xg_away": 1.1},
+    )
+    leg = {
+        "fixture_id": 7,
+        "home": "Hibs",
+        "away": "Hearts",
+        "market_key": "btts_yes",
+        "market_label": "BTTS Yes",
+        "model_pct": 62.0,
+        "odds": 1.7,
+    }
+    out = enrich_leg_list([leg], [pkt])[0]
+    assert out.get("btts_pct") == 61 or out.get("btts_prob") == 61
+    assert out.get("data_quality_pct") == 87.0
+
+
+def test_data_coverage_includes_assistant_policy():
+    from hibs_predictor.data_coverage import data_coverage_status
+
+    status = data_coverage_status()
+    assistant = status.get("assistant") or {}
+    assert assistant.get("no_invented_stats") is True
+    assert assistant.get("no_default_btts_pct") is True
+
+
 def test_acca_review_flags_thin_data(monkeypatch):
     from hibs_predictor.acca_review import review_acca_legs
 

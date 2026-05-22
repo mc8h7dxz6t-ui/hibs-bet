@@ -367,8 +367,9 @@
         var h = '<div class="hibs-assistant-card hibs-leg-card">';
         h += '<p class="ac-line">' + legHtml(leg) + '</p>';
         h += rationaleListHtml(leg.rationale);
-        if (leg.btts_pct != null && leg.market_key === 'btts_yes') {
-            h += '<p class="ac-line" style="font-size:0.84em;">Fixture BTTS blend: <strong>' + leg.btts_pct + '%</strong></p>';
+        var bttsShown = leg.btts_pct != null ? leg.btts_pct : (leg.btts_prob != null ? leg.btts_prob : null);
+        if (bttsShown != null && leg.market_key === 'btts_yes') {
+            h += '<p class="ac-line" style="font-size:0.84em;">Fixture BTTS blend: <strong>' + bttsShown + '%</strong></p>';
         }
         if (leg.data_quality_pct != null) {
             h += '<p class="ac-line" style="font-size:0.84em;">Data <span class="fr-dq fr-dq-compact ' + dqBadgeClass(leg.data_quality_pct) + '">' + leg.data_quality_pct + '%</span></p>';
@@ -465,8 +466,12 @@
         html += '<p class="ac-line"><strong>Match:</strong> ' + esc(si.match || (pkt.home + ' vs ' + pkt.away));
         if (ko) html += ' · ' + esc(ko);
         html += '</p>';
-        html += '<p class="ac-line"><strong>Pick:</strong> <span style="color:var(--neon)">' + esc(si.pick || '—') + '</span></p>';
-        if (si.mode === 'odds_only') {
+        if (si.pick) {
+            html += '<p class="ac-line"><strong>Pick:</strong> <span style="color:var(--neon)">' + esc(si.pick) + '</span></p>';
+        } else if (si.mode === 'odds_only') {
+            html += '<p class="ac-line" style="color:#fde68a;">Insufficient model data — odds-only feed, not used in accas.</p>';
+        }
+        if (si.mode === 'odds_only' && si.pick) {
             html += '<p class="ac-line" style="color:#fde68a;">Thin data — odds only, not used in accas.</p>';
         }
         if (si.rationale && si.rationale.length && !compact) {
@@ -520,7 +525,8 @@
         var s = ko + '<strong>' + esc(leg.home) + '</strong> v <strong>' + esc(leg.away) + '</strong> — ' + esc(leg.market_label);
         if (leg.odds) s += ' @ ' + oddsHtml(leg.odds);
         if (leg.model_pct != null) s += ' · model ' + leg.model_pct + '%';
-        if (leg.btts_pct != null && leg.market_key === 'btts_yes') s += ' · BTTS ' + leg.btts_pct + '%';
+        var bttsLeg = leg.btts_pct != null ? leg.btts_pct : leg.btts_prob;
+        if (bttsLeg != null && leg.market_key === 'btts_yes') s += ' · BTTS ' + bttsLeg + '%';
         if (leg.data_quality_pct != null) {
             s += ' · dq <span class="fr-dq fr-dq-compact ' + dqBadgeClass(leg.data_quality_pct) + '">' + leg.data_quality_pct + '%</span>';
         }
