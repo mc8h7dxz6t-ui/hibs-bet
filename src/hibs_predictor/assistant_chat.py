@@ -17,6 +17,7 @@ from hibs_predictor.assistant_context import (
     build_fixture_context_lines,
     build_fixtures_summary,
     enrich_acca_items,
+    enrich_leg_list,
     pick_recommendation_line,
 )
 from hibs_predictor.assistant_recommendations import (
@@ -27,11 +28,15 @@ from hibs_predictor.assistant_recommendations import (
     build_assistant_recommendations,
     build_bet_builder_suggestions,
     build_mixed_market_acca,
+    build_multi_leg_btts_acca,
+    build_ranked_btts_legs,
+    build_win_btts_combo_suggestions,
     is_analyzable,
 )
 
 _HELP_LINES = [
     "Today's card — leagues loaded, value flags, live games (same dq gates as the dashboard).",
+    "BTTS: btts 10 fold · best 3 btts · best 3 btts win (detailed reasoning)",
     "Accas: best acca · acca tips · suggest legs · BTTS acca · mixed acca · 3-leg safer acca",
     "Singles & review: value bets · best singles · review acca (on /acca)",
     "One fixture: stats / table / bet builder for Team A v Team B",
@@ -49,6 +54,9 @@ _CARD_WIDE_INTENTS = frozenset(
         "mixed_acca",
         "acca",
         "best_singles",
+        "btts_acca",
+        "multi_leg_btts",
+        "win_btts_combo",
     }
 )
 
@@ -272,17 +280,75 @@ def _selected_deep_dive_blocks(pkt: Dict[str, Any]) -> List[Dict[str, Any]]:
     return blocks
 
 
-def _parse_leg_count(q: str) -> Optional[int]:
-    m = re.search(r"\b([2-5])\s*[- ]?\s*leg", q)
+def _wants_detailed_reasoning(q: str) -> bool:
+    return any(
+        x in q
+        for x in (
+            "detailed",
+            "detail",
+            "reasoning",
+            "reason",
+            "explain",
+            "why",
+            "breakdown",
+            "rationale",
+            "analysis",
+        )
+    )
+
+
+def _parse_fold_or_leg_count(q: str) -> Optional[int]:
+    for pat in (
+        r"\b(\d{1,2})\s*[- ]?\s*fold\b",
+        r"\b(\d{1,2})\s*[- ]?\s*leg\b",
+        r"\b(\d{1,2})\s*fold\b",
+        r"\b(\d{1,2})\s*picker\b",
+    ):
+        m = re.search(pat, q)
+        if m:
+            return min(10, max(2, int(m.group(1))))
+    m = re.search(r"\b(?:best|top)\s+(\d{1,2})\b", q)
     if m:
-        return int(m.group(1))
-    if "double" in q or "2-fold" in q:
+        return min(10, max(1, int(m.group(1))))
+    if "double" in q or "2-fold" in q or "2 fold" in q:
         return 2
-    if "treble" in q or "3-fold" in q:
+    if "treble" in q or "3-fold" in q or "3 fold" in q:
         return 3
-    if "4-fold" in q or "fourfold" in q:
+    if "4-fold" in q or "4 fold" in q or "fourfold" in q:
         return 4
+    if "5-fold" in q or "5 fold" in q:
+        return 5
+    if "6-fold" in q or "6 fold" in q:
+        return 6
+    if "7-fold" in q or "7 fold" in q:
+        return 7
+    if "8-fold" in q or "8 fold" in q:
+        return 8
+    if "9-fold" in q or "9 fold" in q:
+        return 9
+    if "10-fold" in q or "10 fold" in q or "tenfold" in q:
+        return 10
     return None
+
+
+def _parse_leg_count(q: str) -> Optional[int]:
+    n = _parse_fold_or_leg_count(q)
+    if n is not None and n >= 2:
+        return n
+    return None
+
+
+def _btts_multi_leg_params(q: str) -> Dict[str, Any]:
+    n = _parse_fold_or_leg_count(q)
+    if n is None and any(x in q for x in ("acca", "accumulator", "parlay", "fold")):
+        n = 3
+    wants_acca = any(x in q for x in ("fold", "acca", "accumulator", "parlay", "treble", "double"))
+    ranked_only = any(x in q for x in ("best", "top")) and not wants_acca
+    return {
+        "leg_count": n or 3,
+        "detailed": _wants_detailed_reasoning(q),
+        "ranked_only": ranked_only,
+    }
 
 
 def parse_intent(question: str) -> Tuple[str, Dict[str, Any]]:
@@ -308,8 +374,36 @@ def parse_intent(question: str) -> Tuple[str, Dict[str, Any]]:
         return "table", {}
     if any(x in q for x in ("mixed acca", "multi market", "multi-market", "several markets", "same bet")):
         return "mixed_acca", {}
+    win_btts = ("btts" in q and ("win" in q or "winner" in q or "result" in q)) or any(
+        x in q for x in ("win and btts", "win + btts", "winner btts", "home and btts", "away and btts")
+    )
+    if win_btts:
+        n = _parse_fold_or_leg_count(q) or 3
+        return "win_btts_combo", {"leg_count": min(10, max(1, n)), "detailed": _wants_detailed_reasoning(q)}
+    if "btts" in q and any(
+        x in q
+        for x in (
+            "fold",
+            "leg",
+            "picker",
+            "best",
+            "top",
+            "acca",
+            "accumulator",
+            "parlay",
+            "treble",
+            "double",
+        )
+    ):
+        params = _btts_multi_leg_params(q)
+        intent = "multi_leg_btts" if params.get("ranked_only") else "btts_acca"
+        return intent, params
+    if "btts" in q and any(x in q for x in ("best", "top")):
+        params = _btts_multi_leg_params(q)
+        params["ranked_only"] = True
+        return "multi_leg_btts", params
     if "btts" in q and "acca" in q:
-        return "acca", {"type": "btts"}
+        return "btts_acca", {"leg_count": _parse_fold_or_leg_count(q) or 3, "detailed": _wants_detailed_reasoning(q)}
     if any(x in q for x in ("over 2.5", "o2.5", "over 2_5", "goals acca")) or ("over" in q and "2.5" in q):
         return "acca", {"type": "over25"}
     if any(x in q for x in ("over 1.5", "o1.5")) or ("over" in q and "1.5" in q):
@@ -468,6 +562,68 @@ def handle_chat(
                         leg = {**leg, "pick_detail": pl.replace("**", "")}
                 extra.append(leg)
             out["blocks"] = [{"type": "singles", "items": extra}]
+        return out
+
+    if intent in ("btts_acca", "multi_leg_btts"):
+        n = min(10, max(2, int(params.get("leg_count") or 3)))
+        detailed = bool(params.get("detailed"))
+        ranked_only = bool(params.get("ranked_only"))
+        if ranked_only:
+            legs = build_ranked_btts_legs(packets, limit=n, detailed=detailed)
+            lines = [f"Top **{n}** BTTS Yes picks on today's card (ranked by model + data bar)."]
+            if len(legs) < n:
+                lines.append(
+                    f"Only **{len(legs)}** qualified — I won't invent legs for a {n}-fold."
+                )
+            if not legs:
+                lines.append("No BTTS legs with prices and model support — try mixed acca or refresh.")
+                out["blocks"] = [{"type": "text", "lines": lines}]
+            else:
+                out["blocks"] = [
+                    {"type": "text", "lines": lines},
+                    {"type": "suggest_legs", "items": enrich_leg_list(legs)},
+                ]
+            return out
+        built = build_multi_leg_btts_acca(packets, target_legs=n, detailed=detailed)
+        lines = [
+            f"BTTS acca — requested **{built.get('requested_count', n)}** legs, "
+            f"**{built.get('qualified_count', 0)}** on card."
+        ]
+        intro_extra = (built.get("rationale") or [])[:1]
+        if intro_extra:
+            lines.extend(intro_extra)
+        if not built.get("legs"):
+            out["blocks"] = [{"type": "text", "lines": lines}]
+        else:
+            out["blocks"] = [
+                {"type": "text", "lines": lines},
+                {"type": "accas", "items": enrich_acca_items([built])},
+            ]
+        return out
+
+    if intent == "win_btts_combo":
+        n = min(10, max(1, int(params.get("leg_count") or 3)))
+        detailed = bool(params.get("detailed"))
+        combos = build_win_btts_combo_suggestions(packets, limit=n, detailed=detailed)
+        lines = [
+            f"Top **{n}** win + BTTS combo legs (priced combo markets from the snapshot)."
+        ]
+        if detailed:
+            lines.append("Detailed reasoning per pick below — all figures from live fixture data.")
+        if len(combos) < n:
+            lines.append(
+                f"Only **{len(combos)}** combos cleared the bar — no invented stats to fill a {n}-picker."
+            )
+        if not combos:
+            lines.append(
+                "No home/away win+BTTS combos with book prices right now — try bet builder on a named fixture."
+            )
+            out["blocks"] = [{"type": "text", "lines": lines}]
+        else:
+            out["blocks"] = [
+                {"type": "text", "lines": lines},
+                {"type": "suggest_legs", "items": enrich_leg_list(combos)},
+            ]
         return out
 
     if intent == "acca":

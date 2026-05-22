@@ -526,6 +526,138 @@ def test_assistant_context_trust_and_wdl():
     assert "Best lines" in joined
 
 
+def test_parse_intent_btts_10_fold():
+    from hibs_predictor.assistant_chat import parse_intent
+
+    intent, params = parse_intent("btts 10 fold")
+    assert intent == "btts_acca"
+    assert params["leg_count"] == 10
+    assert params.get("ranked_only") is not True
+
+
+def test_parse_intent_best_3_btts_ranked():
+    from hibs_predictor.assistant_chat import parse_intent
+
+    intent, params = parse_intent("best 3 btts")
+    assert intent == "multi_leg_btts"
+    assert params["leg_count"] == 3
+    assert params.get("ranked_only") is True
+
+
+def test_parse_intent_best_3_btts_win_detailed():
+    from hibs_predictor.assistant_chat import parse_intent
+
+    intent, params = parse_intent("best 3 btts win with detailed reasoning")
+    assert intent == "win_btts_combo"
+    assert params["leg_count"] == 3
+    assert params.get("detailed") is True
+
+
+def test_btts_10_fold_acca_with_disclaimer_when_short_card():
+    from hibs_predictor.assistant_chat import handle_chat
+
+    packets = _sample_packets_multi()
+    reply = handle_chat("btts 10 fold", packets)
+    assert reply["intent"] == "btts_acca"
+    text = " ".join(
+        line
+        for b in reply["blocks"]
+        if b.get("type") == "text"
+        for line in (b.get("lines") or [])
+    )
+    assert "10" in text
+    accas = [b for b in reply["blocks"] if b.get("type") == "accas"]
+    if accas:
+        acca = accas[0]["items"][0]
+        assert acca["leg_count"] <= 10
+        assert len(acca["legs"]) == acca["leg_count"]
+        if acca.get("requested_count", 10) > acca.get("qualified_count", 0):
+            assert "Only" in text or acca["qualified_count"] < 10
+        for leg in acca["legs"]:
+            assert leg.get("model_pct") is not None
+            assert leg.get("odds") is not None
+            assert leg.get("data_quality_pct") is not None
+
+
+def test_best_3_btts_returns_ranked_legs_with_reasoning():
+    from hibs_predictor.assistant_chat import handle_chat
+
+    packets = _sample_packets_multi()
+    reply = handle_chat("best 3 btts", packets)
+    assert reply["intent"] == "multi_leg_btts"
+    leg_blocks = [b for b in reply["blocks"] if b.get("type") == "suggest_legs"]
+    assert leg_blocks
+    items = leg_blocks[0]["items"]
+    assert 1 <= len(items) <= 3
+    for leg in items:
+        assert leg.get("market_key") == "btts_yes"
+        rat = leg.get("rationale")
+        assert rat
+        bullets = rat if isinstance(rat, list) else [rat]
+        joined = " ".join(str(b) for b in bullets).lower()
+        assert "model" in joined or "btts" in joined
+        assert leg.get("data_quality_pct") is not None
+
+
+def test_best_3_btts_win_detailed_reasoning():
+    from hibs_predictor.assistant_chat import handle_chat
+
+    base = {
+        "kickoff_time": "15:00",
+        "data_quality_pct": 88.0,
+        "home_recent_n": 8,
+        "away_recent_n": 8,
+        "structured_insight": {"mode": "prediction", "pick": "Home Win & BTTS"},
+        "probability_scores": {"home_win_pct": 55, "btts_pct": 62, "xg_home": 1.6, "xg_away": 1.1},
+        "home_form_summary": {"played": 5, "wins": 3, "draws": 1, "losses": 1, "gf": 8, "ga": 5, "btts": 3, "over25": 3},
+        "away_form_summary": {"played": 5, "wins": 2, "draws": 1, "losses": 2, "gf": 6, "ga": 6, "btts": 4, "over25": 2},
+    }
+    packets = [
+        {
+            **base,
+            "id": 10,
+            "home": "Celtic",
+            "away": "Rangers",
+            "pick_menu": [
+                {"key": "home_and_btts", "label": "Home Win & BTTS", "model_pct": 24.0, "odds": 3.8},
+                {"key": "btts_yes", "label": "BTTS Yes", "model_pct": 60.0, "odds": 1.65},
+            ],
+        },
+        {
+            **base,
+            "id": 11,
+            "home": "Arsenal",
+            "away": "Burnley",
+            "pick_menu": [
+                {"key": "away_and_btts", "label": "Away Win & BTTS", "model_pct": 20.0, "odds": 4.2},
+            ],
+        },
+    ]
+    reply = handle_chat("best 3 btts win with detailed reasoning", packets)
+    assert reply["intent"] == "win_btts_combo"
+    intro = " ".join(
+        line
+        for b in reply["blocks"]
+        if b.get("type") == "text"
+        for line in (b.get("lines") or [])
+    )
+    assert "detailed" in intro.lower() or "snapshot" in intro.lower()
+    items = [b for b in reply["blocks"] if b.get("type") == "suggest_legs"][0]["items"]
+    assert items
+    bullets = items[0].get("rationale") or []
+    joined = " ".join(str(b) for b in (bullets if isinstance(bullets, list) else [bullets])).lower()
+    assert "model" in joined
+    assert "xg" in joined or "form" in joined or "table" in joined
+
+
+def test_assistant_js_mentions_btts_fold_examples():
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / "static" / "hibs_assistant.js").read_text(encoding="utf-8")
+    assert "btts 10 fold" in js
+    assert "rationaleListHtml" in js
+
+
 def test_acca_review_flags_thin_data(monkeypatch):
     from hibs_predictor.acca_review import review_acca_legs
 

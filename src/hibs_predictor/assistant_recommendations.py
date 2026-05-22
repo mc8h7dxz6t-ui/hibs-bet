@@ -596,19 +596,200 @@ def _market_highlights(packets: List[Dict[str, Any]]) -> Dict[str, List[Dict[str
 
 
 def _leg_rationale(packet: Dict[str, Any], leg: Dict[str, Any]) -> List[str]:
+    return build_detailed_leg_rationale(packet, leg, max_bullets=3)
+
+
+def build_detailed_leg_rationale(
+    packet: Dict[str, Any],
+    leg: Dict[str, Any],
+    *,
+    max_bullets: int = 5,
+) -> List[str]:
+    """Grounded reasoning bullets from snapshot fields only — no invented stats."""
     si = packet.get("structured_insight") or {}
+    ps = packet.get("probability_scores") or {}
     bullets: List[str] = []
+    mk = leg.get("market_key") or ""
     mp = leg.get("model_pct")
     if mp is not None:
-        bullets.append(f"Model assigns {mp}% to {leg.get('market_label')}.")
+        bullets.append(f"Model **{mp}%** on {leg.get('market_label') or mk}.")
+    btts_pct = ps.get("btts_pct")
+    if mk == "btts_yes" and btts_pct is not None:
+        bullets.append(f"Fixture BTTS probability **{btts_pct}%** (Poisson/xG blend).")
+    if mk == "over_25" and ps.get("over25_pct") is not None:
+        bullets.append(f"Over 2.5 model **{ps['over25_pct']}%**.")
+    if mk in ("home_win", "away_win") and ps.get("home_win_pct") is not None:
+        bullets.append(
+            f"1X2 blend H {ps.get('home_win_pct')}% · D {ps.get('draw_pct')}% · A {ps.get('away_win_pct')}%."
+        )
+    xh, xa = ps.get("xg_home"), ps.get("xg_away")
+    if xh is not None or xa is not None:
+        src = packet.get("xg_source") or "model"
+        bullets.append(f"xG **{xh}–{xa}** ({src}).")
+    for side, label in (("home", packet.get("home") or "Home"), ("away", packet.get("away") or "Away")):
+        fs = packet.get(f"{side}_form_summary") or {}
+        if fs.get("played"):
+            bullets.append(
+                f"{label} L{fs['played']}: W{fs.get('wins')}D{fs.get('draws')}L{fs.get('losses')}, "
+                f"GF{fs.get('gf')} GA{fs.get('ga')}, BTTS {fs.get('btts')}, O2.5 {fs.get('over25')}."
+            )
+            break
+    hp = packet.get("home_position") or {}
+    ap = packet.get("away_position") or {}
+    if hp.get("position") or ap.get("position"):
+        bullets.append(
+            f"Table: {packet.get('home')} **{hp.get('position', '—')}** ({hp.get('points', '—')} pts) · "
+            f"{packet.get('away')} **{ap.get('position', '—')}** ({ap.get('points', '—')} pts)."
+        )
+    injuries = packet.get("fixture_injuries") or []
+    if injuries:
+        bullets.append(f"**{len(injuries)}** injury/absence rows on feed — check team news before staking.")
     if leg.get("is_value") and leg.get("edge_pct") is not None:
-        bullets.append(f"Book edge +{leg['edge_pct']:.1f}% vs fair line.")
+        bullets.append(f"Value edge **+{leg['edge_pct']:.1f}%** vs fair line.")
     dq = packet.get("data_quality_pct")
     if dq is not None:
-        bullets.append(f"Fixture data coverage {dq}% — meets analyst threshold.")
+        bullets.append(f"Data coverage **{dq}%** (assistant bar ≥{assistant_min_data_pct():.0f}%).")
     if si.get("predicted_scoreline"):
-        bullets.append(f"Scoreline lean {si['predicted_scoreline']} from xG blend.")
-    return bullets[:3]
+        bullets.append(f"Scoreline lean **{si['predicted_scoreline']}**.")
+    if si.get("rationale"):
+        for bullet in si["rationale"][:2]:
+            if bullet and bullet not in bullets:
+                bullets.append(str(bullet))
+    return bullets[:max_bullets]
+
+
+def build_ranked_btts_legs(
+    packets: List[Dict[str, Any]],
+    *,
+    limit: int = 10,
+    detailed: bool = False,
+) -> List[Dict[str, Any]]:
+    """Ranked BTTS Yes legs (one per fixture), with optional detailed rationale."""
+    ranked: List[Dict[str, Any]] = []
+    used: set = set()
+    for pkt in packets:
+        if not is_analyzable(pkt):
+            continue
+        candidates = _collect_candidate_legs(pkt, allowed_keys=frozenset({"btts_yes"}))
+        if not candidates:
+            continue
+        best = max(candidates, key=lambda x: float(x.get("score") or 0))
+        fid = pkt.get("id")
+        if fid in used:
+            continue
+        used.add(fid)
+        leg = dict(best)
+        leg["match"] = _match_label(pkt)
+        leg["rationale"] = build_detailed_leg_rationale(pkt, leg, max_bullets=5 if detailed else 3)
+        ps = pkt.get("probability_scores") or {}
+        if ps.get("btts_pct") is not None:
+            leg["btts_pct"] = ps["btts_pct"]
+        ranked.append(leg)
+    ranked.sort(key=lambda x: -float(x.get("score") or 0))
+    return ranked[:limit]
+
+
+def build_multi_leg_btts_acca(
+    packets: List[Dict[str, Any]],
+    *,
+    target_legs: int = 3,
+    max_legs: int = 10,
+    detailed: bool = False,
+) -> Dict[str, Any]:
+    """BTTS acca up to max_legs; disclaimer when fewer than target_legs qualify."""
+    cap = min(max(2, max_legs), 10)
+    want = min(max(2, target_legs), cap)
+    pool = build_ranked_btts_legs(packets, limit=cap, detailed=detailed)
+    picked = pool[:want]
+    lines: List[str] = []
+    if len(picked) < want:
+        lines.append(
+            f"Only **{len(picked)}** BTTS legs cleared the data/model bar (you asked for {want}). "
+            "Widen the card or refresh — I won't pad with thin fixtures."
+        )
+    if not picked:
+        return {
+            "title": f"BTTS {want}-fold",
+            "type": "btts",
+            "leg_count": 0,
+            "legs": [],
+            "qualified_count": 0,
+            "requested_count": want,
+            "disclaimer": _DISCLAIMER,
+            "rationale": ["No BTTS Yes legs with book prices and model support in this window."],
+        }
+    acca = _build_acca(
+        f"BTTS {len(picked)}-fold",
+        "btts",
+        picked,
+        [
+            "One BTTS Yes per match; ranked by model score and data quality.",
+            "Stats below are from the live fixture snapshot — not invented.",
+        ],
+        min_legs=2,
+        max_legs=len(picked),
+    )
+    if not acca:
+        return {
+            "title": f"BTTS {len(picked)}-fold",
+            "type": "btts",
+            "leg_count": len(picked),
+            "legs": picked,
+            "qualified_count": len(picked),
+            "requested_count": want,
+            "disclaimer": _DISCLAIMER,
+            "rationale": lines,
+        }
+    acca["qualified_count"] = len(picked)
+    acca["requested_count"] = want
+    if lines:
+        acca["rationale"] = lines + list(acca.get("rationale") or [])
+    for leg in acca.get("legs") or []:
+        pkt = next((p for p in packets if p.get("id") == leg.get("fixture_id")), {})
+        if pkt and detailed:
+            leg["rationale"] = build_detailed_leg_rationale(pkt, leg, max_bullets=5)
+    return acca
+
+
+def build_win_btts_combo_suggestions(
+    packets: List[Dict[str, Any]],
+    *,
+    limit: int = 3,
+    detailed: bool = False,
+) -> List[Dict[str, Any]]:
+    """Ranked win+BTTS combo legs from priced pick_menu combo keys."""
+    combo_keys = frozenset({"home_and_btts", "away_and_btts", "draw_and_btts"})
+    out: List[Dict[str, Any]] = []
+    for pkt in packets:
+        if not is_analyzable(pkt):
+            continue
+        menu = _menu_item_by_key(pkt)
+        for key in combo_keys:
+            item = menu.get(key)
+            if not item or item.get("odds") is None:
+                continue
+            mp = item.get("model_pct")
+            if mp is None or float(mp) < _min_model_pct_for_key(key):
+                continue
+            leg = _leg_from_menu_item(pkt, item)
+            leg["score"] = _leg_score(leg)
+            leg["match"] = _match_label(pkt)
+            leg["rationale"] = build_detailed_leg_rationale(
+                pkt, leg, max_bullets=5 if detailed else 3
+            )
+            out.append(leg)
+    out.sort(key=lambda x: -float(x.get("score") or 0))
+    seen: set = set()
+    deduped: List[Dict[str, Any]] = []
+    for leg in out:
+        sk = (leg.get("fixture_id"), leg.get("market_key"))
+        if sk in seen:
+            continue
+        seen.add(sk)
+        deduped.append(leg)
+        if len(deduped) >= limit:
+            break
+    return deduped
 
 
 def build_assistant_recommendations(packets: List[Dict[str, Any]]) -> Dict[str, Any]:

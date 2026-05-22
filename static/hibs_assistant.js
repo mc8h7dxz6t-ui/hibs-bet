@@ -49,7 +49,7 @@
     }
 
     function welcomeHtml() {
-        return '<div class="hibs-assistant-card"><p class="ac-line">Ask about today\'s full card — leagues, value, live — or build accas (2–5 legs).</p><p class="ac-line" style="font-size:0.88em;color:var(--muted);">Try <em>live</em>, <em>value bets</em>, <em>best acca</em>, <em>suggest legs</em>, or name a fixture for stats / table.</p></div>';
+        return '<div class="hibs-assistant-card"><p class="ac-line">Ask about today\'s full card — leagues, value, live — or build accas (2–10 legs).</p><p class="ac-line" style="font-size:0.88em;color:var(--muted);">Try <em>btts 10 fold</em>, <em>best 3 btts</em>, <em>best 3 btts win detailed reasoning</em>, <em>live</em>, <em>value bets</em>, or name a fixture for stats / table.</p></div>';
     }
 
     function setBusy(on) {
@@ -351,11 +351,24 @@
         return '<button type="button" class="hibs-assistant-send hibs-leg-slip" data-leg="' + legPayloadAttr(leg) + '">Add to slip</button>';
     }
 
+    function rationaleListHtml(rationale) {
+        if (!rationale) return '';
+        var items = Array.isArray(rationale) ? rationale : [rationale];
+        if (!items.length) return '';
+        var h = '<ul class="hibs-leg-rationale" style="margin:6px 0 0 1.1em;font-size:0.86em;color:var(--muted);">';
+        items.forEach(function (b) {
+            if (b) h += '<li>' + formatLine(String(b)) + '</li>';
+        });
+        h += '</ul>';
+        return h;
+    }
+
     function suggestLegCardHtml(leg) {
         var h = '<div class="hibs-assistant-card hibs-leg-card">';
         h += '<p class="ac-line">' + legHtml(leg) + '</p>';
-        if (leg.rationale) {
-            h += '<p class="ac-line" style="font-size:0.86em;color:var(--muted);">' + esc(leg.rationale) + '</p>';
+        h += rationaleListHtml(leg.rationale);
+        if (leg.btts_pct != null && leg.market_key === 'btts_yes') {
+            h += '<p class="ac-line" style="font-size:0.84em;">Fixture BTTS blend: <strong>' + leg.btts_pct + '%</strong></p>';
         }
         if (leg.data_quality_pct != null) {
             h += '<p class="ac-line" style="font-size:0.84em;">Data <span class="fr-dq fr-dq-compact ' + dqBadgeClass(leg.data_quality_pct) + '">' + leg.data_quality_pct + '%</span></p>';
@@ -402,15 +415,16 @@
         }
         html += '<ol class="hibs-acca-legs">';
         (acca.legs || []).forEach(function (leg) {
-            html += '<li class="hibs-acca-leg-row">' + legHtml(leg);
-            html += ' ' + addToSlipButtonHtml(leg);
+            html += '<li class="hibs-acca-leg-row" style="margin-bottom:10px;">' + legHtml(leg);
+            html += rationaleListHtml(leg.rationale);
+            html += ' <span style="display:inline-block;margin-top:4px;">' + addToSlipButtonHtml(leg) + '</span>';
             html += '</li>';
         });
         html += '</ol>';
         if (acca.rationale && acca.rationale.length) {
-            html += '<p class="ac-line" style="font-size:0.88em;color:var(--muted);margin-top:6px;">';
-            html += acca.rationale.slice(0, 2).map(function (b) { return esc(b); }).join(' ');
-            html += '</p>';
+            html += '<div class="ac-line" style="font-size:0.88em;color:var(--muted);margin-top:6px;">';
+            html += rationaleListHtml(acca.rationale);
+            html += '</div>';
         }
         html += '<p class="ac-line" style="margin-top:8px;"><button type="button" class="hibs-assistant-send hibs-acca-slip" data-acca-slip="1">Add all legs to slip</button></p>';
         html += '</div>';
@@ -505,7 +519,11 @@
         var ko = leg.kickoff_time ? esc(leg.kickoff_time) + ' ' : '';
         var s = ko + '<strong>' + esc(leg.home) + '</strong> v <strong>' + esc(leg.away) + '</strong> — ' + esc(leg.market_label);
         if (leg.odds) s += ' @ ' + oddsHtml(leg.odds);
-        if (leg.model_pct != null) s += ' (' + leg.model_pct + '%)';
+        if (leg.model_pct != null) s += ' · model ' + leg.model_pct + '%';
+        if (leg.btts_pct != null && leg.market_key === 'btts_yes') s += ' · BTTS ' + leg.btts_pct + '%';
+        if (leg.data_quality_pct != null) {
+            s += ' · dq <span class="fr-dq fr-dq-compact ' + dqBadgeClass(leg.data_quality_pct) + '">' + leg.data_quality_pct + '%</span>';
+        }
         if (leg.is_value) s += ' <span style="color:var(--gold);">VALUE</span>';
         return s;
     }

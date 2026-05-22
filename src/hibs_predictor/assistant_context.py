@@ -15,6 +15,7 @@ from hibs_predictor.assistant_recommendations import (
     _rank_all_legs,
     assistant_min_data_pct,
     assistant_min_form_matches,
+    build_detailed_leg_rationale,
     is_analyzable,
 )
 
@@ -576,7 +577,10 @@ def build_acca_candidates(
         for leg in by_fixture[fid][:2]:
             pkt = next((p for p in packets if p.get("id") == fid), {})
             leg = dict(leg)
-            leg["rationale"] = _leg_candidate_blurb(pkt, leg)
+            if leg.get("market_key") == "btts_yes":
+                leg["rationale"] = build_detailed_leg_rationale(pkt, leg, max_bullets=3)
+            else:
+                leg["rationale"] = _leg_candidate_blurb(pkt, leg)
             ordered.append(leg_slip_payload(leg))
             if len(ordered) >= limit:
                 return ordered
