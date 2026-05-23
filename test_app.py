@@ -303,8 +303,11 @@ def test_insights_tables_routes_and_snapshots():
         assert dashboard.status_code == 200, dashboard.get_data(as_text=True)[:200]
         body = dashboard.get_data(as_text=True)
         assert "Aberdeen" in body and "Hibs" in body and "Dundee" in body
-        assert "What this page does" in body
-        assert "<strong>1</strong> leagues loaded" in body
+        assert "What this page does" not in body
+        assert "Insights" in body
+        insights_body = insights.get_data(as_text=True)
+        assert "What this app does" in insights_body
+        assert "<strong>1</strong> leagues loaded" in insights_body
         assert "Scottish Premiership" in body
         assert "Table N/A" not in body
         print("  ✓ /insights, /tables, /settings, and dashboard context render")
@@ -2185,7 +2188,7 @@ def test_field_quality_and_league_profile():
                 "odds_away": 4.5,
                 "line_odds": {"btts_yes": 1.7, "over25": 1.9},
                 "market_odds": {},
-                "supplemental": {"wikipedia_league_supported": True},
+                "supplemental": {"soccerstats_league_supported": True},
                 "fixture_injuries": [],
             }
         )

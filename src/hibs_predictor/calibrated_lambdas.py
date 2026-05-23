@@ -1,6 +1,6 @@
 """xG-style λ calibration: table-rank Elo proxy + league home-advantage multipliers.
 
-Inspired by transparent Poisson+xG pipelines; ranks come from API/Wikipedia standings when present.
+Inspired by transparent Poisson+xG pipelines; ranks come from API/SoccerStats standings when present.
 """
 
 import os

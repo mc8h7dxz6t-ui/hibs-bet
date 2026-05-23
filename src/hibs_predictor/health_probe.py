@@ -356,19 +356,22 @@ def gather_health() -> Dict[str, Any]:
     # --- FBref squad table (EPL sample; heavy scraper path) ---
     t0 = time.perf_counter()
     try:
-        from hibs_predictor.scrapers.fbref_client import fetch_squad_stats_table
+        from hibs_predictor.scrapers.fbref_client import probe_squad_table
 
-        rows = fetch_squad_stats_table("EPL")
+        pr = probe_squad_table("EPL")
         ms = _ms_since(t0)
-        ok = len(rows) >= 5
+        blocked = bool(pr.get("blocked"))
+        ok = bool(pr.get("ok"))
         scrapers.append(
             scraper_row(
                 sid="fbref",
                 label="FBref",
                 ms=ms,
                 ok=ok,
-                error=None if ok else f"squad_rows={len(rows)}",
-                layout_broken=not ok,
+                error=pr.get("error"),
+                blocked=blocked,
+                http_status=pr.get("http_status"),
+                layout_broken=not ok and not blocked and not pr.get("skipped_env"),
             )
         )
     except Exception as exc:
@@ -381,36 +384,6 @@ def gather_health() -> Dict[str, Any]:
                 error=str(exc)[:160],
                 http_status=http_status_from_exc(exc),
                 layout_broken="LAYOUT_BROKEN" in str(exc).upper(),
-            )
-        )
-
-    # --- Wikipedia standings (EPL table sample) ---
-    t0 = time.perf_counter()
-    try:
-        from hibs_predictor.scrapers.wikipedia_standings import fetch_league_table
-
-        rows = fetch_league_table("EPL")
-        ms = _ms_since(t0)
-        ok = len(rows) >= 10
-        scrapers.append(
-            scraper_row(
-                sid="wikipedia",
-                label="Wikipedia",
-                ms=ms,
-                ok=ok,
-                error=None if ok else f"rows={len(rows)}",
-                layout_broken=not ok,
-            )
-        )
-    except Exception as exc:
-        scrapers.append(
-            scraper_row(
-                sid="wikipedia",
-                label="Wikipedia",
-                ms=_ms_since(t0),
-                ok=False,
-                error=str(exc)[:160],
-                http_status=http_status_from_exc(exc),
             )
         )
 

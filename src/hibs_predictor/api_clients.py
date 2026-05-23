@@ -352,6 +352,26 @@ class ApiSportsFootballClient(BaseApiClient):
         data = self._get_json(endpoint, params=params)
         return data.get("response", []) if isinstance(data.get("response"), list) else []
 
+    def fetch_fixture_lineups(
+        self,
+        fixture_id: int,
+        *,
+        ttl_hours: float = 0.5,
+    ) -> List[Dict[str, Any]]:
+        """Confirmed lineups for a fixture (API-Football ``fixtures/lineups``).
+
+        Uses a dedicated per-fixture cache key so TTL can track kickoff proximity
+        (see ``lineup_enrich.lineup_cache_ttl_hours``).
+        """
+        cache_key = f"lineups_fixture_{int(fixture_id)}"
+        cached = self.cache.get(cache_key, ttl_hours=ttl_hours)
+        if cached is not None:
+            return cached if isinstance(cached, list) else []
+        data = self._get_json("fixtures/lineups", params={"fixture": int(fixture_id)}, use_cache=False)
+        rows = data.get("response", []) if isinstance(data.get("response"), list) else []
+        self.cache.set(cache_key, rows, ttl_hours=ttl_hours)
+        return rows
+
     def fetch_top_scorers(self, league_id: int, season: int) -> List[Dict[str, Any]]:
         """League top scorers (API-Football players/topscorers). Cached 24h."""
         cache_key = f"top_scorers_{league_id}_{season}"
@@ -377,6 +397,12 @@ class ApiSportsFootballClient(BaseApiClient):
         params = {"id": fixture_id}
         data = self._get_json(endpoint, params=params)
         return data.get("response", [{}])[0] if data.get("response") else {}
+
+    def fetch_fixture_statistics(self, fixture_id: int) -> List[Dict[str, Any]]:
+        """Post-match / live statistics (Expected Goals when provider supplies them)."""
+        data = self._get_json("fixtures/statistics", params={"fixture": int(fixture_id)})
+        resp = data.get("response")
+        return resp if isinstance(resp, list) else []
 
     def fetch_fixtures_by_league(
         self,

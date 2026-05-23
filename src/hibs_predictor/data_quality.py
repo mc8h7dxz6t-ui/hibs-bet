@@ -61,7 +61,7 @@ def _supplemental_pts(sup: Any) -> float:
             "fbref_schedule",
             "statsbomb_open_team_proxy",
             "sofascore_xg",
-            "wikipedia_positions",
+            "fotmob_xg",
             "soccerstats_positions",
         )
     )
@@ -135,6 +135,7 @@ def _xg_points(src: str, n_h: float, n_a: float, enriched: Optional[Dict[str, An
         "fbref_schedule_xg",
         "fbref_schedule_avg_xg",
         "sofascore_xg",
+        "fotmob_league_xg",
     ):
         return 15.0
     if s == "statsbomb_goals_proxy_xg":

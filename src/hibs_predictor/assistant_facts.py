@@ -105,6 +105,23 @@ def fact_from_packet(packet: Dict[str, Any]) -> Dict[str, Any]:
     injuries = packet.get("fixture_injuries") or []
     if injuries:
         facts["injuries_n"] = len(injuries)
+    meta = packet.get("team_news_meta") or {}
+    if meta.get("home_absences") or meta.get("away_absences"):
+        facts["team_news_meta"] = meta
+    for key in ("attack_availability_home", "attack_availability_away"):
+        if packet.get(key) is not None:
+            facts[key] = packet[key]
+    pi = si.get("player_insight")
+    if isinstance(pi, dict) and (pi.get("home") or pi.get("away")):
+        facts["player_insight"] = pi
+    if packet.get("lineup_confirmed"):
+        facts["lineup_confirmed"] = True
+    lm = packet.get("lineup_meta") or {}
+    if lm:
+        facts["lineup_meta"] = lm
+    fl = packet.get("fixture_lineups")
+    if fl:
+        facts["fixture_lineups"] = fl
 
     hp = packet.get("home_position") or {}
     ap = packet.get("away_position") or {}

@@ -71,6 +71,30 @@
         </div>
     </section>
 
+    {% if dashboard_info is defined and dashboard_info %}
+    <section class="insight-card insight-card-wide" aria-label="How hibs-bet works">
+        <h2>What this app does</h2>
+        <p style="margin:0 0 10px;font-size:0.82em;line-height:1.55;color:var(--text);">{{ dashboard_info.description }}</p>
+        <p style="margin:0;font-size:0.78em;color:var(--muted);">
+            <strong>{{ dashboard_info.loaded_count }}</strong> leagues loaded{% if dashboard_info.total_fixtures %} across <strong>{{ dashboard_info.total_fixtures }}</strong> fixtures{% endif %}.
+            {% if dashboard_info.loaded_names %}
+            Loaded: {{ dashboard_info.loaded_names_text }}.
+            {% else %}
+            No leagues loaded in the current window.
+            {% endif %}
+        </p>
+        {% if fixture_coverage is defined and fixture_coverage and fixture_coverage.summary %}
+        <div class="insight-row" style="margin-top:12px;">
+            <div class="ir-main">{{ fixture_coverage.summary }}</div>
+            <p style="margin:6px 0 0;font-size:0.76em;color:var(--muted);">{{ fixture_coverage.reason }}</p>
+            {% if fixture_coverage.empty_sample %}
+            <p style="margin:6px 0 0;font-size:0.72em;color:var(--muted);">No fixtures: {{ fixture_coverage.empty_sample|map(attribute='name')|join(', ') }}{% if fixture_coverage.empty_count > fixture_coverage.empty_sample|length %}, +{{ fixture_coverage.empty_count - fixture_coverage.empty_sample|length }} more{% endif %}.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+    </section>
+    {% endif %}
+
     <div class="insights-grid">
         <section class="insight-card">
             <h2>Top Model Probabilities</h2>

@@ -109,19 +109,119 @@ def compute_attack_availability(
     return round(home_avail, 3), round(away_avail, 3), meta
 
 
+def _norm_player_name(name: str) -> str:
+    s = unicodedata.normalize("NFKD", (name or "").strip().lower())
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9]+", " ", s).strip()
+
+
+def _injury_player_names_for_side(
+    injuries: List[Dict[str, Any]],
+    *,
+    side: str,
+    home_name: str,
+    away_name: str,
+    home_id: Optional[int],
+    away_id: Optional[int],
+) -> set[str]:
+    """Normalized player names on the injury feed for one side."""
+    names: set[str] = set()
+    for row in injuries or []:
+        if not isinstance(row, dict):
+            continue
+        if _injury_side(
+            row,
+            home_name=home_name,
+            away_name=away_name,
+            home_id=home_id,
+            away_id=away_id,
+        ) != side:
+            continue
+        pl = row.get("player") or {}
+        raw = str(pl.get("name") or "").strip()
+        key = _norm_player_name(raw)
+        if key:
+            names.add(key)
+    return names
+
+
+def top_scorers_listed_absent(
+    top_scorers: List[Dict[str, Any]],
+    injuries: List[Dict[str, Any]],
+    *,
+    side: str,
+    home_name: str,
+    away_name: str,
+    home_id: Optional[int] = None,
+    away_id: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Top scorers whose names also appear on the API injury feed for this side.
+
+    Display-only cross-reference — no invented importance weights.
+    """
+    absent_names = _injury_player_names_for_side(
+        injuries,
+        side=side,
+        home_name=home_name,
+        away_name=away_name,
+        home_id=home_id,
+        away_id=away_id,
+    )
+    if not absent_names or not top_scorers:
+        return []
+    out: List[Dict[str, Any]] = []
+    for row in top_scorers:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        if _norm_player_name(name) in absent_names:
+            out.append({"name": name, "goals": row.get("goals")})
+    return out
+
+
 def apply_team_news_fields(enriched: Dict[str, Any]) -> Dict[str, Any]:
     """Set attack_availability_* on an enriched fixture row."""
     injuries = enriched.get("fixture_injuries") or []
     if not isinstance(injuries, list):
         injuries = []
+    home_name = str(enriched.get("home") or "")
+    away_name = str(enriched.get("away") or "")
+    home_id = enriched.get("home_id")
+    away_id = enriched.get("away_id")
     home_avail, away_avail, meta = compute_attack_availability(
         injuries,
-        home_name=str(enriched.get("home") or ""),
-        away_name=str(enriched.get("away") or ""),
-        home_id=enriched.get("home_id"),
-        away_id=enriched.get("away_id"),
+        home_name=home_name,
+        away_name=away_name,
+        home_id=home_id,
+        away_id=away_id,
     )
     enriched["attack_availability_home"] = home_avail
     enriched["attack_availability_away"] = away_avail
+    enriched["team_news_meta"] = meta
+    home_scorers = enriched.get("home_top_scorers") or []
+    away_scorers = enriched.get("away_top_scorers") or []
+    if isinstance(home_scorers, list) and home_scorers:
+        meta["home_scorers_absent"] = top_scorers_listed_absent(
+            home_scorers,
+            injuries,
+            side="home",
+            home_name=home_name,
+            away_name=away_name,
+            home_id=home_id,
+            away_id=away_id,
+        )
+    if isinstance(away_scorers, list) and away_scorers:
+        meta["away_scorers_absent"] = top_scorers_listed_absent(
+            away_scorers,
+            injuries,
+            side="away",
+            home_name=home_name,
+            away_name=away_name,
+            home_id=home_id,
+            away_id=away_id,
+        )
     enriched["team_news_meta"] = meta
     return enriched

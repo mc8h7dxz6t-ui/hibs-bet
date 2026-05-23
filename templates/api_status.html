@@ -43,6 +43,13 @@
             <div id="status-features" class="health-grid"></div>
         </div>
         <div class="status-section">
+            <h2>xG priority chain</h2>
+            <p id="status-xg-headline" class="status-impact-headline">—</p>
+            <ul id="status-xg-ops" class="status-impact-list"></ul>
+            <table class="data-table status-xg-table" id="status-xg-steps" style="margin-top:10px;font-size:0.78em;width:100%;"></table>
+            <ul id="status-xg-leagues" class="status-impact-list" style="margin-top:10px;"></ul>
+        </div>
+        <div class="status-section">
             <h2>HTTP APIs</h2>
             <div id="status-apis" class="health-grid"></div>
         </div>
@@ -60,6 +67,8 @@
 .status-impact-list{margin:0;padding-left:1.2em;color:var(--muted);font-size:0.88em;line-height:1.5;}
 .status-impact-list li{margin-bottom:6px;}
 .status-effect{font-size:0.78em;color:var(--muted);margin-top:4px;line-height:1.45;}
+.status-xg-table td,.status-xg-table th{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top;}
+.status-xg-table th{color:var(--muted);font-weight:600;text-align:left;}
 </style>
 {% endblock %}
 {% block extra_js %}
@@ -118,6 +127,35 @@
             if (pol) {
                 pol.innerHTML = 'Scraper policy: heavy scrapers default <strong>' + esc(sp.heavy_scrapers_default || '') + '</strong>; '
                     + 'auto-skip heavy when APIs already strong: <strong>' + (sp.skip_heavy_when_api_strong ? 'yes' : 'no') + '</strong>.';
+            }
+            var xg = d.xg_priority_chain || {};
+            var xgH = document.getElementById('status-xg-headline');
+            if (xgH) xgH.textContent = xg.headline || '—';
+            var xgOps = document.getElementById('status-xg-ops');
+            if (xgOps) {
+                xgOps.innerHTML = '';
+                (xg.ops_notes || []).forEach(function (n) {
+                    var li = document.createElement('li');
+                    li.textContent = n;
+                    xgOps.appendChild(li);
+                });
+            }
+            var xgTbl = document.getElementById('status-xg-steps');
+            if (xgTbl) {
+                var th = '<tr><th>#</th><th>Source tag</th><th>When used</th><th>Leagues</th></tr>';
+                var body = (xg.steps || []).map(function (s) {
+                    return '<tr><td>' + esc(s.rank) + '</td><td><code>' + esc(s.source) + '</code></td><td>' + esc(s.when) + '</td><td>' + esc(s.leagues) + '</td></tr>';
+                }).join('');
+                xgTbl.innerHTML = th + body;
+            }
+            var xgLg = document.getElementById('status-xg-leagues');
+            if (xgLg) {
+                xgLg.innerHTML = '';
+                (xg.per_league_notes || []).forEach(function (row) {
+                    var li = document.createElement('li');
+                    li.innerHTML = '<strong>' + esc(row.code) + '</strong> — ' + esc(row.note);
+                    xgLg.appendChild(li);
+                });
             }
             var fh = '';
             (d.features || []).forEach(function (f) { fh += featureRowHtml(f); });

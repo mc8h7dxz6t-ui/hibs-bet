@@ -93,10 +93,15 @@ def run_all_probes() -> Dict[str, Any]:
         from hibs_predictor.scrapers import fbref_client as fr
 
         t1 = time.perf_counter()
-        squad = fr.fetch_squad_stats_table("EPL")
+        pr = fr.probe_squad_table("EPL")
         fb_row["ms"] = _ms(t0)
-        fb_row["ok"] = len(squad) > 3
-        fb_row["detail"]["squad_rows"] = len(squad)
+        fb_row["ok"] = bool(pr.get("ok"))
+        fb_row["detail"]["squad_rows"] = pr.get("squad_rows", 0)
+        if pr.get("blocked"):
+            fb_row["detail"]["blocked"] = True
+            fb_row["detail"]["note"] = pr.get("error") or "HTTP 403 from fbref.com"
+        elif not fb_row["ok"]:
+            fb_row["detail"]["parse"] = pr.get("error")
     except Exception as exc:
         fb_row["ms"] = _ms(t0)
         fb_row["error"] = str(exc)[:200]

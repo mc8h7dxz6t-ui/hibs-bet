@@ -8,8 +8,10 @@ Env:
   HIBS_ENABLE_UNDERSTAT_LIGHT — Understat xG row for fixtures in policy window (default **on** for supported leagues).
   HIBS_SCRAPE_XG — after supplemental, apply Understat + Scottish FBref + recent-match xG into ``xg_home`` / ``xg_away`` (default on).
   HIBS_ENABLE_SCOTTISH_FBREF_XG — FBref SPFL schedule xG for SCOTLAND* leagues (default on).
+  HIBS_FBREF_BLOCKED — skip all FBref HTML (squad + schedule) when datacenter IP gets 403 (typical VPS).
+  HIBS_ENABLE_FOTMOB_XG — FotMob league-table xG (UEFA cups default-on; all mapped leagues when HIBS_MAX_DATA=1).
   HIBS_ENABLE_STATSBOMB_OPEN_MATCHES — StatsBomb open-data goals proxy for teams in policy window (off default).
-  HIBS_PREFER_SCRAPED_STANDINGS — Wikipedia league table first (default on in aggregator).
+  HIBS_PREFER_SCRAPED_STANDINGS — SoccerStats league table when API standings are thin (default on in aggregator).
   HIBS_SKIP_ODDS_API — skip The Odds API (explicit opt-out only when ODDS_API_KEY is usable).
   HIBS_SKIP_RAPID_STATS_XG — skip RapidAPI stats xG (default on; HIBS_MAX_DATA=1 + STATS_API_KEY enables).
   HIBS_MAX_DATA — when 1, prefer maximum safe inputs: do not skip heavy scrapers for "API strong" alone; enable Rapid stats xG when stats client is configured.
@@ -209,35 +211,26 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
 
         try:
             from hibs_predictor.scrapers import fbref_client as fr
+            from hibs_predictor.scrapers.fbref_client import FbrefFetchError
 
-            rows = fr.fetch_squad_stats_table(league_code)
-            if rows:
-                sr = fr.squad_row_for_team(rows, home)
-                if sr:
-                    out["fbref_home_squad"] = {"squad": sr.get("squad"), "stat_keys": list(sr.get("cells", {}).keys())[:12]}
+            if fr.fbref_blocked_env():
+                out["fbref_blocked"] = {"reason": "env_skip", "detail": "HIBS_FBREF_BLOCKED=1"}
+            else:
+                rows = fr.fetch_squad_stats_table(league_code)
+                if rows:
+                    sr = fr.squad_row_for_team(rows, home)
+                    if sr:
+                        out["fbref_home_squad"] = {
+                            "squad": sr.get("squad"),
+                            "stat_keys": list(sr.get("cells", {}).keys())[:12],
+                        }
+        except FbrefFetchError as exc:
+            if exc.blocked:
+                out["fbref_blocked"] = {"reason": "http_403", "detail": str(exc)[:120]}
+            else:
+                out["fbref_error"] = str(exc)[:160]
         except Exception as exc:
             out["fbref_error"] = str(exc)
-
-    try:
-        from hibs_predictor.scrapers import wikipedia_standings as wps
-
-        if league_code in wps.WP_SUFFIX:
-            out["wikipedia_league_supported"] = True
-            if os.getenv("HIBS_PREFER_SCRAPED_STANDINGS", "1").lower() in ("1", "true", "yes"):
-                rows = wps.fetch_league_table(league_code)
-                if rows:
-                    out["wikipedia_table_rows"] = len(rows)
-                    wr = wps.find_team_row(rows, home)
-                    ar = wps.find_team_row(rows, fixture_team_name(fixture, "away"))
-                    if wr or ar:
-                        out["wikipedia_positions"] = {
-                            "home": bool(wr),
-                            "away": bool(ar),
-                        }
-                    elif rows:
-                        _record_miss(out, "wikipedia_positions", "team_name_no_match")
-    except Exception as exc:
-        out["wikipedia_error"] = str(exc)[:120]
 
     try:
         from hibs_predictor.scrapers import soccerstats_standings as sstats
@@ -261,12 +254,27 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
         out["soccerstats_error"] = str(exc)[:120]
 
     try:
+        from hibs_predictor.data_source_policy import fixture_in_policy_window
         from hibs_predictor.scrapers import fotmob_client as fm
 
         if league_code in fm.FOTMOB_LEAGUE_IDS:
             out["fotmob_league_supported"] = True
-    except Exception:
-        pass
+        if fixture_in_policy_window(fixture) and fm.fotmob_xg_enabled(league_code):
+            away_nm = fixture_team_name(fixture, "away")
+            fx = fm.resolve_league_fixture_xg(league_code, home, away_nm, cache=cache)
+            if fx:
+                xh, xa, fmeta = fx
+                out["fotmob_xg"] = {
+                    "xg_home": round(float(xh), 3),
+                    "xg_away": round(float(xa), 3),
+                    "home_n": fmeta.get("home_n"),
+                    "away_n": fmeta.get("away_n"),
+                    "league_id": fmeta.get("league_id"),
+                }
+            elif league_code in fm.FOTMOB_LEAGUE_IDS:
+                _record_miss(out, "fotmob_xg", "no_team_match_or_thin_table")
+    except Exception as exc:
+        out["fotmob_xg_error"] = str(exc)[:160]
 
     try:
         from hibs_predictor.data_source_policy import fixture_in_policy_window

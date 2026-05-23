@@ -1115,6 +1115,18 @@ class BettingEngine:
                 fixture.get("home_position"),
                 fixture.get("away_position"),
             )
+            try:
+                from hibs_predictor.match_insight import derive_motivation_context, _motivation_lambda_nudge
+
+                motivation = derive_motivation_context(fixture)
+                mot_h = _motivation_lambda_nudge(motivation.get("home") or [])
+                mot_a = _motivation_lambda_nudge(motivation.get("away") or [])
+                lam_cal_h *= mot_h
+                lam_cal_a *= mot_a
+                if motivation.get("labels"):
+                    cal_dbg = {**cal_dbg, "motivation_labels": motivation["labels"]}
+            except Exception:
+                pass
             poisson_probs_cal = self._poisson_match_probs(lam_cal_h, lam_cal_a)
 
         if mode == "calibrated_poisson" and poisson_probs_cal is not None:
@@ -1163,6 +1175,23 @@ class BettingEngine:
         )
         lam_h_side = float(lam_cal_h) if (use_cal_side and lam_cal_h is not None) else float(xg_home)
         lam_a_side = float(lam_cal_a) if (use_cal_side and lam_cal_a is not None) else float(xg_away)
+        if not use_cal_side:
+            try:
+                from hibs_predictor.match_insight import derive_motivation_context, _motivation_lambda_nudge
+
+                motivation_raw = derive_motivation_context(fixture)
+                lam_h_side *= _motivation_lambda_nudge(motivation_raw.get("home") or [])
+                lam_a_side *= _motivation_lambda_nudge(motivation_raw.get("away") or [])
+            except Exception:
+                pass
+
+        poisson_top_scores: List[Dict[str, Any]] = []
+        try:
+            from hibs_predictor.match_insight import poisson_top_scorelines
+
+            poisson_top_scores = poisson_top_scorelines(lam_h_side, lam_a_side, top_n=3)
+        except Exception:
+            pass
 
         poisson_btts = self._poisson_btts_probability(lam_h_side, lam_a_side)
         hb = float(fixture.get("home_btts_rate", 0.0) or 0.0)
@@ -1347,6 +1376,12 @@ class BettingEngine:
                     value_bets[_pk]["poisson_agree"] = True
         confidence = max(ensemble_probs.values())
         confidence = confidence_display_scale(confidence, n_home_early, n_away_early)
+        try:
+            from hibs_predictor.lineup_enrich import lineup_confidence_multiplier
+
+            confidence *= lineup_confidence_multiplier(fixture)
+        except Exception:
+            pass
         predicted_outcome = max(ensemble_probs, key=ensemble_probs.get)
         best_bet = max(value_bets, key=lambda x: value_bets[x].get("roi_percent", 0)) if value_bets else None
         best_roi = value_bets[best_bet].get("roi_percent", 0.0) if best_bet else 0.0
@@ -1517,6 +1552,7 @@ class BettingEngine:
             "poisson_probs_calibrated_pct": (
                 {k: round(v * 100, 1) for k, v in poisson_probs_cal.items()} if poisson_probs_cal else None
             ),
+            "poisson_top_scores": poisson_top_scores,
         }
         try:
             from hibs_predictor.match_insight import attach_structured_insight

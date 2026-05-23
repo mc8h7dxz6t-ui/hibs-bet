@@ -54,7 +54,6 @@ def enrich_assistant_packet(packet: Dict[str, Any]) -> Dict[str, Any]:
             for key, label in (
                 ("understat", "understat"),
                 ("understat_light", "understat"),
-                ("wikipedia_positions", "wikipedia"),
                 ("soccerstats_positions", "soccerstats"),
                 ("fbref_schedule", "fbref"),
                 ("statsbomb_open_team_proxy", "statsbomb"),
@@ -145,7 +144,11 @@ def build_fixtures_summary(
     max_n: int = 80,
 ) -> List[Dict[str, Any]]:
     """Compact per-fixture rows for assistant snapshot (card scan, filters)."""
-    ordered = sorted(packets or [], key=lambda p: (p.get("date") or "", p.get("kickoff_time") or ""))
+    from hibs_predictor.tournament_focus import prioritize_fixtures_for_focus
+
+    ordered = prioritize_fixtures_for_focus(
+        sorted(packets or [], key=lambda p: (p.get("date") or "", p.get("kickoff_time") or ""))
+    )
     out: List[Dict[str, Any]] = []
     for pkt in ordered[:max_n]:
         si = pkt.get("structured_insight") or {}
@@ -236,8 +239,8 @@ def data_sources_summary(packet: Dict[str, Any]) -> str:
     if isinstance(sup, dict):
         if sup.get("understat") or sup.get("understat_xg"):
             parts.append("Understat supplemental")
-        if sup.get("wikipedia") or sup.get("wiki_positions"):
-            parts.append("Wikipedia positions")
+        if sup.get("soccerstats_positions"):
+            parts.append("SoccerStats positions")
         if sup.get("fbref"):
             parts.append("FBref")
         if sup.get("statsbomb"):

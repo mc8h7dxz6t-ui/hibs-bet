@@ -1,6 +1,6 @@
 """Supplemental data sources (open APIs + rate-limited public pages).
 
-See ``source_registry.SOURCE_CATALOG`` for FBref, Understat, SofaScore, Wikipedia,
+See ``source_registry.SOURCE_CATALOG`` for FBref, Understat, SofaScore,
 StatsBomb open, WhoScored (experimental), and planned sites (Transfermarkt,
 FootyStats, SoccerStats, DataMB) with ToS / implementation notes.
 """

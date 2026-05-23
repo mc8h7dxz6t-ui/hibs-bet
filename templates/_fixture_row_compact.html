@@ -102,25 +102,24 @@
             <button type="button" class="fr-add-slip" title="Add selected pick to betslip"
                 onclick="event.stopPropagation();" onpointerdown="event.stopPropagation();" onmousedown="event.stopPropagation();" onmouseup="event.stopPropagation();" ontouchstart="event.stopPropagation();">+ Slip</button>
             {% endif %}
-            <select class="fr-league-snap" title="League table snapshot"
+            <select class="fr-league-snap" title="Full league table — * marks this fixture's teams"
                 onclick="event.stopPropagation();" onpointerdown="event.stopPropagation();" onmousedown="event.stopPropagation();" onmouseup="event.stopPropagation();" onchange="event.stopPropagation();" onkeydown="event.stopPropagation();" ontouchstart="event.stopPropagation();">
+                {% set table_rows = fixture.league_table_rows if fixture.league_table_rows is defined else [] %}
+                {% set table_label = fixture.league_table_name if fixture.league_table_name is defined else (fixture.league_name or fixture.league) %}
+                {% if table_rows %}
+                <optgroup label="{{ table_label }}">
+                    {% for row in table_rows %}
+                    <option {% if row.is_focus %}selected{% endif %} class="{% if row.is_home_team %}fr-tbl-home{% elif row.is_away_team %}fr-tbl-away{% endif %}">{% if row.is_focus %}* {% endif %}{% if row.is_home_team %}[H] {% elif row.is_away_team %}[A] {% endif %}{{ row.position }}. {{ row.team }} · P {{ row.played }} · GF {{ row.goals_for }} GA {{ row.goals_against }} · GD {% if row.goal_diff > 0 %}+{% endif %}{{ row.goal_diff }} · {{ row.points }} pts{% if row.form %} · {{ row.form[-5:] }}{% endif %}</option>
+                    {% endfor %}
+                </optgroup>
+                {% elif fixture.home_table_snapshot or fixture.away_table_snapshot %}
                 {% set home_snap = fixture.home_table_snapshot if fixture.home_table_snapshot is defined else [] %}
                 {% set away_snap = fixture.away_table_snapshot if fixture.away_table_snapshot is defined else [] %}
-                {% if home_snap or away_snap %}
-                {% if home_snap %}
-                <optgroup label="{{ fixture.home }} table">
-                    {% for row in home_snap %}
-                    <option {% if row.is_focus %}selected{% endif %}>{% if row.is_focus %}* {% endif %}{{ row.position }} {{ row.team }} · P {{ row.played }} W {{ row.won }} D {{ row.drawn }} L {{ row.lost }} · GD {% if row.goal_diff > 0 %}+{% endif %}{{ row.goal_diff }} · {{ row.points }} pts</option>
+                <optgroup label="{{ table_label }}">
+                    {% for row in home_snap + away_snap %}
+                    <option {% if row.is_focus %}selected{% endif %}>{% if row.is_focus %}* {% endif %}{{ row.position }}. {{ row.team }} · GF {{ row.goals_for }} GA {{ row.goals_against }} · {{ row.points }} pts</option>
                     {% endfor %}
                 </optgroup>
-                {% endif %}
-                {% if away_snap %}
-                <optgroup label="{{ fixture.away }} table">
-                    {% for row in away_snap %}
-                    <option>{{ row.position }} {{ row.team }} · P {{ row.played }} W {{ row.won }} D {{ row.drawn }} L {{ row.lost }} · GD {% if row.goal_diff > 0 %}+{% endif %}{{ row.goal_diff }} · {{ row.points }} pts{% if row.is_focus %} *{% endif %}</option>
-                    {% endfor %}
-                </optgroup>
-                {% endif %}
                 {% else %}
                 <option selected>Table N/A</option>
                 {% endif %}
@@ -136,9 +135,10 @@
     </div>
     <span class="fr-prob fr-prob-btts{% if btts_value %} fr-prob-value{% endif %}" title="{% if btts_value %}Value: BTTS Yes{% else %}Model BTTS Yes{% endif %}{% if btts_pct is not none %} · {{ btts_pct }}%{% endif %}">{% if btts_pct is not none %}<span class="fr-prob-pct">{{ "%.0f"|format(btts_pct) }}%</span>{% else %}<span class="fr-prob-na">—</span>{% endif %}</span>
     <span class="fr-prob fr-prob-win{% if win_value %} fr-prob-value{% endif %}" title="{% if win_value %}Value: {{ win_lean }} win lean{% else %}Model 1X2 lean{% endif %}{% if win_pct is not none %} · {{ win_lean }} {{ win_pct }}%{% endif %}{% if joint_pct is not none %} · {{ win_lean }}+BTTS {{ joint_pct }}%{% endif %}">{% if win_pct is not none %}<span class="fr-win-lean">{{ win_lean }}</span><span class="fr-prob-pct">{{ "%.0f"|format(win_pct) }}%</span>{% if joint_pct is not none %}<span class="fr-joint-pct" aria-label="{{ win_lean }} win and BTTS joint">{{ "%.0f"|format(joint_pct) }}<span class="fr-joint-lbl">+B</span></span>{% endif %}{% else %}<span class="fr-prob-na">—</span>{% endif %}</span>
-    <span class="fr-od fr-od-h{% if vb.get('home') %} fr-od-value{% endif %}" title="{% if vb.get('home') %}Value: Home{% endif %}"{% if p and p.bookmaker_odds.home is not none %} data-odds-dec="{{ p.bookmaker_odds.home }}"{% endif %}>{% if p and p.bookmaker_odds.home is not none %}{{ "%.2f"|format(p.bookmaker_odds.home) }}{% else %}—{% endif %}</span>
-    <span class="fr-od fr-od-x{% if vb.get('draw') %} fr-od-value{% endif %}" title="{% if vb.get('draw') %}Value: Draw{% endif %}"{% if p and p.bookmaker_odds.draw is not none %} data-odds-dec="{{ p.bookmaker_odds.draw }}"{% endif %}>{% if p and p.bookmaker_odds.draw is not none %}{{ "%.2f"|format(p.bookmaker_odds.draw) }}{% else %}—{% endif %}</span>
-    <span class="fr-od fr-od-a{% if vb.get('away') %} fr-od-value{% endif %}" title="{% if vb.get('away') %}Value: Away{% endif %}"{% if p and p.bookmaker_odds.away is not none %} data-odds-dec="{{ p.bookmaker_odds.away }}"{% endif %}>{% if p and p.bookmaker_odds.away is not none %}{{ "%.2f"|format(p.bookmaker_odds.away) }}{% else %}—{% endif %}</span>
+{% set bo_src = fixture.best_odds_source if fixture.best_odds_source is defined else {} %}
+    <span class="fr-od fr-od-h{% if vb.get('home') %} fr-od-value{% endif %}" title="{% if vb.get('home') %}Value: Home{% endif %}{% if bo_src.get('home') %} · {{ bo_src.home }}{% endif %}"{% if p and p.bookmaker_odds.home is not none %} data-odds-dec="{{ p.bookmaker_odds.home }}"{% endif %}>{% if p and p.bookmaker_odds.home is not none %}{{ "%.2f"|format(p.bookmaker_odds.home) }}{% else %}—{% endif %}</span>
+    <span class="fr-od fr-od-x{% if vb.get('draw') %} fr-od-value{% endif %}" title="{% if vb.get('draw') %}Value: Draw{% endif %}{% if bo_src.get('draw') %} · {{ bo_src.draw }}{% endif %}"{% if p and p.bookmaker_odds.draw is not none %} data-odds-dec="{{ p.bookmaker_odds.draw }}"{% endif %}>{% if p and p.bookmaker_odds.draw is not none %}{{ "%.2f"|format(p.bookmaker_odds.draw) }}{% else %}—{% endif %}</span>
+    <span class="fr-od fr-od-a{% if vb.get('away') %} fr-od-value{% endif %}" title="{% if vb.get('away') %}Value: Away{% endif %}{% if bo_src.get('away') %} · {{ bo_src.away }}{% endif %}"{% if p and p.bookmaker_odds.away is not none %} data-odds-dec="{{ p.bookmaker_odds.away }}"{% endif %}>{% if p and p.bookmaker_odds.away is not none %}{{ "%.2f"|format(p.bookmaker_odds.away) }}{% else %}—{% endif %}</span>
     <span class="fr-od{% if vb.get('btts_yes') %} fr-od-value{% endif %}" title="{% if vb.get('btts_yes') %}Value: BTTS Yes{% endif %}"{% if lo.get('btts_yes') %} data-odds-dec="{{ lo.btts_yes }}"{% endif %}>{% if lo.get('btts_yes') %}{{ "%.2f"|format(lo.btts_yes) }}{% else %}—{% endif %}</span>
     <span class="fr-od{% if vb.get('over15') %} fr-od-value{% endif %}" title="{% if vb.get('over15') %}Value: Over 1.5{% endif %}"{% if lo.get('over15') %} data-odds-dec="{{ lo.over15 }}"{% endif %}>{% if lo.get('over15') %}{{ "%.2f"|format(lo.over15) }}{% else %}—{% endif %}</span>
     <span class="fr-od{% if vb.get('over25') %} fr-od-value{% endif %}" title="{% if vb.get('over25') %}Value: Over 2.5{% endif %}"{% if lo.get('over25') %} data-odds-dec="{{ lo.over25 }}"{% endif %}>{% if lo.get('over25') %}{{ "%.2f"|format(lo.over25) }}{% else %}—{% endif %}</span>

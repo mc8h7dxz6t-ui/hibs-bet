@@ -18,7 +18,7 @@ SEASON_COVERAGE: List[Dict[str, Any]] = [
         "summary": "Primary coverage comes from API-Football plus Football-Data.org fixture and standings fallbacks; FotMob can fill selected empty fixture calendars experimentally, with odds and side markets when bookmaker feeds expose them.",
         "strengths": [
             "Fixtures, standings, team stats, recent form, injuries and 1X2 odds for API-supported leagues.",
-            "Understat, FBref, Wikipedia, SofaScore, FotMob and recent-match xG paths fill gaps where the source supports the league.",
+            "Understat, FBref, SoccerStats, SofaScore, FotMob and recent-match xG paths fill gaps where the source supports the league.",
             "Season candidates include the active domestic season and previous-season standings fallback for awkward or completed fixture windows.",
         ],
         "shortcomings": [
@@ -38,7 +38,7 @@ SEASON_COVERAGE: List[Dict[str, Any]] = [
         ],
         "shortcomings": [
             "Provider season ids can lag before fixtures are officially published.",
-            "Wikipedia/FBref season pages may not exist or may change layout at rollover.",
+            "FBref/SoccerStats season pages may not exist or may change layout at rollover.",
             "Historical xG sources may not cover promoted clubs or new competitions immediately.",
         ],
     },

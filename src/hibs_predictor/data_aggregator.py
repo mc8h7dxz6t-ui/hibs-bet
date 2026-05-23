@@ -23,7 +23,6 @@ from hibs_predictor.cache import Cache
 from hibs_predictor.data_quality import _has_stats, compute_fixture_data_quality
 from hibs_predictor.scrapers.supplemental import collect_supplemental
 from hibs_predictor.fixture_utils import coerce_team_id, fixture_team_id, fixture_team_name
-from hibs_predictor.scrapers import wikipedia_standings as wiki_standings
 from hibs_predictor.scrapers import soccerstats_standings as soccerstats_standings
 
 
@@ -327,6 +326,37 @@ def _max_implied_delta_pct(
     for p, q in ((a, x), (b, y), (c, z)):
         d = max(d, abs(_implied_prob(p) - _implied_prob(q)) * 100.0)
     return round(d, 2)
+
+
+def _normalize_bookmaker_odds_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Dedupe by bookmaker label; keep best price per outcome; ensure display names."""
+    merged: Dict[str, Dict[str, Any]] = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("bookmaker") or row.get("name") or "").strip()
+        if not name:
+            src = str(row.get("source") or "book")
+            name = src.replace("_", " ").title()
+        key = name.lower()
+        cur = merged.get(key)
+        if cur is None:
+            cur = {"bookmaker": name, "source": row.get("source")}
+            merged[key] = cur
+        for side in ("home", "draw", "away"):
+            raw = row.get(side)
+            try:
+                price = float(raw) if raw is not None else 0.0
+            except (TypeError, ValueError):
+                continue
+            if price <= 1.0:
+                continue
+            prev = cur.get(side)
+            if prev is None or price > float(prev):
+                cur[side] = price
+    out = [r for r in merged.values() if any(r.get(s) for s in ("home", "draw", "away"))]
+    out.sort(key=lambda r: str(r.get("bookmaker") or ""))
+    return out
 
 
 def compute_best_line_from_bookmakers(
@@ -682,27 +712,10 @@ class DataAggregator:
 
         home_nm = fixture_team_name(fixture, "home")
         away_nm = fixture_team_name(fixture, "away")
-        prefer_wiki = os.getenv("HIBS_PREFER_SCRAPED_STANDINGS", "1").lower() in ("1", "true", "yes")
-        wiki_rows: List[Dict[str, Any]] = []
-        if prefer_wiki and league_code in wiki_standings.WP_SUFFIX:
-            try:
-                wiki_rows = self._cached_wikipedia_league_table(league_code)
-            except Exception as exc:
-                print(f"[enrich wiki_standings] {league_code}: {exc!r}")
-                wiki_rows = []
+        prefer_scraped = os.getenv("HIBS_PREFER_SCRAPED_STANDINGS", "1").lower() in ("1", "true", "yes")
 
         hp: Dict[str, Any] = {}
         ap: Dict[str, Any] = {}
-        if wiki_rows:
-            try:
-                wr = wiki_standings.find_team_row(wiki_rows, home_nm)
-                arw = wiki_standings.find_team_row(wiki_rows, away_nm)
-                if wr:
-                    hp = wiki_standings.row_to_position_shape(wr)
-                if arw:
-                    ap = wiki_standings.row_to_position_shape(arw)
-            except Exception as exc:
-                print(f"[enrich wiki_positions] {league_code} fid={fixture_id_str}: {exc!r}")
 
         if league_api_id and "api_sports" in self.clients:
             skip_api_tbl = os.getenv("HIBS_SKIP_API_STANDINGS", "0").lower() in ("1", "true", "yes")
@@ -730,7 +743,7 @@ class DataAggregator:
             except Exception as exc:
                 print(f"[enrich fdo_away_position] {league_code} fid={fixture_id_str}: {exc!r}")
 
-        if prefer_wiki and league_code in soccerstats_standings.LEAGUE_PARAM:
+        if prefer_scraped and league_code in soccerstats_standings.LEAGUE_PARAM:
             try:
                 if not hp.get("position") or not ap.get("position"):
                     ss_rows = self._cached_soccerstats_league_table(league_code)
@@ -794,15 +807,39 @@ class DataAggregator:
         else:
             enriched["fixture_injuries"] = []
         try:
+            self._maybe_attach_player_insight(enriched, league_code, season)
+        except Exception as exc:
+            print(f"[enrich player_insight] {league_code} fid={fixture_id_str}: {exc!r}")
+        try:
             from hibs_predictor.team_news_enrich import apply_team_news_fields
 
             apply_team_news_fields(enriched)
         except Exception as exc:
             print(f"[enrich team_news] {league_code} fid={fixture_id_str}: {exc!r}")
         try:
-            self._maybe_attach_player_insight(enriched, league_code, season)
+            from hibs_predictor.lineup_enrich import (
+                apply_lineup_fields,
+                lineup_cache_ttl_hours,
+                should_fetch_lineups,
+            )
+
+            raw_lineups = None
+            if fid_int and "api_sports" in self.clients and should_fetch_lineups(
+                enriched, api_client_present=True
+            ):
+                ttl = lineup_cache_ttl_hours(enriched)
+                raw_lineups = self.clients["api_sports"].fetch_fixture_lineups(fid_int, ttl_hours=ttl)
+            apply_lineup_fields(enriched, raw_lineups=raw_lineups)
         except Exception as exc:
-            print(f"[enrich player_insight] {league_code} fid={fixture_id_str}: {exc!r}")
+            print(f"[enrich lineup] {league_code} fid={fixture_id_str}: {exc!r}")
+            try:
+                from hibs_predictor.lineup_enrich import apply_lineup_fields
+
+                apply_lineup_fields(enriched)
+            except Exception:
+                enriched.setdefault("fixture_lineups", None)
+                enriched.setdefault("lineup_confirmed", False)
+                enriched.setdefault("lineup_meta", {})
         try:
             enriched["supplemental"] = collect_supplemental(fixture, league_code, enriched)
         except Exception as exc:
@@ -1037,17 +1074,6 @@ class DataAggregator:
         if cached:
             return cached
         rows = soccerstats_standings.fetch_league_table(league_code, cache=self.cache)
-        self.cache.set(cache_key, rows, ttl_hours=12)
-        return rows
-
-    def _cached_wikipedia_league_table(self, league_code: str) -> List[Dict[str, Any]]:
-        """One Wikipedia standings parse per league per ~12h (disk cache)."""
-        sk = wiki_standings._season_wiki_title_part()
-        cache_key = f"wiki_stand_{league_code}_{sk}"
-        cached = self.cache.get(cache_key, ttl_hours=12)
-        if cached is not None:
-            return cached if isinstance(cached, list) else []
-        rows = wiki_standings.fetch_league_table(league_code)
         self.cache.set(cache_key, rows, ttl_hours=12)
         return rows
 
@@ -1377,6 +1403,7 @@ class DataAggregator:
         cross = max(float(cross), cross_book)
 
         avail = bool(ph and pd and pa and ph > 1 and pd > 1 and pa > 1)
+        all_bookmakers = _normalize_bookmaker_odds_rows(all_bookmakers)
         bundle = {
             "odds_home": ph,
             "odds_draw": pd,

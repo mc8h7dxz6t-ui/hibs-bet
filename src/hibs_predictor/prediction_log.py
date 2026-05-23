@@ -86,10 +86,13 @@ def init_db() -> None:
                 result_away INTEGER,
                 result_outcome TEXT,
                 result_status TEXT,
-                result_recorded_at TEXT
+                result_recorded_at TEXT,
+                result_xg_home REAL,
+                result_xg_away REAL
             )
             """
         )
+        _migrate_prediction_log_schema(conn)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_predlog_fixture ON prediction_snapshots(fixture_id)"
         )
@@ -99,6 +102,53 @@ def init_db() -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def _migrate_prediction_log_schema(conn: sqlite3.Connection) -> None:
+    """Append-only schema upgrades for existing audit DBs."""
+    cols = {str(r[1]) for r in conn.execute("PRAGMA table_info(prediction_snapshots)").fetchall()}
+    if "result_xg_home" not in cols:
+        conn.execute("ALTER TABLE prediction_snapshots ADD COLUMN result_xg_home REAL")
+    if "result_xg_away" not in cols:
+        conn.execute("ALTER TABLE prediction_snapshots ADD COLUMN result_xg_away REAL")
+    conn.commit()
+
+
+def parse_result_xg_from_statistics(
+    stats_response: Any,
+    *,
+    home_team_id: Optional[int] = None,
+    away_team_id: Optional[int] = None,
+    home_name: Optional[str] = None,
+    away_name: Optional[str] = None,
+) -> Tuple[Optional[float], Optional[float]]:
+    """Extract home/away xG from API-Football fixtures/statistics response."""
+    if not isinstance(stats_response, list) or len(stats_response) < 2:
+        return None, None
+    try:
+        from hibs_predictor.live_scores import parse_live_statistics
+
+        _, xg_h, xg_a = parse_live_statistics(
+            stats_response,
+            home_name=home_name,
+            away_name=away_name,
+        )
+        if xg_h is not None and xg_a is not None:
+            return float(xg_h), float(xg_a)
+    except Exception:
+        pass
+    if home_team_id and away_team_id:
+        try:
+            from hibs_predictor.betting_engine import TeamStrengthCalculator
+
+            pseudo = {"statistics": stats_response}
+            xh = TeamStrengthCalculator._team_xg_from_fixture_statistics(pseudo, int(home_team_id))
+            xa = TeamStrengthCalculator._team_xg_from_fixture_statistics(pseudo, int(away_team_id))
+            if xh is not None and xa is not None:
+                return float(xh), float(xa)
+        except Exception:
+            pass
+    return None, None
 
 
 def _fixture_id(fixture: Dict[str, Any]) -> Optional[int]:
@@ -211,7 +261,30 @@ def _enrich_summary(fixture: Dict[str, Any], prediction: Optional[Dict[str, Any]
         "away_table": bool(ap.get("position")),
         "data_quality_pct": float(dq.get("score_pct") or 0),
         "full_scope": bool(dq.get("full_scope")),
+        "injuries_n": len(fixture.get("fixture_injuries") or []),
+        "lineup_confirmed": bool(fixture.get("lineup_confirmed")),
     }
+    meta = fixture.get("team_news_meta") or {}
+    if meta.get("home_absences") or meta.get("away_absences"):
+        out["team_news_absences"] = {
+            "home": int(meta.get("home_absences") or 0),
+            "away": int(meta.get("away_absences") or 0),
+        }
+    lmeta = fixture.get("lineup_meta") or {}
+    if lmeta.get("home_scorers_out_of_xi") or lmeta.get("away_scorers_out_of_xi"):
+        out["lineup_scorers_out"] = {
+            "home": len(lmeta.get("home_scorers_out_of_xi") or []),
+            "away": len(lmeta.get("away_scorers_out_of_xi") or []),
+        }
+    if lmeta.get("home_xi_n") or lmeta.get("away_xi_n"):
+        out["lineup_xi_n"] = {
+            "home": int(lmeta.get("home_xi_n") or 0),
+            "away": int(lmeta.get("away_xi_n") or 0),
+        }
+    if fixture.get("attack_availability_home") is not None:
+        out["attack_availability_home"] = fixture.get("attack_availability_home")
+    if fixture.get("attack_availability_away") is not None:
+        out["attack_availability_away"] = fixture.get("attack_availability_away")
     if _clv_enabled() and prediction:
         out["clv"] = _clv_opening_capture(fixture, prediction)
     return out
@@ -331,6 +404,7 @@ def sync_finished_results(
     fetch_fixture_fn: Any,
     *,
     fetch_odds_fn: Any = None,
+    fetch_statistics_fn: Any = None,
     max_fixtures: int = 400,
     min_after_kickoff_hours: float = 2.5,
 ) -> int:
@@ -339,6 +413,7 @@ def sync_finished_results(
 
     ``fetch_fixture_fn``: ``ApiSportsFootballClient.fetch_fixture`` (fixture_id -> raw response row).
     ``fetch_odds_fn``: optional ``fetch_odds`` for closing 1X2 when ``HIBS_CLV_LOG_ENABLED=1``.
+    ``fetch_statistics_fn``: optional ``fetch_fixture_statistics`` for post-match xG join.
     Returns number of snapshot rows updated (can be > distinct fixtures if multiple pending rows).
     """
     path = _db_path()
@@ -388,13 +463,33 @@ def sync_finished_results(
                     continue
                 oc = _outcome_from_goals(hi, ai)
                 rec_at = datetime.now(timezone.utc).isoformat()
+                res_xg_h: Optional[float] = None
+                res_xg_a: Optional[float] = None
+                if fetch_statistics_fn is not None:
+                    try:
+                        stats_raw = fetch_statistics_fn(fid_int)
+                        teams = raw.get("teams") or {}
+                        hid = ((teams.get("home") or {}).get("id"))
+                        aid = ((teams.get("away") or {}).get("id"))
+                        hnm = ((teams.get("home") or {}).get("name"))
+                        anm = ((teams.get("away") or {}).get("name"))
+                        res_xg_h, res_xg_a = parse_result_xg_from_statistics(
+                            stats_raw,
+                            home_team_id=int(hid) if hid is not None else None,
+                            away_team_id=int(aid) if aid is not None else None,
+                            home_name=str(hnm) if hnm else None,
+                            away_name=str(anm) if anm else None,
+                        )
+                    except Exception:
+                        res_xg_h = res_xg_a = None
                 cur = conn.execute(
                     """
                     UPDATE prediction_snapshots
-                    SET result_home=?, result_away=?, result_outcome=?, result_status=?, result_recorded_at=?
+                    SET result_home=?, result_away=?, result_outcome=?, result_status=?, result_recorded_at=?,
+                        result_xg_home=?, result_xg_away=?
                     WHERE fixture_id=? AND result_recorded_at IS NULL
                     """,
-                    (hi, ai, oc, status, rec_at, fid_int),
+                    (hi, ai, oc, status, rec_at, res_xg_h, res_xg_a, fid_int),
                 )
                 updated += cur.rowcount if cur.rowcount else 0
                 conn.commit()
@@ -672,7 +767,8 @@ def export_scored_csv(target_path: str) -> int:
             """
             SELECT captured_at, fixture_id, league_code, kickoff_iso, home_name, away_name,
                    data_quality_pct, one_x2_mode, xg_source, prediction_json,
-                   result_home, result_away, result_outcome, result_recorded_at
+                   result_home, result_away, result_outcome, result_recorded_at,
+                   result_xg_home, result_xg_away
             FROM prediction_snapshots
             WHERE result_outcome IS NOT NULL AND result_outcome != ''
             ORDER BY kickoff_iso
@@ -705,6 +801,8 @@ def export_scored_csv(target_path: str) -> int:
                 "res_away",
                 "res_outcome",
                 "result_at",
+                "res_xg_home",
+                "res_xg_away",
             ]
         )
         for r in rows:
@@ -732,6 +830,8 @@ def export_scored_csv(target_path: str) -> int:
                     r["result_away"],
                     r["result_outcome"],
                     r["result_recorded_at"],
+                    r["result_xg_home"] if "result_xg_home" in r.keys() else None,
+                    r["result_xg_away"] if "result_xg_away" in r.keys() else None,
                 ]
             )
             n += 1

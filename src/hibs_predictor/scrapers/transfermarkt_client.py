@@ -25,7 +25,10 @@ def probe_availability() -> Dict[str, Any]:
         return {
             "ok": ok,
             "status": "deferred",
-            "note": "No squad/injury parser wired — use API-Football injuries until reviewed.",
+            "note": (
+                "Probe-only (robots.txt). No squad/injury parser — API-Football injuries are the "
+                "production path; Transfermarkt backlog pending ToS review."
+            ),
             "robots_http": r.status_code,
         }
     except Exception as exc:

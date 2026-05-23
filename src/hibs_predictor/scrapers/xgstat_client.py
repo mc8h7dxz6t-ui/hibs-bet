@@ -25,6 +25,6 @@ def probe_public_api() -> Dict[str, Any]:
             continue
     return {
         "ok": False,
-        "status": "not_available",
-        "note": "No documented public JSON feed — keep as backlog.",
+        "status": "deferred",
+        "note": "No documented public JSON feed — backlog only (probe checks site HTML).",
     }

@@ -170,7 +170,44 @@
             <p style="margin:0 0 6px;font-size:0.85em;"><strong>Confidence:</strong> {{ si.confidence_pct }}%</p>
             {% endif %}
             {% if si.predicted_scoreline %}
-            <p style="margin:0;font-size:0.85em;"><strong>Predicted scoreline:</strong> {{ si.predicted_scoreline }}</p>
+            <p style="margin:0;font-size:0.85em;"><strong>Predicted scoreline:</strong> {{ si.predicted_scoreline }}{% if si.scoreline_note %} <span style="color:var(--muted);font-size:0.9em;">({{ si.scoreline_note }})</span>{% endif %}</p>
+            {% elif show_pred and p.poisson_top_scores %}
+            <p style="margin:0;font-size:0.85em;"><strong>Predicted scoreline:</strong> {{ p.poisson_top_scores[0].score }} <span style="color:var(--muted);font-size:0.9em;">({{ p.poisson_top_scores[0].pct }}% Poisson mass)</span></p>
+            {% endif %}
+            {% if show_pred and p.poisson_top_scores %}
+            <p style="margin:6px 0 0;font-size:0.78em;color:var(--muted);"><strong>Top scorelines:</strong>
+                {% for s in p.poisson_top_scores %}{{ s.score }} {{ s.pct }}%{% if not loop.last %} · {% endif %}{% endfor %}
+            </p>
+            {% endif %}
+            {% if si.motivation_labels %}
+            <p style="margin:8px 0 0;font-size:0.78em;color:#fde68a;"><strong>Motivation:</strong> {{ si.motivation_labels|join(' · ') }}</p>
+            {% endif %}
+            {% if si.player_insight is defined and si.player_insight %}
+            <div style="margin:10px 0 0;padding:8px 10px;border-radius:10px;border:1px solid rgba(190,220,205,0.14);background:rgba(2,6,23,0.28);">
+                <p style="margin:0 0 6px;font-size:0.72em;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.06em;">League top scorers (API · display only)</p>
+                {% if si.player_insight.home %}
+                <p style="margin:0 0 4px;font-size:0.78em;"><strong>{{ fixture.home }}:</strong>
+                    {% for s in si.player_insight.home %}{{ s.name }}{% if s.goals is not none %} ({{ s.goals }}g){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+                </p>
+                {% endif %}
+                {% if si.player_insight.away %}
+                <p style="margin:0;font-size:0.78em;"><strong>{{ fixture.away }}:</strong>
+                    {% for s in si.player_insight.away %}{{ s.name }}{% if s.goals is not none %} ({{ s.goals }}g){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+                </p>
+                {% endif %}
+                {% if si.player_insight.home_scorers_absent or si.player_insight.away_scorers_absent %}
+                <p style="margin:6px 0 0;font-size:0.72em;color:#fecaca;">
+                    {% for s in si.player_insight.home_scorers_absent|default([]) %}Top scorer {{ s.name }}{% if s.goals is not none %} ({{ s.goals }}g){% endif %} listed on API injury feed ({{ fixture.home }}).{% if not loop.last %} {% endif %}{% endfor %}
+                    {% for s in si.player_insight.away_scorers_absent|default([]) %}Top scorer {{ s.name }}{% if s.goals is not none %} ({{ s.goals }}g){% endif %} listed on API injury feed ({{ fixture.away }}).{% if not loop.last %} {% endif %}{% endfor %}
+                </p>
+                {% endif %}
+                {% if si.player_insight.home_scorers_out_of_xi or si.player_insight.away_scorers_out_of_xi %}
+                <p style="margin:6px 0 0;font-size:0.72em;color:#fde68a;">
+                    {% for s in si.player_insight.home_scorers_out_of_xi|default([]) %}Top scorer {{ s.name }}{% if s.goals is not none %} ({{ s.goals }}g){% endif %} not in confirmed XI ({{ fixture.home }}){% if s.on_injury_feed %} · injury feed{% endif %}.{% if not loop.last %} {% endif %}{% endfor %}
+                    {% for s in si.player_insight.away_scorers_out_of_xi|default([]) %}Top scorer {{ s.name }}{% if s.goals is not none %} ({{ s.goals }}g){% endif %} not in confirmed XI ({{ fixture.away }}){% if s.on_injury_feed %} · injury feed{% endif %}.{% if not loop.last %} {% endif %}{% endfor %}
+                </p>
+                {% endif %}
+            </div>
             {% endif %}
             {% if si.disclaimer %}
             <p style="margin:10px 0 0;font-size:0.68em;color:var(--muted);">{{ si.disclaimer }}</p>
@@ -242,6 +279,27 @@
         <!-- LEAGUE TABLE -->
         {% if (hp and hp.position) or (ap and ap.position) %}
         <div class="section-title">📊 League Table Position</div>
+        {% set table_rows = fixture.league_table_rows if fixture.league_table_rows is defined else [] %}
+        {% if table_rows|length > 2 %}
+        <details class="league-table-popover" style="margin-bottom:10px;">
+            <summary style="cursor:pointer;font-size:0.78em;color:var(--neon-value);margin-bottom:8px;">Full table ({{ table_rows|length }} teams) — home/away highlighted</summary>
+            <table class="data-table league-table-full" style="margin-bottom:8px;font-size:0.72em;">
+                <tr><th>Pos</th><th>Team</th><th>P</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th><th>Form</th></tr>
+                {% for row in table_rows %}
+                <tr class="{% if row.is_home_team %}home-row{% elif row.is_away_team %}away-row{% endif %}">
+                    <td>{{ row.position }}</td>
+                    <td>{% if row.is_home_team or row.is_away_team %}★ {% endif %}{{ row.team }}</td>
+                    <td>{{ row.played }}</td>
+                    <td>{{ row.goals_for }}</td>
+                    <td>{{ row.goals_against }}</td>
+                    <td>{% if row.goal_diff > 0 %}+{% endif %}{{ row.goal_diff }}</td>
+                    <td><strong>{{ row.points }}</strong></td>
+                    <td>{% if row.form %}{{ row.form[-5:] }}{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        </details>
+        {% endif %}
         <table class="data-table" style="margin-bottom:14px;">
             <tr><th>Team</th><th>Pos</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th><th>Form</th></tr>
             {% if hp and hp.position %}
@@ -281,13 +339,23 @@
             </tr>
             {% endif %}
         </table>
-        {% if hp and hp.get('source') == 'wikipedia' or ap and ap.get('source') == 'wikipedia' %}
-        <p style="font-size:0.62em;color:var(--muted);margin:-6px 0 10px;line-height:1.35;">Table from Wikipedia (season article); API-Football may refine when enabled.</p>
+        {% if hp and hp.get('source') == 'soccerstats' or ap and ap.get('source') == 'soccerstats' %}
+        <p style="font-size:0.62em;color:var(--muted);margin:-6px 0 10px;line-height:1.35;">Table from SoccerStats; API-Football may refine when enabled.</p>
         {% endif %}
         {% endif %}
 
         {% if fixture.fixture_injuries is defined and fixture.fixture_injuries %}
         <div class="section-title" style="margin-top:14px;">🏥 Injuries &amp; absences (API)</div>
+        {% if fixture.team_news_meta is defined and fixture.team_news_meta %}
+        <p style="font-size:0.72em;color:var(--muted);margin:-4px 0 8px;line-height:1.4;">
+            Attack availability:
+            {% if fixture.attack_availability_home is not none %}home {{ (fixture.attack_availability_home * 100)|int }}%{% endif %}
+            {% if fixture.attack_availability_away is not none %} · away {{ (fixture.attack_availability_away * 100)|int }}%{% endif %}
+            {% if fixture.team_news_meta.home_absences or fixture.team_news_meta.away_absences %}
+            ({{ fixture.team_news_meta.home_absences|default(0) }} / {{ fixture.team_news_meta.away_absences|default(0) }} listed)
+            {% endif %}
+        </p>
+        {% endif %}
         <table class="data-table" style="margin-bottom:14px;">
             <tr><th>Player</th><th>Team</th><th>Type</th><th>Reason</th></tr>
             {% for inj in fixture.fixture_injuries[:12] %}
@@ -301,6 +369,38 @@
             </tr>
             {% endfor %}
         </table>
+        {% endif %}
+
+        {% if fixture.lineup_confirmed and fixture.fixture_lineups is defined and fixture.fixture_lineups %}
+        <div class="section-title" style="margin-top:14px;">📋 Confirmed lineups (API)</div>
+        {% set fl = fixture.fixture_lineups %}
+        {% set lm = fixture.lineup_meta|default({}) %}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+            {% if fl.home is defined and fl.home %}
+            <div style="padding:8px 10px;border-radius:10px;border:1px solid rgba(190,220,205,0.14);background:rgba(2,6,23,0.28);">
+                <p style="margin:0 0 6px;font-size:0.72em;color:var(--muted);font-weight:700;">{{ fixture.home }}{% if lm.home_formation %} · {{ lm.home_formation }}{% elif fl.home.formation %} · {{ fl.home.formation }}{% endif %}</p>
+                <p style="margin:0;font-size:0.72em;line-height:1.45;color:var(--text);">
+                    {% for pl in fl.home.start_xi|default([]) %}{{ pl.name }}{% if pl.number is defined %} (#{{ pl.number }}){% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
+                </p>
+            </div>
+            {% endif %}
+            {% if fl.away is defined and fl.away %}
+            <div style="padding:8px 10px;border-radius:10px;border:1px solid rgba(190,220,205,0.14);background:rgba(2,6,23,0.28);">
+                <p style="margin:0 0 6px;font-size:0.72em;color:var(--muted);font-weight:700;">{{ fixture.away }}{% if lm.away_formation %} · {{ lm.away_formation }}{% elif fl.away.formation %} · {{ fl.away.formation }}{% endif %}</p>
+                <p style="margin:0;font-size:0.72em;line-height:1.45;color:var(--text);">
+                    {% for pl in fl.away.start_xi|default([]) %}{{ pl.name }}{% if pl.number is defined %} (#{{ pl.number }}){% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
+                </p>
+            </div>
+            {% endif %}
+        </div>
+        {% if lm.home_scorers_out_of_xi or lm.away_scorers_out_of_xi %}
+        <p style="font-size:0.72em;color:#fecaca;margin:-6px 0 14px;line-height:1.4;">
+            {% for s in lm.home_scorers_out_of_xi|default([]) %}Top scorer {{ s.name }}{% if s.goals is not none %} ({{ s.goals }}g){% endif %} not in {{ fixture.home }} XI{% if s.on_injury_feed %} (injury feed){% endif %}.{% if not loop.last %} {% endif %}{% endfor %}
+            {% for s in lm.away_scorers_out_of_xi|default([]) %}Top scorer {{ s.name }}{% if s.goals is not none %} ({{ s.goals }}g){% endif %} not in {{ fixture.away }} XI{% if s.on_injury_feed %} (injury feed){% endif %}.{% if not loop.last %} {% endif %}{% endfor %}
+        </p>
+        {% endif %}
+        {% elif fixture.lineup_meta is defined and fixture.lineup_meta and not fixture.lineup_confirmed %}
+        <p style="font-size:0.72em;color:var(--muted);margin-top:14px;">Starting XIs not confirmed by API yet — no guessed lineups.</p>
         {% endif %}
 
         <!-- LAST 10 RESULTS SIDE BY SIDE -->
@@ -481,17 +581,23 @@
         <!-- BOOKMAKER ODDS -->
         {% if fixture.all_bookmaker_odds %}
         <div class="section-title">💷 Bookmaker Odds Comparison</div>
+        {% if fixture.best_odds_source %}
+        <p style="font-size:0.68em;color:var(--muted);margin:-4px 0 8px;">Best prices shown on row: H {% if fixture.best_odds_source.home %}{{ fixture.best_odds_source.home }}{% else %}—{% endif %} · D {% if fixture.best_odds_source.draw %}{{ fixture.best_odds_source.draw }}{% else %}—{% endif %} · A {% if fixture.best_odds_source.away %}{{ fixture.best_odds_source.away }}{% else %}—{% endif %}</p>
+        {% endif %}
         <table class="data-table" style="margin-bottom:14px;">
             <tr><th>Bookmaker</th><th>Home</th><th>Draw</th><th>Away</th></tr>
-            {% for bm in fixture.all_bookmaker_odds[:8] %}
+            {% for bm in fixture.all_bookmaker_odds[:12] %}
             <tr>
-                <td style="color:var(--muted);">{{ bm.bookmaker }}</td>
+                <td style="color:var(--muted);">{{ bm.bookmaker or bm.name or 'Book' }}{% if bm.source %} <span style="opacity:0.65;font-size:0.85em;">({{ bm.source }})</span>{% endif %}</td>
                 <td class="home-row">{% if bm.home %}<span data-odds-dec="{{ bm.home }}">{{ "%.2f"|format(bm.home) }}</span>{% else %}—{% endif %}</td>
                 <td>{% if bm.draw %}<span data-odds-dec="{{ bm.draw }}">{{ "%.2f"|format(bm.draw) }}</span>{% else %}—{% endif %}</td>
                 <td class="away-row">{% if bm.away %}<span data-odds-dec="{{ bm.away }}">{{ "%.2f"|format(bm.away) }}</span>{% else %}—{% endif %}</td>
             </tr>
             {% endfor %}
         </table>
+        {% elif p and p.bookmaker_odds and p.bookmaker_odds.home %}
+        <div class="section-title">💷 Bookmaker Odds</div>
+        <p style="font-size:0.72em;color:var(--muted);margin:0 0 12px;">Single best 1X2 line only — multi-book comparison not returned for this fixture.</p>
         {% endif %}
 
         {% if fixture.has_value_bet and p.value_highlights is defined and p.value_highlights %}

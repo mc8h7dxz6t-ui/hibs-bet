@@ -16,10 +16,9 @@ _API_EFFECT: Dict[str, str] = {
 _SCRAPER_EFFECT: Dict[str, str] = {
     "statsbomb_open": "Open-data JSON (no key). Competition list always; optional per-fixture goals-in-window proxy when enabled. Rarely shifts 1X2 unless blended priors are on.",
     "understat": "League-page xG when the embed parses. Heavy + light paths can feed optional xG blend in the betting engine.",
-    "fbref": "Squad aggregates from HTML when heavy scrapers run (or when not skipped). May 403 from some networks; core 1X2 still runs on APIs.",
+    "fbref": "Squad aggregates + schedule xG from HTML when heavy scrapers run. May 403 from datacenter IPs — set HIBS_FBREF_BLOCKED=1 on VPS; core 1X2 still runs on APIs.",
     "fotmob": "Daily match JSON fixture fallback when API lists are empty. Uses /api/data/matches (not legacy /api/matches).",
-    "wikipedia": "Scraped league tables when API standings are thin; Norway/Finland/cups supported.",
-    "soccerstats": "HTML table positions after Wikipedia; Scotland L1–L2 and other mapped leagues.",
+    "soccerstats": "Scraped league tables when API standings are thin; Norway/Finland/Scotland L1-L2 supported.",
     "sofascore": "Recent-match listing from public endpoints. Often 403 outside a browser; no core impact when absent.",
 }
 
@@ -37,7 +36,7 @@ def _pred_audit_line() -> Dict[str, Any]:
         "label": "Prediction audit (SQLite)",
         "ok": on,
         "ms": None,
-        "prediction_effect": "When enabled, stores snapshots for post-match calibration (Brier, etc.). Does not change live 1X2 probabilities.",
+        "prediction_effect": "When enabled, stores snapshots for post-match calibration (Brier, etc.). pred-log-sync joins FT scores and API Expected Goals when available. Does not change live 1X2 probabilities.",
     }
 
 
@@ -148,4 +147,10 @@ def augment_health_for_ui(health: Dict[str, Any]) -> Dict[str, Any]:
         "heavy_scrapers_enabled": heavy_enabled,
         "skip_heavy_when_api_strong": skip_strong,
     }
+    try:
+        from hibs_predictor.xg_priority_chain import xg_priority_chain_dict
+
+        out["xg_priority_chain"] = xg_priority_chain_dict()
+    except Exception:
+        pass
     return out

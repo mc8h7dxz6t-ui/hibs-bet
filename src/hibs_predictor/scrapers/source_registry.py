@@ -33,10 +33,10 @@ SOURCE_CATALOG: List[Dict[str, Any]] = [
     {
         "id": "fotmob",
         "label": "FotMob",
-        "focus": "Public daily match JSON used as a conservative fixture fallback",
+        "focus": "Public daily match JSON; league-table team xG for UEFA cups + optional domestic fallback",
         "status": "wired",
         "module": "hibs_predictor.scrapers.fotmob_client",
-        "notes": "``/api/data/matches?date=&timezone=`` (2025+; legacy ``/api/matches`` is 404). Health probe + ``HIBS_ENABLE_FOTMOB_FIXTURES=1``.",
+        "notes": "``/api/data/matches`` fixture fallback; ``/api/data/leagues`` season xG table. ``HIBS_ENABLE_FOTMOB_XG`` / cups default-on.",
     },
     {
         "id": "fbref",
@@ -44,7 +44,7 @@ SOURCE_CATALOG: List[Dict[str, Any]] = [
         "focus": "Deep squad tables, advanced metrics, Opta-backed stats on many leagues",
         "status": "wired",
         "module": "hibs_predictor.scrapers.fbref_client",
-        "notes": "HTML tables; follow Sports Reference robots; heavy path in collect_supplemental.",
+        "notes": "HTML tables; follow Sports Reference robots; heavy path in collect_supplemental. May 403 from datacenter IPs — set HIBS_FBREF_BLOCKED=1 on VPS.",
     },
     {
         "id": "understat",
@@ -61,14 +61,6 @@ SOURCE_CATALOG: List[Dict[str, Any]] = [
         "status": "blocked",
         "module": "hibs_predictor.scrapers.sofascore_client",
         "notes": "Often HTTP 403 from server/datacenter IPs — optional rolling xG only when reachable.",
-    },
-    {
-        "id": "wikipedia",
-        "label": "Wikipedia",
-        "focus": "Season league tables / standings text for supported codes",
-        "status": "wired",
-        "module": "hibs_predictor.scrapers.wikipedia_standings",
-        "notes": "MediaWiki HTML; Norway/Finland/cups added; used when API standings thin.",
     },
     {
         "id": "statsbomb_open",
@@ -108,7 +100,7 @@ SOURCE_CATALOG: List[Dict[str, Any]] = [
         "focus": "xG/team-stat enrichment",
         "status": "deferred",
         "module": "hibs_predictor.scrapers.xgstat_client",
-        "notes": "Probe-only: no stable public JSON API found.",
+        "notes": "Probe-only: no stable public JSON API found; not in enrichment pipeline.",
     },
     {
         "id": "besoccer",
@@ -116,7 +108,7 @@ SOURCE_CATALOG: List[Dict[str, Any]] = [
         "focus": "Fixtures, tables, team/news pages",
         "status": "deferred",
         "module": "hibs_predictor.scrapers.besoccer_client",
-        "notes": "Probe-only: site reachable but no documented public JSON feed.",
+        "notes": "Probe-only: site reachable but no documented public JSON feed; not wired.",
     },
     {
         "id": "transfermarkt",
@@ -124,7 +116,7 @@ SOURCE_CATALOG: List[Dict[str, Any]] = [
         "focus": "Transfers, market values, injuries, squad depth",
         "status": "deferred",
         "module": "hibs_predictor.scrapers.transfermarkt_client",
-        "notes": "Robots probe only; squad/injury parser deferred pending ToS review.",
+        "notes": "Robots probe only; injuries via API-Football. Squad/injury HTML parser deferred pending ToS review.",
     },
     {
         "id": "footystats",
@@ -140,7 +132,7 @@ SOURCE_CATALOG: List[Dict[str, Any]] = [
         "focus": "League table standings when API positions are missing",
         "status": "wired",
         "module": "hibs_predictor.scrapers.soccerstats_standings",
-        "notes": "HTML tables.asp fallback after Wikipedia/API; Norway/Finland/Scotland L1-L2.",
+        "notes": "HTML tables.asp fallback after API/FDO; Norway/Finland/Scotland L1-L2.",
     },
     {
         "id": "datamb",

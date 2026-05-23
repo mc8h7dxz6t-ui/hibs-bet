@@ -13,12 +13,10 @@ import unicodedata
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-import requests
 from bs4 import BeautifulSoup
 
 from hibs_predictor.cache import Cache
-
-_HEADERS = {"User-Agent": "hibs-bet/1.0 (Scottish xG enrichment)"}
+from hibs_predictor.scrapers.fbref_client import FbrefFetchError, fetch_fbref_html, fbref_blocked_env
 
 # league_code → (fbref comp id, URL slug)
 FBREF_SCOTTISH_LEAGUE: Dict[str, Tuple[str, str]] = {
@@ -178,7 +176,7 @@ def fetch_schedule_rows(
     cache: Optional[Cache] = None,
 ) -> List[Dict[str, Any]]:
     meta = FBREF_SCHEDULE_LEAGUES.get((league_code or "").strip().upper())
-    if not meta:
+    if not meta or fbref_blocked_env():
         return []
     comp_id, slug = meta
     from hibs_predictor.season import fbref_season_labels
@@ -194,11 +192,15 @@ def fetch_schedule_rows(
             return hit
         url = f"https://fbref.com/en/comps/{comp_id}/{sl}/schedule/{slug}-Scores-and-Fixtures"
         try:
-            r = requests.get(url, headers=_HEADERS, timeout=30)
-            r.raise_for_status()
-            rows = _parse_schedule_rows(r.text)
+            html = fetch_fbref_html(url, cache_key=f"{key}_html", cache=c, ttl_hours=12.0)
+            rows = _parse_schedule_rows(html)
             c.set(key, rows, ttl_hours=12.0)
             return rows
+        except FbrefFetchError as exc:
+            last_exc = exc
+            if exc.blocked:
+                break
+            continue
         except Exception as exc:
             last_exc = exc
             continue

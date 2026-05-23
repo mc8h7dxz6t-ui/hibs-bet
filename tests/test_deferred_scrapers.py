@@ -21,6 +21,7 @@ def test_xgstat_probe_not_available():
     with patch("hibs_predictor.scrapers.xgstat_client.requests.get", return_value=mock_resp):
         out = xgstat_client.probe_public_api()
     assert out["ok"] is False
+    assert out["status"] == "deferred"
 
 
 def test_besoccer_probe_deferred():

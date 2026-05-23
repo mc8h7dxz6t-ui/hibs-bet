@@ -3,10 +3,11 @@ Scraped / derived xG for upcoming fixtures when API-Football fixture stats are e
 
 Sources (priority):
   1. Understat league-page row for this fixture (top leagues)
-  2. FBref schedule xG / team rolling averages (Scottish, EFL, selected European)
-  3. StatsBomb open-data goals proxy → estimated xG when enabled
-  4. Average xG from API-Sports last finished matches per team (all leagues with stats)
-  5. Optional blend with existing goals_proxy when only one side has xG
+  2. FotMob league-table xG (UEFA cups default-on; domestic when HIBS_MAX_DATA=1)
+  3. FBref schedule xG / team rolling averages (Scottish, EFL, selected European)
+  4. StatsBomb open-data goals proxy → estimated xG when enabled
+  5. Average xG from API-Sports last finished matches per team (all leagues with stats)
+  6. Optional blend with existing goals_proxy when only one side has xG
 """
 
 from __future__ import annotations
@@ -163,6 +164,28 @@ def resolve_scraped_xg(
             if pair:
                 meta.update(fmeta)
                 return pair[0], pair[1], tag, meta
+
+    fm_block = sup.get("fotmob_xg") if isinstance(sup, dict) else None
+    if isinstance(fm_block, dict):
+        pair = _understat_pair_from_dict(fm_block)
+        if pair:
+            meta["fotmob_league"] = True
+            meta["home_n"] = fm_block.get("home_n")
+            meta["away_n"] = fm_block.get("away_n")
+            return pair[0], pair[1], "fotmob_league_xg", meta
+
+    try:
+        from hibs_predictor.scrapers.fotmob_client import fotmob_xg_enabled, resolve_league_fixture_xg
+
+        if fotmob_xg_enabled(league_code):
+            fx = resolve_league_fixture_xg(league_code, home_nm, away_nm)
+            if fx:
+                xh, xa, fmeta = fx
+                meta.update(fmeta)
+                meta["fotmob_fetch"] = "direct"
+                return float(xh), float(xa), "fotmob_league_xg", meta
+    except Exception:
+        pass
 
     ss_block = sup.get("sofascore_xg") if isinstance(sup, dict) else None
     if isinstance(ss_block, dict):

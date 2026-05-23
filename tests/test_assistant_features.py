@@ -431,7 +431,7 @@ def _full_sample_packet(**overrides):
         "sharp_anchor_implied": {"home": 0.48, "draw": 0.27, "away": 0.25},
         "bet_confidence": 82.0,
         "has_value_dual_agree": True,
-        "supplemental_tags": ["understat", "wikipedia"],
+        "supplemental_tags": ["understat", "soccerstats"],
         "calibration_shrink": {"shrink_factor": 0.92},
     }
     base.update(overrides)

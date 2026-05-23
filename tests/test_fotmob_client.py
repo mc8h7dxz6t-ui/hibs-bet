@@ -54,3 +54,87 @@ def test_probe_matches_api_ok():
         pr = fm.probe_matches_api()
     assert pr["ok"] is True
     assert pr.get("http_status") == 200
+
+
+UCL_XG_PAYLOAD = {
+    "table": [
+        {
+            "data": {
+                "table": {
+                    "xg": [
+                        {
+                            "name": "Arsenal",
+                            "shortName": "Arsenal",
+                            "id": 9825,
+                            "played": 8,
+                            "xg": 20.0,
+                            "xgConceded": 6.0,
+                        },
+                        {
+                            "name": "Aston Villa",
+                            "shortName": "Aston Villa",
+                            "id": 10252,
+                            "played": 8,
+                            "xg": 14.0,
+                            "xgConceded": 10.0,
+                        },
+                    ]
+                }
+            }
+        }
+    ]
+}
+
+
+def test_parse_league_xg_table():
+    rows = fm.parse_league_xg_table(UCL_XG_PAYLOAD)
+    assert len(rows) == 2
+    assert rows[0]["name"] == "Arsenal"
+
+
+def test_fixture_xg_from_league_table():
+    rows = fm.parse_league_xg_table(UCL_XG_PAYLOAD)
+    hp = fm.row_to_xg_profile(fm.find_team_xg_row(rows, "Arsenal FC"))
+    ap = fm.row_to_xg_profile(fm.find_team_xg_row(rows, "Aston Villa"))
+    assert hp and ap
+    pair = fm.fixture_xg_from_profiles(hp, ap)
+    assert pair
+    xh, xa = pair
+    assert 0.35 <= xh <= 3.2
+    assert 0.35 <= xa <= 3.2
+
+
+def test_fotmob_xg_enabled_cups_default():
+    import os
+
+    old = os.environ.pop("HIBS_ENABLE_FOTMOB_XG", None)
+    old_md = os.environ.pop("HIBS_MAX_DATA", None)
+    try:
+        assert fm.fotmob_xg_enabled("UCL") is True
+        assert fm.fotmob_xg_enabled("EPL") is False
+        os.environ["HIBS_MAX_DATA"] = "1"
+        assert fm.fotmob_xg_enabled("EPL") is True
+    finally:
+        if old is not None:
+            os.environ["HIBS_ENABLE_FOTMOB_XG"] = old
+        else:
+            os.environ.pop("HIBS_ENABLE_FOTMOB_XG", None)
+        if old_md is not None:
+            os.environ["HIBS_MAX_DATA"] = old_md
+        else:
+            os.environ.pop("HIBS_MAX_DATA", None)
+
+
+def test_resolve_league_fixture_xg_mocked():
+    cache = MagicMock()
+    with patch("hibs_predictor.scrapers.fotmob_client.fotmob_xg_enabled", return_value=True):
+        with patch(
+            "hibs_predictor.scrapers.fotmob_client.fetch_league_data",
+            return_value=UCL_XG_PAYLOAD,
+        ):
+            out = fm.resolve_league_fixture_xg("UCL", "Arsenal", "Aston Villa", cache=cache)
+    assert out is not None
+    xh, xa, meta = out
+    assert xh > 0.04 and xa > 0.04
+    assert meta.get("home_n") == 8
+

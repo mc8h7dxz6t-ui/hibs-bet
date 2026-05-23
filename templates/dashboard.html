@@ -42,6 +42,12 @@
     </div>
     {% endif %}
 
+    {% if tournament_focus.active %}
+    <div class="tournament-focus-banner" role="status">
+        <strong>{{ tournament_focus.label }}</strong> — international fixtures only (fewer domestic API calls). Use <strong>All</strong>, <strong>UK</strong>, or <strong>European</strong> region chips to browse domestic leagues when needed.
+    </div>
+    {% endif %}
+
     {% if sky_dock_unavailable_note %}
     <p class="sky-dock-hidden-note" role="status" style="margin:0 0 12px;padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:rgba(30,41,59,0.5);font-size:0.78em;color:var(--muted);">
         Sky TV dock hidden — stream unavailable on YouTube. Open
@@ -69,10 +75,14 @@
                 {% endif %}
                 <div class="chip-row" id="region-chip-row" aria-label="Region filter">
                     {% for slug, label in dashboard_filter_regions %}
-                    <button type="button" class="chip chip-region{% if not slug %} active{% endif %}" data-region="{{ slug }}">{{ label }}</button>
+                    <button type="button" class="chip chip-region{% if slug == tournament_focus.default_region %} active{% elif not slug and not tournament_focus.active %} active{% endif %}" data-region="{{ slug }}">{{ label }}</button>
                     {% endfor %}
                 </div>
+                {% if tournament_focus.active %}
+                <p class="chip-hint region-filter-hint" id="region-filter-hint">Showing <strong>International</strong> by default during {{ tournament_focus.label|lower }}. Pick <strong>All</strong> or another region for domestic leagues.</p>
+                {% else %}
                 <p class="chip-hint region-filter-hint" id="region-filter-hint" hidden>UEFA cup finals (e.g. Europa League) are under <strong>European</strong>, not UK — switch region or choose All.</p>
+                {% endif %}
                 <div class="chip-row" id="chip-row" aria-label="League filter">
                     <button type="button" class="chip chip-lg active" data-league="">All leagues</button>
                     {% for code, name in leagues_for_filter %}
@@ -89,9 +99,9 @@
                 {% set last_day.val = item.kickoff_day_local %}
                 <div class="du-day">{{ item.kickoff_day_local[8:10] }}/{{ item.kickoff_day_local[5:7] }}</div>
                 {% endif %}
-                <a href="#fix-{{ item.id }}" class="du-row" data-league="{{ item.league }}" data-region="{{ item.dashboard_region|default('other') }}" data-fid="{{ item.id }}">
-                    <span class="du-ko">{{ item.kickoff_time }}</span>
-                    <span class="du-teams">{{ item.home }} <span class="du-vs">v</span> {{ item.away }}</span>
+                <a href="#fix-{{ item.id }}" class="du-row" data-league="{{ item.league }}" data-region="{{ item.dashboard_region|default('other') }}" data-fid="{{ item.id }}" title="{% if item.rationale_snippet %}{{ item.rationale_snippet }}{% elif item.pick %}{{ item.pick }}{% endif %}">
+                    <span class="du-ko">{% if item.confidence %}<span class="du-conf">{{ "%.0f"|format(item.confidence) }}%</span>{% endif %}{{ item.kickoff_time }}</span>
+                    <span class="du-teams">{{ item.home }} <span class="du-vs">v</span> {{ item.away }}{% if item.rationale_snippet %}<span class="du-snippet">{{ item.rationale_snippet }}</span>{% elif item.pick %}<span class="du-snippet">{{ item.pick }}</span>{% endif %}</span>
                 </a>
                 {% endfor %}
                 {% else %}
@@ -105,19 +115,7 @@
             <div class="hero-strip">
                 <h1 class="hero-title"><span class="hero-brand">hibs-bet</span> {{ fetch_days }}-Day Fixtures</h1>
                 <p class="hero-meta"><strong>{{ total }}</strong> fixtures <span class="live-pill"><span class="live-dot"></span> LIVE DATA</span> · showing next <strong>{{ fetch_days }} days</strong> · times in <strong>{{ display_tz_label }}</strong></p>
-                <p class="hero-sub">Full fixture list by day and league — SPL first, then EPL, Scotland, England, Europe, internationals, UEFA. Tap any row for form, xG, markets and value picks.</p>
-                <section class="dash-info-box" aria-label="Dashboard overview">
-                    <p class="dash-info-title">What this page does</p>
-                    <p class="dash-info-main">{{ dashboard_info.description }}</p>
-                    <p class="dash-info-meta">
-                        <strong>{{ dashboard_info.loaded_count }}</strong> leagues loaded{% if dashboard_info.total_fixtures %} across <strong>{{ dashboard_info.total_fixtures }}</strong> fixtures{% endif %}.
-                        {% if dashboard_info.loaded_names %}
-                        Loaded leagues: {{ dashboard_info.loaded_names_text }}.
-                        {% else %}
-                        No leagues are loaded yet.
-                        {% endif %}
-                    </p>
-                </section>
+                <p class="hero-sub">Full fixture list by day and league — tap any row for form, xG, markets and value picks. <a href="/insights">Insights</a> explains how the model works and which leagues loaded.</p>
                 {% if fixture_coverage %}
                 <div class="api-missing-banner" style="margin-top:10px;">
                     <strong>{{ fixture_coverage.summary }}</strong>
@@ -163,7 +161,7 @@
             </div>
             {% endif %}
 
-            <div id="dash-fixture-root" class="fixtures-full-list" data-dq-min="{{ data_quality_ui_min }}">
+            <div id="dash-fixture-root" class="fixtures-full-list" data-dq-min="{{ data_quality_ui_min }}" data-default-region="{{ tournament_focus.default_region }}">
                 {% if total == 0 %}
                 <div class="empty-state"><div class="icon">📡</div>
                     <p>No fixtures in the next {{ fetch_days }} days. Check API keys and <a href="/status">status</a>, then Refresh. Scrapers add stats to fixtures after a provider returns them; they do not create league calendars.</p>
@@ -189,6 +187,43 @@
                 {% endfor %}
                 {% endif %}
             </div>
+
+            {% if recent_results_total > 0 %}
+            <section class="results-section" id="dash-results-section" aria-labelledby="dash-results-heading">
+                <div class="results-section-head">
+                    <h2 class="results-heading" id="dash-results-heading">Recent results</h2>
+                    <p class="results-meta">Last <strong>{{ recent_results_days }}</strong> days · finished matches only · times in <strong>{{ display_tz_label }}</strong></p>
+                </div>
+                <div id="dash-results-root" class="results-full-list" data-default-region="{{ tournament_focus.default_region }}">
+                    {% for day in recent_results_days_groups %}
+                    <section class="day-block results-day-block" data-date="{{ day.date_iso }}">
+                        <h3 class="day-heading results-day-heading">{{ day.heading }}</h3>
+                        {% for lg in day.leagues %}
+                        <div class="lg-block results-lg-block" data-league-section="{{ lg.code }}">
+                            <h4 class="lg-heading results-lg-heading">{{ lg.name|upper }} <span class="lg-count">({{ lg.fixtures|length }})</span></h4>
+                            <div class="results-scroll-wrap">
+                                <div class="results-head" aria-hidden="true">
+                                    <span>KO</span><span class="res-h-match">MATCH</span><span class="res-h-score">SCORE</span><span class="res-h-xg">xG</span>
+                                </div>
+                                {% for row in lg.fixtures %}
+                                <div class="results-row"
+                                     data-league="{{ row.league }}"
+                                     data-region="{{ row.dashboard_region|default('other') }}"
+                                     data-search="{{ row.home|lower }} {{ row.away|lower }} {{ row.league_name|lower }}">
+                                    <span class="res-ko">{{ row.kickoff_time }}</span>
+                                    <span class="res-match">{{ row.home }} <span class="res-vs">v</span> {{ row.away }}</span>
+                                    <span class="res-score">{{ row.scoreline }}</span>
+                                    <span class="res-xg">{% if row.has_xg %}{{ "%.1f"|format(row.xg_home) }}–{{ "%.1f"|format(row.xg_away) }}{% else %}—{% endif %}</span>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </section>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endif %}
         </div>
     </div>
 </div>
@@ -200,17 +235,23 @@
 <script src="{{ url_for('static', filename='hibs_assistant.js') }}"></script>
 <script>
 (function () {
-    var FILTER_KEY = 'hibs_league_filter_v1';
+    var FILTER_KEY = 'hibs_league_filter_v2';
     var activeRegion = '';
     var activeLeague = '';
     var searchQ = '';
     var fullDataOnly = false;
     var activeDqMin = 0;
+    var defaultRegion = '';
 
     function loadFilterState() {
+        var root = document.getElementById('dash-fixture-root');
+        defaultRegion = root ? (root.getAttribute('data-default-region') || '') : '';
         try {
             var raw = localStorage.getItem(FILTER_KEY);
-            if (!raw) return;
+            if (!raw) {
+                if (defaultRegion) activeRegion = defaultRegion;
+                return;
+            }
             var s = JSON.parse(raw);
             if (s && typeof s === 'object') {
                 activeRegion = s.region || '';
@@ -218,10 +259,13 @@
             } else if (typeof raw === 'string') {
                 activeRegion = raw;
             }
-        } catch (e) {}
+        } catch (e) {
+            if (defaultRegion) activeRegion = defaultRegion;
+        }
+        if (!activeRegion && defaultRegion) activeRegion = defaultRegion;
         if (activeRegion === 'uk' && !activeLeague) {
             var hint = document.getElementById('region-filter-hint');
-            if (hint) hint.hidden = false;
+            if (hint && hint.hidden !== false && !defaultRegion) hint.hidden = false;
         }
     }
 
@@ -266,7 +310,7 @@
         var valOnly = valCb ? valCb.checked : false;
         var dqMin = currentDqMin();
         var hint = document.getElementById('region-filter-hint');
-        if (hint) hint.hidden = activeRegion !== 'uk' || !!activeLeague;
+        if (hint && !defaultRegion) hint.hidden = activeRegion !== 'uk' || !!activeLeague;
         document.querySelectorAll('#dash-fixture-root .fixture-card').forEach(function (card) {
             var rg = activeRegion;
             var okR = !rg || card.getAttribute('data-region') === rg;
@@ -282,20 +326,54 @@
             var show = okR && okL && okV && okS && okD && ok90;
             card.style.display = show ? '' : 'none';
         });
-        document.querySelectorAll('.lg-block').forEach(function (block) {
+        document.querySelectorAll('#dash-fixture-root .lg-block').forEach(function (block) {
             var vis = false;
             block.querySelectorAll('.fixture-card').forEach(function (c) {
                 if (c.style.display !== 'none') vis = true;
             });
             block.style.display = vis ? '' : 'none';
         });
-        document.querySelectorAll('.day-block').forEach(function (day) {
+        document.querySelectorAll('#dash-fixture-root .day-block').forEach(function (day) {
             var v = false;
             day.querySelectorAll('.lg-block').forEach(function (b) {
                 if (b.style.display !== 'none') v = true;
             });
             day.style.display = v ? '' : 'none';
         });
+        var resultsRoot = document.getElementById('dash-results-root');
+        if (resultsRoot) {
+            resultsRoot.querySelectorAll('.results-row').forEach(function (row) {
+                var rg = activeRegion;
+                var okR = !rg || row.getAttribute('data-region') === rg;
+                var lg = activeLeague;
+                var okL = !lg || row.getAttribute('data-league') === lg;
+                var hay = (row.getAttribute('data-search') || '');
+                var okS = !searchQ || hay.indexOf(searchQ) !== -1;
+                row.style.display = (okR && okL && okS) ? '' : 'none';
+            });
+            resultsRoot.querySelectorAll('.results-lg-block').forEach(function (block) {
+                var vis = false;
+                block.querySelectorAll('.results-row').forEach(function (r) {
+                    if (r.style.display !== 'none') vis = true;
+                });
+                block.style.display = vis ? '' : 'none';
+            });
+            resultsRoot.querySelectorAll('.results-day-block').forEach(function (day) {
+                var v = false;
+                day.querySelectorAll('.results-lg-block').forEach(function (b) {
+                    if (b.style.display !== 'none') v = true;
+                });
+                day.style.display = v ? '' : 'none';
+            });
+            var resultsSection = document.getElementById('dash-results-section');
+            if (resultsSection) {
+                var anyResults = false;
+                resultsRoot.querySelectorAll('.results-row').forEach(function (r) {
+                    if (r.style.display !== 'none') anyResults = true;
+                });
+                resultsSection.style.display = anyResults ? '' : 'none';
+            }
+        }
         document.querySelectorAll('#dash-upcoming .du-row').forEach(function (row) {
             var rg = activeRegion;
             var okR = !rg || row.getAttribute('data-region') === rg;

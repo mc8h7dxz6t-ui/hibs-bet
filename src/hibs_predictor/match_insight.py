@@ -98,11 +98,161 @@ def should_use_odds_only(fixture: Dict[str, Any], prediction: Dict[str, Any]) ->
     return False
 
 
-def _most_likely_scoreline(lam_h: float, lam_a: float) -> str:
-    """Discrete score from rounded lambdas (Poisson means), capped for display."""
-    h = max(0, min(4, int(round(max(0.05, lam_h)))))
-    a = max(0, min(4, int(round(max(0.05, lam_a)))))
-    return f"{h}-{a}"
+def _poisson_pmf(lam: float, k: int) -> float:
+    import math
+
+    lam = max(0.08, float(lam))
+    try:
+        return math.exp(-lam) * (lam**k) / math.factorial(k)
+    except (OverflowError, ValueError):
+        return 0.0
+
+
+def _most_likely_scoreline(lam_h: float, lam_a: float, *, max_goals: int = 6) -> str:
+    """Poisson joint argmax on calibrated side lambdas (same grid as betting_engine totals)."""
+    top = poisson_top_scorelines(lam_h, lam_a, top_n=1, max_goals=max_goals)
+    return top[0]["score"] if top else "0-0"
+
+
+def poisson_top_scorelines(
+    lam_h: float,
+    lam_a: float,
+    *,
+    top_n: int = 3,
+    max_goals: int = 6,
+) -> List[Dict[str, Any]]:
+    """Top-N joint Poisson scorelines with percentage mass (same grid as betting_engine)."""
+    cap = max(3, min(8, int(max_goals)))
+    scored: List[Dict[str, Any]] = []
+    for h in range(cap + 1):
+        for a in range(cap + 1):
+            p = _poisson_pmf(lam_h, h) * _poisson_pmf(lam_a, a)
+            scored.append({"score": f"{h}-{a}", "pct": round(p * 100.0, 1)})
+    scored.sort(key=lambda row: (-float(row["pct"]), row["score"]))
+    n = max(1, min(int(top_n), len(scored)))
+    return scored[:n]
+
+
+def _calibrated_lambdas_for_scoreline(prediction: Dict[str, Any]) -> Tuple[float, float]:
+    """Prefer HA+Elo side lambdas; fall back to raw expected goals."""
+    lam_h = prediction.get("lambda_side_home")
+    lam_a = prediction.get("lambda_side_away")
+    try:
+        if lam_h is not None and lam_a is not None:
+            return max(0.08, float(lam_h)), max(0.08, float(lam_a))
+    except (TypeError, ValueError):
+        pass
+    return (
+        max(0.08, float(prediction.get("expected_goals_home") or 1.2)),
+        max(0.08, float(prediction.get("expected_goals_away") or 1.1)),
+    )
+
+
+def _norm_team_key(name: Any) -> str:
+    import re
+    import unicodedata
+
+    text = unicodedata.normalize("NFKD", str(name or ""))
+    text = "".join(c for c in text if not unicodedata.combining(c)).lower()
+    text = re.sub(r"[^a-z0-9]+", " ", text).strip()
+    for suffix in (" fc", " afc", " cf", " sc", " united", " city"):
+        if text.endswith(suffix):
+            text = text[: -len(suffix)].strip()
+    return text
+
+
+def derive_motivation_context(
+    fixture: Dict[str, Any],
+    *,
+    table_rows: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Deterministic end-of-season motivation from table position + points gap.
+    No invented stats — requires standings rows with position, points, played.
+    """
+    rows = table_rows or fixture.get("league_table_rows") or []
+    if len(rows) < 4:
+        return {"home": [], "away": [], "labels": []}
+
+    def _leader_points(rs: List[Dict[str, Any]]) -> Optional[int]:
+        top = min((int(r.get("position") or 999) for r in rs), default=999)
+        for r in rs:
+            if int(r.get("position") or 999) == top:
+                try:
+                    return int(r.get("points") or 0)
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    def _team_row(team: str) -> Optional[Dict[str, Any]]:
+        key = _norm_team_key(team)
+        for r in rows:
+            if _norm_team_key(r.get("team")) == key:
+                return r
+        return None
+
+    def _flags(side: str, pos: Dict[str, Any]) -> List[str]:
+        flags: List[str] = []
+        try:
+            rank = int(pos.get("position") or 0)
+            pts = int(pos.get("points") or 0)
+            played = int(pos.get("played") or 0)
+        except (TypeError, ValueError):
+            return flags
+        if rank < 1 or played < 1:
+            return flags
+        n_teams = len(rows)
+        leader_pts = _leader_points(rows)
+        max_played = max(int(r.get("played") or 0) for r in rows) or played
+        remaining = max(0, max_played - played)
+        if leader_pts is not None and rank == 1 and remaining <= 3:
+            gap = pts - max(
+                (int(r.get("points") or 0) for r in rows if int(r.get("position") or 999) > 1),
+                default=0,
+            )
+            if gap >= 6:
+                flags.append("title_won")
+        if leader_pts is not None and remaining <= 2:
+            if pts <= leader_pts - 15 and rank > 1:
+                flags.append("nothing_to_play_for")
+            elif rank >= n_teams - 1 and pts <= leader_pts - 12:
+                flags.append("relegation_done")
+        if remaining <= 4 and rank <= 2 and leader_pts is not None and pts >= leader_pts - 3:
+            flags.append("title_race")
+        if remaining <= 4 and rank >= n_teams - 2:
+            flags.append("relegation_battle")
+        return flags
+
+    home = fixture.get("home") or "Home"
+    away = fixture.get("away") or "Away"
+    hp = fixture.get("home_position") or {}
+    ap = fixture.get("away_position") or {}
+    hr = _team_row(str(home)) or hp
+    ar = _team_row(str(away)) or ap
+    home_flags = _flags("home", hr if isinstance(hr, dict) else {})
+    away_flags = _flags("away", ar if isinstance(ar, dict) else {})
+    label_map = {
+        "title_won": "already won league",
+        "nothing_to_play_for": "little left to play for",
+        "relegation_done": "relegation settled",
+        "title_race": "title race",
+        "relegation_battle": "relegation battle",
+    }
+    labels: List[str] = []
+    for team, flags in ((home, home_flags), (away, away_flags)):
+        for f in flags:
+            labels.append(f"{team}: {label_map.get(f, f)}")
+    return {"home": home_flags, "away": away_flags, "labels": labels}
+
+
+def _motivation_lambda_nudge(flags: List[str]) -> float:
+    """Tiny λ multiplier from motivation (engine + scoreline; max ±6%)."""
+    nudge = 1.0
+    if "title_won" in flags or "nothing_to_play_for" in flags or "relegation_done" in flags:
+        nudge *= 0.97
+    if "title_race" in flags or "relegation_battle" in flags:
+        nudge *= 1.02
+    return max(0.94, min(1.06, nudge))
 
 
 def _pick_conservative(
@@ -281,6 +431,24 @@ def _build_rationale_metrics(
                 "label": "Table",
                 "value": f"{fixture.get('home', 'Home')} {hp['position']} · {fixture.get('away', 'Away')} {ap['position']}",
                 "note": f"{hp.get('points', '—')} vs {ap.get('points', '—')} pts.",
+            }
+        )
+    inj_n = len(fixture.get("fixture_injuries") or [])
+    if inj_n:
+        optional.append(
+            {
+                "label": "Injuries",
+                "value": f"{inj_n} listed",
+                "note": "API absence feed — may affect squad strength.",
+            }
+        )
+    mot = derive_motivation_context(fixture)
+    if mot.get("labels"):
+        optional.append(
+            {
+                "label": "Motivation",
+                "value": "; ".join(mot["labels"][:2]),
+                "note": "From table position + games remaining (deterministic).",
             }
         )
     dq = fixture.get("data_quality") or prediction.get("data_quality") or {}
@@ -480,11 +648,33 @@ def build_player_insight_block(fixture: Dict[str, Any]) -> Optional[Dict[str, An
     away = fixture.get("away_top_scorers") or []
     if not home and not away:
         return None
-    return {
+    meta = fixture.get("team_news_meta") or {}
+    out: Dict[str, Any] = {
         "home": home[:3],
         "away": away[:3],
         "source": "api_sports_topscorers",
     }
+    home_abs = meta.get("home_scorers_absent") or []
+    away_abs = meta.get("away_scorers_absent") or []
+    if home_abs:
+        out["home_scorers_absent"] = home_abs
+    if away_abs:
+        out["away_scorers_absent"] = away_abs
+    lineup_meta = fixture.get("lineup_meta") or {}
+    home_out = lineup_meta.get("home_scorers_out_of_xi") or []
+    away_out = lineup_meta.get("away_scorers_out_of_xi") or []
+    if home_out:
+        out["home_scorers_out_of_xi"] = home_out
+    if away_out:
+        out["away_scorers_out_of_xi"] = away_out
+    if fixture.get("lineup_confirmed"):
+        out["lineup_confirmed"] = True
+        fl = fixture.get("fixture_lineups") or {}
+        if fl.get("home"):
+            out["home_formation"] = (fl["home"] or {}).get("formation")
+        if fl.get("away"):
+            out["away_formation"] = (fl["away"] or {}).get("formation")
+    return out
 
 
 def _rationale_bullets(
@@ -529,6 +719,30 @@ def _rationale_bullets(
     inj_line = _injury_rationale_line(fixture)
     if inj_line:
         bullets.append(inj_line)
+    pi = build_player_insight_block(fixture)
+    if pi:
+        for side_key, label in (("home_scorers_absent", fixture.get("home", "Home")), ("away_scorers_absent", fixture.get("away", "Away"))):
+            for row in pi.get(side_key) or []:
+                name = row.get("name") or "?"
+                goals = row.get("goals")
+                g_txt = f" ({goals}g)" if goals is not None else ""
+                bullets.append(f"Top scorer {name}{g_txt} on API absence feed ({label}).")
+        for side_key, label in (
+            ("home_scorers_out_of_xi", fixture.get("home", "Home")),
+            ("away_scorers_out_of_xi", fixture.get("away", "Away")),
+        ):
+            for row in pi.get(side_key) or []:
+                name = row.get("name") or "?"
+                goals = row.get("goals")
+                g_txt = f" ({goals}g)" if goals is not None else ""
+                inj = " · also on injury feed" if row.get("on_injury_feed") else ""
+                bullets.append(f"Top scorer {name}{g_txt} not in confirmed XI ({label}){inj}.")
+    if not fixture.get("lineup_confirmed"):
+        from hibs_predictor.lineup_enrich import lineup_confidence_multiplier, minutes_to_kickoff
+
+        mins = minutes_to_kickoff(fixture)
+        if mins is not None and 0 <= mins <= 120:
+            bullets.append("Starting XIs not confirmed yet — treat model confidence cautiously near kickoff.")
     hp = fixture.get("home_position") or {}
     ap = fixture.get("away_position") or {}
     if hp.get("position") and ap.get("position"):
@@ -604,8 +818,10 @@ def build_structured_insight(
             "disclaimer": "Prices from book feeds; not a model recommendation.",
         }
 
-    lam_h = float(prediction.get("expected_goals_home") or prediction.get("lambda_side_home") or 1.2)
-    lam_a = float(prediction.get("expected_goals_away") or prediction.get("lambda_side_away") or 1.1)
+    lam_h, lam_a = _calibrated_lambdas_for_scoreline(prediction)
+    motivation = derive_motivation_context(fixture)
+    lam_h *= _motivation_lambda_nudge(motivation.get("home") or [])
+    lam_a *= _motivation_lambda_nudge(motivation.get("away") or [])
     probs = prediction.get("probabilities") or {}
     btts = float(prediction.get("btts_probability") or 0.5)
     over25 = float(prediction.get("over25_probability_pct") or 50) / 100.0
@@ -623,6 +839,9 @@ def build_structured_insight(
 
     margin = _env_float("HIBS_INSIGHT_PICK_MARGIN", 0.08)
     pick_key, pick_label, conf = _pick_conservative(probs, btts, over25, lam_h, lam_a, margin)
+    from hibs_predictor.lineup_enrich import lineup_confidence_multiplier
+
+    conf = round(conf * lineup_confidence_multiplier(fixture), 1)
     rationale = _rationale_bullets(
         fixture, prediction, pick_key, lam_h, lam_a, pick_label, conf
     )
@@ -644,9 +863,16 @@ def build_structured_insight(
         ),
         "confidence_pct": conf,
         "predicted_scoreline": scoreline,
+        "scoreline_note": (
+            f"Poisson argmax on calibrated λ {lam_h:.2f}–{lam_a:.2f} "
+            f"(xG source: {fixture.get('xg_source') or 'unknown'})."
+        ),
+        "motivation_context": motivation,
         "mode": "prediction",
         "disclaimer": "Conservative, data-backed view — not financial advice. Gamble responsibly 18+.",
     }
+    if motivation.get("labels"):
+        out["motivation_labels"] = motivation["labels"]
     if player_insight:
         out["player_insight"] = player_insight
     return out
@@ -734,6 +960,13 @@ def build_pick_menu(fixture: Dict[str, Any], prediction: Dict[str, Any]) -> List
             it["recommended"] = False
         menu.insert(0, _item("avoid", "AVOID", None, None))
         menu[0]["recommended"] = True
+    menu.sort(
+        key=lambda it: (
+            0 if it.get("recommended") else 1,
+            -(float(it.get("model_pct") or 0)),
+            str(it.get("label") or ""),
+        )
+    )
     return menu
 
 
@@ -908,7 +1141,6 @@ def _supplemental_tags(sup: Any) -> List[str]:
     for key, label in (
         ("understat", "understat"),
         ("understat_light", "understat"),
-        ("wikipedia_positions", "wikipedia"),
         ("soccerstats_positions", "soccerstats"),
         ("fbref_schedule", "fbref"),
         ("fbref_home_squad", "fbref"),
@@ -963,6 +1195,14 @@ def build_assistant_packet(fixture_row: Dict[str, Any]) -> Dict[str, Any]:
         "home_position": fixture_row.get("home_position") or {},
         "away_position": fixture_row.get("away_position") or {},
         "fixture_injuries": fixture_row.get("fixture_injuries") or [],
+        "attack_availability_home": fixture_row.get("attack_availability_home"),
+        "attack_availability_away": fixture_row.get("attack_availability_away"),
+        "team_news_meta": fixture_row.get("team_news_meta") or {},
+        "home_top_scorers": fixture_row.get("home_top_scorers") or [],
+        "away_top_scorers": fixture_row.get("away_top_scorers") or [],
+        "lineup_confirmed": bool(fixture_row.get("lineup_confirmed")),
+        "fixture_lineups": fixture_row.get("fixture_lineups"),
+        "lineup_meta": fixture_row.get("lineup_meta") or {},
         "xg_source": fixture_row.get("xg_source"),
         "structured_insight": p.get("structured_insight"),
         "pick_menu": p.get("pick_menu"),
