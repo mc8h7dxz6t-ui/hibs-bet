@@ -52,16 +52,17 @@ Coverage scoring: `src/hibs_predictor/data_quality.py` (`full_scope` ≥ **85%**
 
 ## Tournament focus (World Cup / internationals)
 
-When active (env or auto window **2026-06-11 → 2026-07-18**), fixture fetch defaults to `WORLD_CUP`, `NATIONS_LEAGUE`, and `EUROS` only — reducing domestic league API load on VPS. Dashboard defaults to **International** region; **All / UK / European** region chips trigger a full domestic fetch (`?domestic=1`).
+When active (env or auto window **2026-06-11 → 2026-07-18**), fixture fetch defaults to `WORLD_CUP`, `INTL_FRIENDLIES`, `NATIONS_LEAGUE`, and `EUROS` — reducing domestic league API load on VPS. Dashboard defaults to **International** region (chip shows all four); **All / UK / European** region chips trigger a full domestic fetch (`?domestic=1`).
 
 | Variable | Purpose |
 |----------|---------|
 | `HIBS_TOURNAMENT_FOCUS=worldcup` | Force focus on (`euros`, `international`, or `1` also work) |
 | `HIBS_TOURNAMENT_FOCUS=0` | Disable even during auto window — restores domestic leagues immediately after restart |
 | `HIBS_FOCUS_INTERNATIONAL=1` | Shorthand for international focus |
+| `HIBS_TOURNAMENT_INCLUDE_FRIENDLIES=1` | Add friendlies when focus is not `worldcup` (auto window includes them) |
 | `HIBS_TOURNAMENT_FOCUS_START` / `_END` | Override auto date window (ISO dates) |
 
-FotMob xG: `WORLD_CUP` (77), `EUROS` (50), `NATIONS_LEAGUE` (9806–9809). API-Football / Football-Data.org / Odds API mappings already include the three international codes.
+`INTL_FRIENDLIES`: API-Football league id **10**; no Football-Data.org code; no FotMob league-table id (use API fixture xG / form paths). FotMob xG: `WORLD_CUP` (77), `EUROS` (50), `NATIONS_LEAGUE` (9806–9809).
 
 ## Leagues still typically thin (no free xG table)
 

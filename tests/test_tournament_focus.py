@@ -142,6 +142,12 @@ def test_international_comp_codes_in_focus_list():
     assert "EPL" not in INTERNATIONAL_FOCUS_LEAGUE_CODES
 
 
+def test_intl_friendlies_dashboard_region():
+    from hibs_predictor.config import league_dashboard_region
+
+    assert league_dashboard_region(INTL_FRIENDLIES_CODE) == "international"
+
+
 def test_friendlies_in_worldcup_auto_window(monkeypatch):
     monkeypatch.setattr(
         "hibs_predictor.tournament_focus._today_utc",
@@ -170,10 +176,16 @@ def test_prioritize_fixtures_for_focus():
     fixtures = [
         {"league": "EPL", "kickoff_sort": "2026-06-10T12:00:00Z"},
         {"league": "WORLD_CUP", "kickoff_sort": "2026-06-11T15:00:00Z"},
+        {"league": INTL_FRIENDLIES_CODE, "kickoff_sort": "2026-06-11T14:00:00Z"},
         {"league": "NATIONS_LEAGUE", "kickoff_sort": "2026-06-10T18:00:00Z"},
     ]
     ordered = prioritize_fixtures_for_focus(fixtures, today=date(2026, 6, 20))
-    assert [f["league"] for f in ordered] == ["WORLD_CUP", "NATIONS_LEAGUE", "EPL"]
+    assert [f["league"] for f in ordered] == [
+        "WORLD_CUP",
+        INTL_FRIENDLIES_CODE,
+        "NATIONS_LEAGUE",
+        "EPL",
+    ]
 
 
 def test_fotmob_nations_league_comp_mapping():

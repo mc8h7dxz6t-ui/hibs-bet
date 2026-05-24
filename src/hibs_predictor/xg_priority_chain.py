@@ -104,6 +104,10 @@ def xg_priority_chain_dict() -> Dict[str, Any]:
             "code": "WORLD_CUP / EUROS / NATIONS_LEAGUE",
             "note": "FotMob ids 77 / 50 / 9806–9809 when HIBS_ENABLE_FOTMOB_XG; else API fixture xG and form-derived paths.",
         },
+        {
+            "code": "INTL_FRIENDLIES",
+            "note": "API-Football league 10; no FotMob table — API fixture xG, recent-match stats, or form/goals_proxy.",
+        },
     ]
     notes: List[str] = []
     if fbref_blocked:
