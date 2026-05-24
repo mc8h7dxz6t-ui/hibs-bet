@@ -1,9 +1,7 @@
 {% from '_dq_badge.html' import dq_badge %}
-{% macro table_team_label(t) -%}
-{%- if t is mapping -%}{{ t.get('name') or t.get('shortName') or '—' }}{%- else -%}{{ t }}{%- endif -%}
-{%- endmacro %}
     <div class="expand-panel" data-fixture-id="{{ fixture.id }}">
         {% set p = fixture.prediction %}
+        {% set model_ok = p and not (p.prediction_unavailable | default(false)) %}
         {% set hl10 = fixture.home_last10 %}
         {% set al10 = fixture.away_last10 %}
         {% set hp = fixture.home_position %}
@@ -139,10 +137,13 @@
                     <em>{{ fixture.xg_source or 'source unknown' }}</em>
                 </div>
                 <div class="rationale-tile">
-                    <span class="rt-label">Table Context</span>
-                    {% if hp and hp.position and ap and ap.position %}
-                    <strong>{{ fixture.home }} {{ hp.position }} · {{ fixture.away }} {{ ap.position }}</strong>
-                    <em>{% if hp.source or ap.source %}{{ hp.source or ap.source }} standings{% else %}standings loaded{% endif %}</em>
+                    <span class="rt-label">{% if fixture.is_cup_competition %}Cup / Stage{% else %}Table Context{% endif %}</span>
+                    {% if fixture.is_cup_competition %}
+                    <strong>{{ fixture.cup_round_label or fixture.league_name or 'Cup tie' }}</strong>
+                    <em>Knockout — recent form below; no league table.</em>
+                    {% elif hp|position_rank and ap|position_rank %}
+                    <strong>{{ fixture.home|table_team_label }} {{ hp|position_rank }} · {{ fixture.away|table_team_label }} {{ ap|position_rank }}</strong>
+                    <em>{% if hp.source or ap.source %}{{ hp.source or ap.source }} standings{% else %}standings loaded{% endif %}{% if fixture.home_table_form_warn or fixture.away_table_form_warn %} · ⚠ table vs form mismatch{% endif %}</em>
                     {% else %}
                     <strong>Not available</strong>
                     <em>No table row loaded for one or both teams.</em>
@@ -279,9 +280,18 @@
         </div>
 
         <div id="{{ tab_gid }}-form" class="tab-panel" data-group="{{ tab_gid }}">
-        <!-- LEAGUE TABLE -->
-        {% if (hp and hp.position) or (ap and ap.position) %}
+        <!-- LEAGUE TABLE / CUP -->
+        {% if fixture.is_cup_competition %}
+        <div class="section-title">🏆 {{ fixture.cup_round_label or 'Cup tie' }}</div>
+        <p style="font-size:0.78em;color:var(--muted);margin:0 0 10px;">No league table for knockout cups — use recent form (last 10) below.</p>
+        {% if fixture.home_table_form_warn or fixture.away_table_form_warn %}
+        <p style="font-size:0.72em;color:#fde68a;margin:0 0 10px;">⚠ Domestic table rank vs cup form may diverge — treat table badges cautiously.</p>
+        {% endif %}
+        {% elif (hp|position_rank) or (ap|position_rank) %}
         <div class="section-title">📊 League Table Position</div>
+        {% if fixture.home_table_form_warn or fixture.away_table_form_warn %}
+        <p style="font-size:0.72em;color:#fde68a;margin:0 0 8px;">⚠ Table rank vs recent form inconsistent for {% if fixture.home_table_form_warn %}{{ fixture.home }}{% endif %}{% if fixture.home_table_form_warn and fixture.away_table_form_warn %} · {% endif %}{% if fixture.away_table_form_warn %}{{ fixture.away }}{% endif %}.</p>
+        {% endif %}
         {% set table_rows = fixture.league_table_rows if fixture.league_table_rows is defined else [] %}
         {% if table_rows|length > 2 %}
         <details class="league-table-popover" style="margin-bottom:10px;">
@@ -290,8 +300,8 @@
                 <tr><th>Pos</th><th>Team</th><th>P</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th><th>Form</th></tr>
                 {% for row in table_rows %}
                 <tr class="{% if row.is_home_team %}home-row{% elif row.is_away_team %}away-row{% endif %}">
-                    <td>{{ row.position }}</td>
-                    <td>{% if row.is_home_team or row.is_away_team %}★ {% endif %}{{ table_team_label(row.team) }}</td>
+                    <td>{{ row.position|position_rank }}</td>
+                    <td>{% if row.is_home_team or row.is_away_team %}★ {% endif %}{{ row.team|table_team_label }}</td>
                     <td>{{ row.played }}</td>
                     <td>{{ row.goals_for }}</td>
                     <td>{{ row.goals_against }}</td>
@@ -305,10 +315,10 @@
         {% endif %}
         <table class="data-table" style="margin-bottom:14px;">
             <tr><th>Team</th><th>Pos</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th><th>Form</th></tr>
-            {% if hp and hp.position %}
+            {% if hp|position_rank %}
             <tr class="home-row">
-                <td><strong>{{ fixture.home }}</strong></td>
-                <td><strong>{{ hp.position }}</strong></td>
+                <td><strong>{{ fixture.home|table_team_label }}</strong></td>
+                <td><strong>{{ hp|position_rank }}</strong></td>
                 <td>{{ hp.played }}</td><td>{{ hp.won }}</td><td>{{ hp.drawn }}</td><td>{{ hp.lost }}</td>
                 <td>{{ hp.goals_for }}</td><td>{{ hp.goals_against }}</td>
                 {% set hp_gd = hp.get('goal_diff', 0) if hp is mapping else (hp.goal_diff|default(0)) %}
@@ -323,10 +333,10 @@
                 </td>
             </tr>
             {% endif %}
-            {% if ap and ap.position %}
+            {% if ap|position_rank %}
             <tr class="away-row">
-                <td><strong>{{ fixture.away }}</strong></td>
-                <td><strong>{{ ap.position }}</strong></td>
+                <td><strong>{{ fixture.away|table_team_label }}</strong></td>
+                <td><strong>{{ ap|position_rank }}</strong></td>
                 <td>{{ ap.played }}</td><td>{{ ap.won }}</td><td>{{ ap.drawn }}</td><td>{{ ap.lost }}</td>
                 <td>{{ ap.goals_for }}</td><td>{{ ap.goals_against }}</td>
                 {% set ap_gd = ap.get('goal_diff', 0) if ap is mapping else (ap.goal_diff|default(0)) %}

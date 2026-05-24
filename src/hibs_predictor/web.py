@@ -52,7 +52,22 @@ from hibs_predictor.betting_engine import (
 )
 from hibs_predictor.health_probe import gather_health
 from hibs_predictor.display_tz import display_tz_label, fixture_window_start_utc, fixture_window_end_utc
-from hibs_predictor.fixture_utils import display_competition_title
+from hibs_predictor.fixture_utils import (
+    cup_round_label,
+    display_competition_title,
+    fixture_status_short,
+    fixture_team_name,
+    format_goal_scorers_line,
+    is_cup_competition,
+    is_finished_fixture,
+    normalize_fixture_display,
+    normalize_position_dict,
+    normalize_position_rank,
+    position_points,
+    position_rank,
+    table_form_inconsistent,
+    table_team_display,
+)
 from hibs_predictor.media_config import (
     SKY_SPORTS_FOOTBALL_YOUTUBE_CHANNEL_URL,
     SKY_SPORTS_FOOTBALL_YOUTUBE_PRESET_DISPLAY,
@@ -68,6 +83,21 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
 app.config["JSON_SORT_KEYS"] = False
 init_auth(app)
+
+
+@app.template_filter("table_team_label")
+def _jinja_table_team_label(value: Any) -> str:
+    label = table_team_display(value)
+    return label or "—"
+
+
+@app.template_filter("position_rank")
+def _jinja_position_rank(value: Any) -> str:
+    if isinstance(value, dict):
+        rank = position_rank(value)
+        return str(rank) if rank is not None else ""
+    rank = normalize_position_rank(value)
+    return str(rank) if rank is not None else str(value or "")
 
 
 @app.after_request
@@ -927,11 +957,12 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
 
         row = {
             "id": fixture.get("fixture", {}).get("id"),
-            "home": fixture.get("home", {}).get("name", "?"),
-            "away": fixture.get("away", {}).get("name", "?"),
+            "home": home_nm or "?",
+            "away": away_nm or "?",
             "home_id": home_id,
             "away_id": away_id,
             "date": fixture.get("date"),
+            "fixture_status": fixture_status_short(fixture),
             "league": league_code,
             "league_name": title,
             "competition_meta": comp_meta,
@@ -1038,15 +1069,7 @@ def _safe_int_value(value: Any, default: int = 0) -> int:
 
 def _table_team_display(value: Any) -> str:
     """Render-safe team label from API dict or plain string."""
-    if isinstance(value, dict):
-        return str(
-            value.get("name")
-            or value.get("shortName")
-            or value.get("teamName")
-            or value.get("tla")
-            or ""
-        ).strip()
-    return str(value or "").strip()
+    return table_team_display(value)
 
 
 def _table_team_id(value: Any) -> Optional[int]:
@@ -1059,19 +1082,7 @@ def _table_team_id(value: Any) -> Optional[int]:
 
 def _normalize_position_rank(value: Any) -> Optional[int]:
     """Integer table rank; never pass through nested team dicts."""
-    if isinstance(value, dict):
-        if value.get("rank") is not None:
-            n = _safe_int_value(value.get("rank"), 0)
-            return n if 0 < n < 500 else None
-        inner = value.get("position")
-        if inner is not None and not isinstance(inner, dict):
-            n = _safe_int_value(inner, 0)
-            return n if 0 < n < 500 else None
-        return None
-    if value in (None, "", "?"):
-        return None
-    n = _safe_int_value(value, 0)
-    return n if 0 < n < 500 else None
+    return normalize_position_rank(value)
 
 
 _TEAM_CANONICAL_ALIASES = {
@@ -1153,24 +1164,7 @@ def _normalize_table_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def _normalize_position_dict(pos: Any) -> Dict[str, Any]:
     """Sanitize home/away position blobs attached to fixtures."""
-    if not isinstance(pos, dict):
-        return {}
-    out = dict(pos)
-    rank = _normalize_position_rank(out.get("position", out.get("rank")))
-    if rank is not None:
-        out["position"] = rank
-    elif "position" in out:
-        out.pop("position", None)
-    team_name = _table_team_display(out.get("team"))
-    if team_name:
-        out["team"] = team_name
-    tid = _table_team_id(out.get("team"))
-    if tid is not None:
-        out["team_id"] = tid
-    for key in ("played", "won", "drawn", "lost", "goals_for", "goals_against", "goal_diff", "points"):
-        if key in out:
-            out[key] = _safe_int_value(out.get(key))
-    return out
+    return normalize_position_dict(pos)
 
 
 def _table_row_dedupe_key(row: Dict[str, Any]) -> str:
@@ -1321,6 +1315,8 @@ def _fetch_full_table_rows(league_code: str, *, live_fetch: Optional[bool] = Non
     configured documented API clients and falls back to previous season rows
     when the current/ended competition has no table in the active season id.
     """
+    if is_cup_competition(league_code):
+        return []
     from hibs_predictor.season import season_candidates
 
     league = LEAGUES.get(league_code) or {}
@@ -1407,7 +1403,7 @@ def _fixture_position_rows(fixtures: List[Dict[str, Any]]) -> Dict[str, List[Dic
         if not league_code:
             continue
         for team_key, pos_key in (("home", "home_position"), ("away", "away_position")):
-            row = _table_row_from_position(str(fixture.get(team_key) or ""), fixture.get(pos_key) or {})
+            row = _table_row_from_position(fixture_team_name(fixture, team_key), fixture.get(pos_key) or {})
             if row:
                 by_league.setdefault(league_code, []).append(row)
     return by_league
@@ -1513,16 +1509,39 @@ def _snapshot_for_team(
     return []
 
 
+def _attach_cup_and_form_flags(fixtures: List[Dict[str, Any]]) -> None:
+    for fixture in fixtures:
+        lc = fixture.get("league") or ""
+        fixture["is_cup_competition"] = is_cup_competition(lc)
+        if fixture["is_cup_competition"]:
+            fixture["cup_round_label"] = cup_round_label(fixture)
+        hp = fixture.get("home_position") or {}
+        ap = fixture.get("away_position") or {}
+        fixture["home_table_form_warn"] = table_form_inconsistent(hp, fixture.get("home_last10") or [])
+        fixture["away_table_form_warn"] = table_form_inconsistent(ap, fixture.get("away_last10") or [])
+
+
 def _attach_table_snapshots(fixtures: List[Dict[str, Any]], tables: List[Dict[str, Any]]) -> None:
     by_code = {t["code"]: t for t in tables}
     for fixture in fixtures:
+        normalize_fixture_display(fixture)
         fixture["home_position"] = _normalize_position_dict(fixture.get("home_position"))
         fixture["away_position"] = _normalize_position_dict(fixture.get("away_position"))
         league_code = fixture.get("league") or ""
+        is_cup = is_cup_competition(league_code)
+        fixture["is_cup_competition"] = is_cup
+        if is_cup:
+            fixture["cup_round_label"] = cup_round_label(fixture)
+            fixture["league_table_rows"] = []
+            fixture["home_table_snapshot"] = []
+            fixture["away_table_snapshot"] = []
+            fixture["league_table_name"] = fixture.get("league_name") or league_code
+            fixture["league_table_status_note"] = "Knockout cup — no league table; see round and recent form."
+            continue
         tbl = by_code.get(league_code) or {}
         rows = [_normalize_table_row(r) for r in (tbl.get("rows") or [])]
-        home = str(fixture.get("home") or "")
-        away = str(fixture.get("away") or "")
+        home = fixture_team_name(fixture, "home")
+        away = fixture_team_name(fixture, "away")
         home_key = _canonical_team_key(home)
         away_key = _canonical_team_key(away)
         full_rows: List[Dict[str, Any]] = []
@@ -1551,6 +1570,16 @@ def _attach_table_snapshots(fixtures: List[Dict[str, Any]], tables: List[Dict[st
         )
 
 
+def _upcoming_fixtures(all_fixtures: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Drop finished matches from the main upcoming dashboard list (still in Recent results)."""
+    return [f for f in all_fixtures if not is_finished_fixture(f)]
+
+
+def _bundle_fixtures(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Upcoming-only fixture rows for dashboard/insights (finished same-day dropped)."""
+    return data.get("upcoming") or _upcoming_fixtures(data.get("all") or [])
+
+
 def _finalize_fixture_bundle(
     all_fixtures: List[Dict[str, Any]],
     *,
@@ -1559,6 +1588,8 @@ def _finalize_fixture_bundle(
 ) -> Dict[str, Any]:
     from hibs_predictor.display_tz import enrich_fixtures_kickoff
 
+    for row in all_fixtures:
+        normalize_fixture_display(row)
     all_fixtures = enrich_fixtures_kickoff(all_fixtures)
     for row in all_fixtures:
         row["dashboard_region"] = league_dashboard_region(str(row.get("league") or ""))
@@ -1569,34 +1600,38 @@ def _finalize_fixture_bundle(
     all_fixtures.sort(key=lambda x: x.get("kickoff_sort") or x.get("date") or "")
     league_tables = _build_league_tables(all_fixtures, include_live=False, include_domestic=include_domestic)
     _attach_table_snapshots(all_fixtures, league_tables)
-    value_bets_only = [f for f in all_fixtures if f.get("has_value_bet")]
+    _attach_cup_and_form_flags(all_fixtures)
+    upcoming = _upcoming_fixtures(all_fixtures)
+    value_bets_only = [f for f in upcoming if f.get("has_value_bet")]
     value_bets_only.sort(key=lambda x: -(x.get("prediction", {}).get("best_bet_roi") or 0))
     fixtures_by_league: Dict[str, List] = {c: [] for c in _dashboard_league_order(include_domestic=include_domestic)}
-    for f in all_fixtures:
+    for f in upcoming:
         lc = f.get("league")
         if lc in fixtures_by_league:
             fixtures_by_league[lc].append(f)
     for c in fixtures_by_league:
         fixtures_by_league[c].sort(key=lambda x: x.get("kickoff_sort") or x.get("date") or "")
     by_region: Dict[str, List] = {r: [] for r in LEAGUE_REGIONS}
-    for f in all_fixtures:
+    for f in upcoming:
         for region, codes in LEAGUE_REGIONS.items():
             if f.get("league") in codes:
                 by_region[region].append(f)
     coverage_summary = _fixture_coverage_summary(
-        fixtures_by_league, len(all_fixtures), include_domestic=include_domestic
+        fixtures_by_league, len(upcoming), include_domestic=include_domestic
     )
     return {
         "all": all_fixtures,
+        "upcoming": upcoming,
         "by_region": by_region,
         "by_league": fixtures_by_league,
-        "dashboard_days": _dashboard_days_groups(all_fixtures, include_domestic=include_domestic),
+        "dashboard_days": _dashboard_days_groups(upcoming, include_domestic=include_domestic),
         "value_bets": value_bets_only,
-        "total": len(all_fixtures),
+        "total": len(upcoming),
+        "total_including_finished": len(all_fixtures),
         "value_bet_count": len(value_bets_only),
         "fetch_days": _fetch_window_days(),
         "has_api_clients": ("api_sports" in aggregator.clients or "football_data_org" in aggregator.clients),
-        "sidebar_upcoming": _sidebar_upcoming(all_fixtures),
+        "sidebar_upcoming": _sidebar_upcoming(upcoming),
         "league_tables": league_tables,
         "fixture_coverage": coverage_summary,
     }
@@ -1761,8 +1796,8 @@ def _sidebar_upcoming(all_fixtures: List[Dict[str, Any]], limit: int = 80) -> Li
         rows.append(
             {
                 "id": fid,
-                "home": f.get("home", "?"),
-                "away": f.get("away", "?"),
+                "home": fixture_team_name(f, "home") or f.get("home", "?"),
+                "away": fixture_team_name(f, "away") or f.get("away", "?"),
                 "league": f.get("league", ""),
                 "league_name": f.get("league_name", ""),
                 "dashboard_region": f.get("dashboard_region")
@@ -1931,6 +1966,7 @@ def index():
 
     attach_live = not _dashboard_lite_mode()
     data = fetch_all_fixtures(attach_live=attach_live, include_domestic=include_domestic)
+    upcoming = _bundle_fixtures(data)
     from hibs_predictor.recent_results import fetch_recent_results
 
     recent_results = fetch_recent_results(aggregator, include_domestic=include_domestic)
@@ -1938,12 +1974,12 @@ def index():
         assistant_packets: List[Dict[str, Any]] = []
         assistant_bundle: Dict[str, Any] = {"packets": [], "recommendations": [], "acca_candidates": [], "count": 0}
     else:
-        assistant_bundle = _assistant_bundle(data["all"])
+        assistant_bundle = _assistant_bundle(upcoming)
         assistant_packets = assistant_bundle["packets"]
     fixture_coverage = data.get("fixture_coverage", {})
     html = render_template(
         "dashboard.html",
-        all_fixtures=data["all"],
+        all_fixtures=upcoming,
         by_region=data["by_region"],
         by_league=data["by_league"],
         dashboard_days=data["dashboard_days"],
@@ -1990,7 +2026,8 @@ def index():
 def api_assistant_snapshot():
     """Structured insight packets + acca/market recommendations for the Betting Assistant."""
     data = fetch_all_fixtures(attach_live=True)
-    bundle = _assistant_bundle(data["all"])
+    upcoming = _bundle_fixtures(data)
+    bundle = _assistant_bundle(upcoming)
     return jsonify(bundle)
 
 
@@ -1999,7 +2036,7 @@ def api_assistant_snapshot():
 def api_assistant_recommendations():
     """Acca and market recommendations only (packets omitted for lighter payload)."""
     data = fetch_all_fixtures()
-    bundle = _assistant_bundle(data["all"])
+    bundle = _assistant_bundle(_bundle_fixtures(data))
     return jsonify(
         {
             "recommendations": bundle.get("recommendations"),
@@ -2020,7 +2057,7 @@ def api_assistant_chat():
         return jsonify({"error": "question required"}), 400
     fixture_id = payload.get("fixture_id")
     data = fetch_all_fixtures(attach_live=True)
-    bundle = _assistant_bundle(data["all"])
+    bundle = _assistant_bundle(_bundle_fixtures(data))
     legs = payload.get("legs")
     if legs is not None and not isinstance(legs, list):
         legs = None
@@ -2045,7 +2082,7 @@ def api_assistant_acca_review():
     if not isinstance(legs, list) or not legs:
         return jsonify({"error": "legs array required"}), 400
     data = fetch_all_fixtures(attach_live=True)
-    packets = _assistant_packets_from_fixtures(data["all"])
+    packets = _assistant_packets_from_fixtures(_bundle_fixtures(data))
     return jsonify(review_acca_legs(legs, packets))
 
 
@@ -2145,7 +2182,8 @@ def api_insights():
     from hibs_predictor.insights import build_insights
 
     data = fetch_all_fixtures()
-    return jsonify(build_insights(data["all"]))
+    upcoming = _bundle_fixtures(data)
+    return jsonify(build_insights(upcoming))
 
 
 @app.route("/api/acca/recommendations")
@@ -2156,7 +2194,8 @@ def api_acca_recommendations():
     from hibs_predictor.match_insight import build_assistant_packet
 
     data = fetch_all_fixtures()
-    packets = [build_assistant_packet(f) for f in data["all"]]
+    upcoming = _bundle_fixtures(data)
+    packets = [build_assistant_packet(f) for f in upcoming]
     return jsonify(build_acca_recommendations(packets))
 
 
@@ -2167,8 +2206,9 @@ def insights_page():
     from hibs_predictor.insights import build_insights
 
     data = fetch_all_fixtures()
-    insights = build_insights(data["all"])
-    assistant_bundle = _assistant_bundle(data["all"])
+    upcoming = _bundle_fixtures(data)
+    insights = build_insights(upcoming)
+    assistant_bundle = _assistant_bundle(upcoming)
     fixture_coverage = data.get("fixture_coverage") or {}
     return render_template(
         "insights.html",
@@ -2223,7 +2263,7 @@ def settings_page():
 @login_required
 def acca_builder():
     data = fetch_all_fixtures()
-    return render_template("acca_builder.html", fixtures=data["all"])
+    return render_template("acca_builder.html", fixtures=_bundle_fixtures(data))
 
 
 @app.route("/status")

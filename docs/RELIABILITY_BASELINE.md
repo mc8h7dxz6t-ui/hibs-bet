@@ -48,6 +48,9 @@ sudo systemctl restart hibs-bet
 3. **Lighter load** — set `HIBS_FETCH_DAYS=5` or `HIBS_DASHBOARD_LITE=1` if home page times out.
 4. **World Cup window** — remove `HIBS_TOURNAMENT_FOCUS=0` or set `HIBS_TOURNAMENT_FOCUS=worldcup` from 2026-06-11.
 5. **Injury sensitivity** — lower `HIBS_INJURY_LAMBDA_MAX_CUT` (e.g. `0.05`) for a gentler effect.
+6. **Cup load** — cups skip full standings fetch automatically; set `HIBS_SKIP_API_STANDINGS=1` if quota is tight (form/last-10 still enrich).
+7. **Recent results scorers** — set `HIBS_RESULTS_FETCH_EVENTS=1` and optionally `HIBS_RESULTS_MAX_EVENT_FETCHES=12` to attach API goal scorers (uses cache; off by default).
+8. **Shared fixture cache** — dashboard and `/insights` reuse the same `all_fixtures_*` disk cache within TTL; avoid `?refresh=1` unless clearing stale data.
 
 Re-run the apply script after changing baseline keys; it dedupes `HIBS_*` lines and preserves your API keys.
 

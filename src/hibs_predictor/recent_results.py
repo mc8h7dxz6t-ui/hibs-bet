@@ -15,7 +15,11 @@ from hibs_predictor.display_tz import (
     display_timezone,
     parse_kickoff_utc,
 )
-from hibs_predictor.fixture_utils import display_competition_title
+from hibs_predictor.fixture_utils import (
+    display_competition_title,
+    format_goal_scorers_line,
+    goal_scorers_from_events,
+)
 from hibs_predictor.season import CALENDAR_YEAR_LEAGUES
 from hibs_predictor.tournament_focus import (
     effective_dashboard_league_order,
@@ -32,6 +36,58 @@ _FDO_FINISHED = frozenset({"FINISHED", "AWARDED"})
 
 def _env_truthy(name: str) -> bool:
     return (os.getenv(name) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+_EVENTS_CACHE_PREFIX = "api_sports_fixture_events_"
+
+
+def _results_fetch_events() -> bool:
+    return _env_truthy("HIBS_RESULTS_FETCH_EVENTS")
+
+
+def _results_max_event_fetches() -> int:
+    try:
+        return max(0, min(30, int(os.getenv("HIBS_RESULTS_MAX_EVENT_FETCHES", "12"))))
+    except ValueError:
+        return 12
+
+
+def _enrich_goal_scorers(rows: List[Dict[str, Any]], aggregator: Any, cache: Cache) -> None:
+    """Attach goal scorers when API events are cached or a small fetch budget allows."""
+    if not rows:
+        return
+    client = (getattr(aggregator, "clients", None) or {}).get("api_sports")
+    budget = _results_max_event_fetches() if _results_fetch_events() else 0
+    for row in rows:
+        embedded = row.get("events")
+        if isinstance(embedded, list) and embedded:
+            scorers = goal_scorers_from_events(embedded)
+            if scorers:
+                row["goal_scorers_line"] = format_goal_scorers_line(scorers)
+            continue
+        fid = row.get("id")
+        if fid is None or not client:
+            continue
+        try:
+            fid_int = int(fid)
+        except (TypeError, ValueError):
+            continue
+        ck = f"{_EVENTS_CACHE_PREFIX}{fid_int}"
+        events = cache.get(ck, ttl_hours=6.0)
+        if events is None and budget > 0:
+            if not client.rate_limiter.check_rate_limit("api_sports"):
+                continue
+            try:
+                data = client._get_json("fixtures/events", params={"fixture": fid_int}, use_cache=False)
+                events = data.get("response") if isinstance(data.get("response"), list) else []
+                cache.set(ck, events, ttl_hours=6.0)
+                budget -= 1
+            except Exception:
+                events = []
+        if events:
+            scorers = goal_scorers_from_events(events)
+            if scorers:
+                row["goal_scorers_line"] = format_goal_scorers_line(scorers)
 
 
 def results_days() -> int:
@@ -455,6 +511,9 @@ def fetch_recent_results(
                 print(f"[Recent results] {code}: {exc!r}")
 
     bundle = finalize_results_bundle(list(combined.values()))
+    if bundle.get("all"):
+        _enrich_goal_scorers(bundle["all"], aggregator, cache)
+        bundle = finalize_results_bundle(bundle["all"])
     if bundle.get("total"):
         cache.set(ck, bundle, ttl_hours=ttl)
     return bundle

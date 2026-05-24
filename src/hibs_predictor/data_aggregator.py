@@ -22,7 +22,7 @@ from hibs_predictor.config import LEAGUES
 from hibs_predictor.cache import Cache
 from hibs_predictor.data_quality import _has_stats, compute_fixture_data_quality
 from hibs_predictor.scrapers.supplemental import collect_supplemental
-from hibs_predictor.fixture_utils import coerce_team_id, fixture_team_id, fixture_team_name
+from hibs_predictor.fixture_utils import coerce_team_id, fixture_team_id, fixture_team_name, normalize_position_dict
 from hibs_predictor.scrapers import soccerstats_standings as soccerstats_standings
 
 
@@ -760,8 +760,8 @@ class DataAggregator:
                 if os.getenv("HIBS_DEBUG", "0").lower() in ("1", "true", "yes"):
                     print(f"[enrich soccerstats_positions] {league_code} fid={fixture_id_str}: {exc!r}")
 
-        enriched["home_position"] = hp
-        enriched["away_position"] = ap
+        enriched["home_position"] = normalize_position_dict(hp)
+        enriched["away_position"] = normalize_position_dict(ap)
 
         try:
             enriched["xg_home"], enriched["xg_away"], enriched["xg_source"] = self._fetch_expected_goals(

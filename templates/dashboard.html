@@ -203,7 +203,7 @@
                             <h4 class="lg-heading results-lg-heading">{{ lg.name|upper }} <span class="lg-count">({{ lg.fixtures|length }})</span></h4>
                             <div class="results-scroll-wrap">
                                 <div class="results-head" aria-hidden="true">
-                                    <span>KO</span><span class="res-h-match">MATCH</span><span class="res-h-score">SCORE</span><span class="res-h-xg">xG</span>
+                                    <span>KO</span><span class="res-h-match">MATCH</span><span class="res-h-score">SCORE</span><span class="res-h-scorers">GOALS</span><span class="res-h-xg">xG</span>
                                 </div>
                                 {% for row in lg.fixtures %}
                                 <div class="results-row"
@@ -213,6 +213,7 @@
                                     <span class="res-ko">{{ row.kickoff_time }}</span>
                                     <span class="res-match">{{ row.home }} <span class="res-vs">v</span> {{ row.away }}</span>
                                     <span class="res-score">{{ row.scoreline }}</span>
+                                    <span class="res-scorers">{% if row.goal_scorers_line %}{{ row.goal_scorers_line }}{% else %}—{% endif %}</span>
                                     <span class="res-xg">{% if row.has_xg %}{{ "%.1f"|format(row.xg_home) }}–{{ "%.1f"|format(row.xg_away) }}{% else %}—{% endif %}</span>
                                 </div>
                                 {% endfor %}

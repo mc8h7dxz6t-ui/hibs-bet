@@ -83,6 +83,39 @@ def test_normalize_table_row_coerces_nested_position_team():
     assert row["team"] == "Tottenham"
 
 
+def test_normalize_table_row_team_dict_in_team_field():
+    raw = {
+        "position": 17,
+        "team": {"id": 47, "name": "Tottenham"},
+        "points": 38,
+        "played": 20,
+    }
+    row = _normalize_table_row(raw)
+    assert row["team"] == "Tottenham"
+    assert row["position"] == 17
+
+
+def test_fixture_utils_table_display_and_rank():
+    from hibs_predictor.fixture_utils import (
+        normalize_fixture_display,
+        position_rank,
+        table_team_display,
+    )
+
+    assert table_team_display({"id": 47, "name": "Tottenham"}) == "Tottenham"
+    assert position_rank({"position": {"id": 47, "name": "Tottenham"}, "rank": 17}) == 17
+    fx = {
+        "home": {"id": 47, "name": "Tottenham"},
+        "away": {"id": 45, "name": "Everton"},
+        "home_position": {"position": {"id": 47, "name": "Tottenham"}, "rank": 17, "points": 38},
+        "away_position": {"position": 12, "points": 49},
+    }
+    normalize_fixture_display(fx)
+    assert fx["home"] == "Tottenham"
+    assert fx["away"] == "Everton"
+    assert position_rank(fx["home_position"]) == 17
+
+
 def test_attach_table_snapshots_hibs_alias():
     fixtures = [
         {

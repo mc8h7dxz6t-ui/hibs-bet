@@ -425,14 +425,16 @@ def _build_rationale_metrics(
             )
     hp = fixture.get("home_position") or {}
     ap = fixture.get("away_position") or {}
-    hp_rank = hp.get("position") if isinstance(hp.get("position"), int) else None
-    ap_rank = ap.get("position") if isinstance(ap.get("position"), int) else None
+    from hibs_predictor.fixture_utils import fixture_team_name, position_points, position_rank
+
+    hp_rank = position_rank(hp)
+    ap_rank = position_rank(ap)
     if hp_rank and ap_rank:
         optional.append(
             {
                 "label": "Table",
-                "value": f"{fixture.get('home', 'Home')} {hp_rank} · {fixture.get('away', 'Away')} {ap_rank}",
-                "note": f"{hp.get('points', '—')} vs {ap.get('points', '—')} pts.",
+                "value": f"{fixture_team_name(fixture, 'home') or 'Home'} {hp_rank} · {fixture_team_name(fixture, 'away') or 'Away'} {ap_rank}",
+                "note": f"{position_points(hp) or '—'} vs {position_points(ap) or '—'} pts.",
             }
         )
     inj_n = len(fixture.get("fixture_injuries") or [])
@@ -747,10 +749,14 @@ def _rationale_bullets(
             bullets.append("Starting XIs not confirmed yet — treat model confidence cautiously near kickoff.")
     hp = fixture.get("home_position") or {}
     ap = fixture.get("away_position") or {}
-    if hp.get("position") and ap.get("position"):
+    from hibs_predictor.fixture_utils import fixture_team_name, position_rank
+
+    hp_rank = position_rank(hp)
+    ap_rank = position_rank(ap)
+    if hp_rank and ap_rank:
         bullets.append(
-            f"Table: {fixture.get('home', 'Home')} {hp.get('position')} · "
-            f"{fixture.get('away', 'Away')} {ap.get('position')}."
+            f"Table: {fixture_team_name(fixture, 'home') or 'Home'} {hp_rank} · "
+            f"{fixture_team_name(fixture, 'away') or 'Away'} {ap_rank}."
         )
     dq = fixture.get("data_quality") or prediction.get("data_quality") or {}
     if dq.get("score_pct") is not None:

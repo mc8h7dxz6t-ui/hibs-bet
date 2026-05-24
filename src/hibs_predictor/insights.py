@@ -11,6 +11,7 @@ from hibs_predictor.assistant_recommendations import (
     is_analyzable,
 )
 from hibs_predictor.data_coverage import data_coverage_status
+from hibs_predictor.fixture_utils import fixture_team_name, position_rank
 from hibs_predictor.match_insight import build_assistant_packet
 from hibs_predictor.prediction_log import report_summary_dict
 
@@ -102,6 +103,7 @@ def _data_quality_alerts(packets: List[Dict[str, Any]], limit: int = 8) -> List[
     return alerts[:limit]
 
 
+
 def _form_xg_table_angles(packets: List[Dict[str, Any]], limit: int = 8) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for pkt in packets:
@@ -113,8 +115,11 @@ def _form_xg_table_angles(packets: List[Dict[str, Any]], limit: int = 8) -> List
         bullets: List[str] = []
         if ps.get("xg_home") is not None and ps.get("xg_away") is not None:
             bullets.append(f"xG lean {ps.get('xg_home')}–{ps.get('xg_away')} from {pkt.get('xg_source') or 'model blend'}.")
-        if hp.get("position") and ap.get("position"):
-            bullets.append(f"Table: {pkt.get('home')} {hp.get('position')} vs {pkt.get('away')} {ap.get('position')}.")
+        if position_rank(hp) and position_rank(ap):
+            bullets.append(
+                f"Table: {fixture_team_name(pkt, 'home') or pkt.get('home')} {position_rank(hp)} vs "
+                f"{fixture_team_name(pkt, 'away') or pkt.get('away')} {position_rank(ap)}."
+            )
         if hf.get("played") or af.get("played"):
             bullets.append(
                 f"Form: {pkt.get('home')} W{hf.get('wins', 0)} D{hf.get('draws', 0)} L{hf.get('losses', 0)}; "
