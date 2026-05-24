@@ -56,6 +56,16 @@ def _http_get(url: str, *, timeout: int = 30) -> requests.Response:
         return requests.get(url, headers=_HEADERS, timeout=timeout)
 
 
+def curl_cffi_available() -> bool:
+    """True when curl_cffi is installed (browser TLS impersonation for datacenter IPs)."""
+    try:
+        import curl_cffi  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 def fetch_fbref_html(
     url: str,
     *,
@@ -173,6 +183,7 @@ def squad_row_for_team(rows: List[Dict[str, Any]], team_name: str) -> Optional[D
 
 def probe_squad_table(league_code: str = "EPL") -> Dict[str, Any]:
     """Health/reliability probe — never raises; surfaces 403 as blocked."""
+    cffi = curl_cffi_available()
     if fbref_blocked_env():
         return {
             "ok": False,
@@ -180,7 +191,11 @@ def probe_squad_table(league_code: str = "EPL") -> Dict[str, Any]:
             "skipped_env": True,
             "http_status": None,
             "squad_rows": 0,
-            "error": "HIBS_FBREF_BLOCKED=1 — FBref HTML skipped on this host (optional)",
+            "curl_cffi": cffi,
+            "error": (
+                "HIBS_FBREF_BLOCKED=1 — FBref HTML skipped on this host (optional). "
+                "xG falls back to Understat + FotMob + API recent-match xG."
+            ),
         }
     try:
         rows = fetch_squad_stats_table(league_code)
@@ -189,15 +204,28 @@ def probe_squad_table(league_code: str = "EPL") -> Dict[str, Any]:
             "ok": ok,
             "blocked": False,
             "squad_rows": len(rows),
+            "curl_cffi": cffi,
             "error": None if ok else f"squad_rows={len(rows)}",
         }
     except FbrefFetchError as exc:
+        err = str(exc)[:160]
+        if exc.blocked and not cffi:
+            err = (
+                f"{err} curl_cffi not installed — pip install curl_cffi may help on some networks; "
+                "datacenter VPS often still 403 — use HIBS_FBREF_BLOCKED=1."
+            )
+        elif exc.blocked and cffi:
+            err = (
+                f"{err} curl_cffi present but still blocked — typical on datacenter VPS; "
+                "set HIBS_FBREF_BLOCKED=1 and rely on Understat/FotMob/API xG."
+            )
         return {
             "ok": False,
             "blocked": exc.blocked,
             "http_status": exc.http_status,
             "squad_rows": 0,
-            "error": str(exc)[:160],
+            "curl_cffi": cffi,
+            "error": err,
         }
     except Exception as exc:
         return {
@@ -205,5 +233,6 @@ def probe_squad_table(league_code: str = "EPL") -> Dict[str, Any]:
             "blocked": False,
             "http_status": None,
             "squad_rows": 0,
+            "curl_cffi": cffi,
             "error": str(exc)[:160],
         }

@@ -63,6 +63,29 @@ strip_unwanted_env() {
   mv "$tmp" "$f"
 }
 
+dedupe_hibs_env() {
+  local f="$1"
+  [[ -f "$f" ]] || return 0
+  local tmp
+  tmp="$(mktemp)"
+  awk '
+    /^HIBS_[A-Za-z0-9_]+=/ {
+      key = $0
+      sub(/=.*/, "", key)
+      if (!(key in seen)) { order[++n] = key; seen[key] = 1 }
+      hibs[key] = $0
+      next
+    }
+    { lines[++m] = $0 }
+    END {
+      for (i = 1; i <= m; i++) print lines[i]
+      for (i = 1; i <= n; i++) print hibs[order[i]]
+    }
+  ' "$f" >"$tmp"
+  mv "$tmp" "$f"
+  echo "    Deduped HIBS_* keys in ${f}"
+}
+
 upsert_safe_env() {
   local f="$1"
   touch "$f"
@@ -80,6 +103,7 @@ upsert_safe_env() {
     ' "$f" >"$tmp"
     mv "$tmp" "$f"
   fi
+  dedupe_hibs_env "$f"
   cat >>"$f" <<EOF
 
 ${SAFE_MARKER}
@@ -88,14 +112,19 @@ HIBS_MAX_DATA=1
 HIBS_DASHBOARD_LITE=0
 HIBS_ALWAYS_DEEP_SCRAPE=0
 HIBS_SKIP_HEAVY_WHEN_API_STRONG=1
-HIBS_FIXTURE_FETCH_WORKERS=3
+HIBS_FIXTURE_FETCH_WORKERS=2
+HIBS_ENRICH_API_SEM=1
 HIBS_WARM_FIXTURE_CACHE=1
 HIBS_ENABLE_PLAYER_INSIGHT=1
 HIBS_ENABLE_LINEUP_FETCH=1
+HIBS_LINEUP_FETCH_MAX_HOURS=6
+HIBS_SKIP_API_SQUAD_DEPTH=1
 HIBS_USE_INJURY_LAMBDA_ADJUST=1
 HIBS_FBREF_BLOCKED=1
 HIBS_PREDICTION_LOG_ENABLED=1
+HIBS_CLV_LOG_ENABLED=1
 EOF
+  dedupe_hibs_env "$f"
   chown www-data:www-data "$f"
   chmod 640 "$f"
   echo "    Applied safer full-data flags to ${f}"
@@ -136,6 +165,8 @@ systemctl status hibs-bet --no-pager || true
 
 echo ""
 echo "Done. Safer profile: 7-day window, MAX_DATA=1, live dashboard, skip heavy when APIs strong."
+echo "Tournament focus: auto window 2026-06-11 → 2026-07-18 (internationals only by default)."
+echo "  Disable on VPS now: echo 'HIBS_TOURNAMENT_FOCUS=0' >> ${ENV_FILE} && systemctl restart hibs-bet"
 echo "Test:"
 echo "  curl -sS --max-time 30 -o /dev/null -w 'health %{http_code}\n' http://127.0.0.1:8000/api/health"
 echo "  curl -sS --max-time 200 -o /dev/null -w 'home %{http_code}\n' http://127.0.0.1:8000/"

@@ -11,6 +11,7 @@ Audit of what hibs-bet already fetches, what is safe to use, and a phased plan f
 | `team_news_meta` | Derived (`home_absences`, penalties) | After injuries | Debug / display | Rationale |
 | `home_top_scorers[]` / `away_top_scorers[]` | API-Football `players/topscorers` (24h league cache) | When `HIBS_ENABLE_PLAYER_INSIGHT=1` | **No** (display only) | `structured_insight.player_insight` |
 | `supplemental.fbref_home_squad` | FBref squad table (heavy scraper) | When heavy scrapers run & not blocked | **No** | Supplemental tags only |
+| `home_squad_depth` / `away_squad_depth` | API-Football `players/squads` (24h team cache) | When `HIBS_ENABLE_API_SQUAD_DEPTH=1` (default on) | **No** (display / meta only) | `team_news_meta` absence %; supplemental mirror |
 | `fixture_lineups` / `lineup_confirmed` | API-Football `fixtures/lineups` (Phase 2) | Pre-KO window only (`HIBS_ENABLE_LINEUP_FETCH`) | **No** (display / confidence only) | Expand panel XI; rationale; assistant |
 | Transfermarkt injuries | Deferred (probe-only) | Never in production | — | — |
 | WhoScored / SofaScore players | Not wired | — | — | Template note “deferred” |
@@ -23,9 +24,10 @@ Audit of what hibs-bet already fetches, what is safe to use, and a phased plan f
 | `players/topscorers` | `fetch_top_scorers(league, season)` | **24h per league+season** | Shared across all fixtures in league window |
 | `fixtures/statistics` | `fetch_fixture_statistics` | Post-match / live | Team xG only, not per-player |
 | `fixtures/lineups` | `fetch_fixture_lineups` | Pre-KO window (per-fixture cache) | Starting XI display + scorer cross-check |
+| `players/squads` | `fetch_team_squad` | **24h per team** | Squad size + position counts; absence % in team news |
 | `teams/statistics` | `fetch_team_statistics` | 12h | Team aggregates, not roster |
 
-**Not called:** `players/squads`, `players?team=`, per-player xG.
+**Not called:** `players?team=`, per-player xG.
 
 ### Injury row shape (API-Football)
 
@@ -112,7 +114,7 @@ Cache: dedicated `lineups_fixture_{id}` key; TTL 15min when &lt;90min to KO, up 
 ### Phase 3 — **Heavy / deferred**
 
 - FBref squad minutes blend (heavy scraper, VPS often blocked)
-- Transfermarkt (ToS)
+- Transfermarkt HTML (ToS) — squad/injury context covered by API-Football `players/squads` + `injuries` instead
 - Per-player xG where Understat/API expose it
 
 ---
@@ -166,11 +168,12 @@ Cache: dedicated `lineups_fixture_{id}` key; TTL 15min when &lt;90min to KO, up 
 | Module | Role |
 |--------|------|
 | `team_news_enrich.py` | Availability math + scorer/injury cross-ref |
+| `squad_depth_enrich.py` | API-Football squad roster → depth + absence % |
 | `lineup_enrich.py` | Phase 2 — API lineups parse, scorer/XI cross-check, confidence multiplier |
 | `data_aggregator.py` | Fetch injuries, top scorers, apply enrichers |
 | `betting_engine.py` | Optional injury λ (pre-calibration xG) |
 | `match_insight.py` | Rationale, `player_insight`, motivation pattern |
-| `api_clients.py` | `fetch_injuries`, `fetch_top_scorers`, `fetch_fixture_lineups` |
+| `api_clients.py` | `fetch_injuries`, `fetch_top_scorers`, `fetch_fixture_lineups`, `fetch_team_squad` |
 | `deep_enrich.py` | Backfill empty injury list in 75–90% DQ band |
 | `prediction_log.py` | Audit summary counts |
 | `templates/_fixture_expand_panel.html` | Injuries table, scorers, availability strip |

@@ -11,12 +11,14 @@ Items completed in the latest backlog pass are listed under **Done**; remaining 
 - **Poisson top-3 scorelines** — `poisson_top_scores` on prediction payload + expand panel.
 - **League table UX** — `[H]` / `[A]` markers in compact dropdown; collapsible highlighted full table in expand panel (dropdown retained).
 - **VPS deploy** — `HIBS_PREDICTION_LOG_ENABLED=1` in `apply-vps-safe-production.sh`.
+- **API squad depth (Transfermarkt alternative)** — API-Football `players/squads` → `home_squad_depth` / `away_squad_depth`, absence % in `team_news_meta`, supplemental `api_squad_depth` mirror, DQ high-value tag. Default on; VPS safe profile sets `HIBS_SKIP_API_SQUAD_DEPTH=1` (extra API calls per fixture).
 
 ## Modeling
 - **Confirmed lineups (Phase 2)** — **Done.** API-Football `fixtures/lineups` pre-KO only; display + optional confidence penalty when XI unknown near kickoff (see `docs/PLAYER_LINEUP_INTEGRATION.md`).
 - Historic xG backfill from Understat/FotMob league tables for cups without API xG (needs live cup window to validate).
 
 ## Coverage
+- **World Cup focus window** — auto-limits fetch to internationals **2026-06-11 → 2026-07-18** only; domestic leagues normal outside that window. `HIBS_TOURNAMENT_FOCUS=0` disables on VPS; region chips load domestic via `?domestic=1`.
 - Conference League final / Primera play-off at kickoff: FotMob primary ids documented; verify API round labels when finals are live (no fake fixtures in tests).
 
 ## UI

@@ -10,6 +10,8 @@ Env:
   HIBS_ENABLE_SCOTTISH_FBREF_XG — FBref SPFL schedule xG for SCOTLAND* leagues (default on).
   HIBS_FBREF_BLOCKED — skip all FBref HTML (squad + schedule) when datacenter IP gets 403 (typical VPS).
   HIBS_ENABLE_FOTMOB_XG — FotMob league-table xG (UEFA cups default-on; all mapped leagues when HIBS_MAX_DATA=1).
+  HIBS_ENABLE_API_SQUAD_DEPTH — API-Football players/squads roster (default on; 24h team cache).
+  HIBS_SKIP_API_SQUAD_DEPTH=1 — skip squad depth API calls.
   HIBS_ENABLE_STATSBOMB_OPEN_MATCHES — StatsBomb open-data goals proxy for teams in policy window (off default).
   HIBS_PREFER_SCRAPED_STANDINGS — SoccerStats league table when API standings are thin (default on in aggregator).
   HIBS_SKIP_ODDS_API — skip The Odds API (explicit opt-out only when ODDS_API_KEY is usable).
@@ -114,6 +116,12 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
 
     out: Dict[str, Any] = {}
     from hibs_predictor.fixture_utils import fixture_team_name
+
+    if enriched.get("home_squad_depth") or enriched.get("away_squad_depth"):
+        out["api_squad_depth"] = {
+            "home": enriched.get("home_squad_depth"),
+            "away": enriched.get("away_squad_depth"),
+        }
 
     home = fixture_team_name(fixture, "home")
     heavy_enabled = os.getenv("HIBS_ENABLE_HEAVY_SCRAPERS", "1").lower() not in ("0", "false", "no")

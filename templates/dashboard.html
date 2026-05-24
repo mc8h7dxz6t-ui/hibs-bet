@@ -44,7 +44,7 @@
 
     {% if tournament_focus.active %}
     <div class="tournament-focus-banner" role="status">
-        <strong>{{ tournament_focus.label }}</strong> — international fixtures only (fewer domestic API calls). Use <strong>All</strong>, <strong>UK</strong>, or <strong>European</strong> region chips to browse domestic leagues when needed.
+        <strong>{{ tournament_focus.label }}</strong>{% if tournament_focus.intl_only_fetch %} — international fixtures by default (fewer domestic API calls).{% else %} — domestic leagues included.{% endif %} Use <strong>All</strong>, <strong>UK</strong>, or <strong>European</strong> region chips to browse domestic leagues when needed.
     </div>
     {% endif %}
 
@@ -61,7 +61,7 @@
     <div class="dash-layout">
         <aside class="dash-sidebar" aria-label="Filters and upcoming fixtures">
             <p class="dash-side-hd">Coming up</p>
-            <p class="dash-side-sub">Kick-offs in <strong>{{ display_tz_label }}</strong> time · click to jump</p>
+            <p class="dash-side-sub">Kick-offs in <strong>{{ display_tz_label }}</strong> · click to jump</p>
 
             <div class="search-chips dash-sidebar-filters">
                 <input type="search" id="dash-search" class="dash-search" placeholder="Search teams…" autocomplete="off" aria-label="Search fixtures">
@@ -78,8 +78,8 @@
                     <button type="button" class="chip chip-region{% if slug == tournament_focus.default_region %} active{% elif not slug and not tournament_focus.active %} active{% endif %}" data-region="{{ slug }}">{{ label }}</button>
                     {% endfor %}
                 </div>
-                {% if tournament_focus.active %}
-                <p class="chip-hint region-filter-hint" id="region-filter-hint">Showing <strong>International</strong> by default during {{ tournament_focus.label|lower }}. Pick <strong>All</strong> or another region for domestic leagues.</p>
+                {% if tournament_focus.active and tournament_focus.intl_only_fetch %}
+                <p class="chip-hint region-filter-hint" id="region-filter-hint">Showing <strong>International</strong> by default during {{ tournament_focus.label|lower }}. Pick <strong>All</strong> or another region to load domestic leagues.</p>
                 {% else %}
                 <p class="chip-hint region-filter-hint" id="region-filter-hint" hidden>UEFA cup finals (e.g. Europa League) are under <strong>European</strong>, not UK — switch region or choose All.</p>
                 {% endif %}
@@ -161,7 +161,7 @@
             </div>
             {% endif %}
 
-            <div id="dash-fixture-root" class="fixtures-full-list" data-dq-min="{{ data_quality_ui_min }}" data-default-region="{{ tournament_focus.default_region }}">
+            <div id="dash-fixture-root" class="fixtures-full-list" data-dq-min="{{ data_quality_ui_min }}" data-default-region="{{ tournament_focus.default_region }}" data-include-domestic="{{ '1' if include_domestic else '0' }}">
                 {% if total == 0 %}
                 <div class="empty-state"><div class="icon">📡</div>
                     <p>No fixtures in the next {{ fetch_days }} days. Check API keys and <a href="/status">status</a>, then Refresh. Scrapers add stats to fixtures after a provider returns them; they do not create league calendars.</p>
@@ -194,7 +194,7 @@
                     <h2 class="results-heading" id="dash-results-heading">Recent results</h2>
                     <p class="results-meta">Last <strong>{{ recent_results_days }}</strong> days · finished matches only · times in <strong>{{ display_tz_label }}</strong></p>
                 </div>
-                <div id="dash-results-root" class="results-full-list" data-default-region="{{ tournament_focus.default_region }}">
+                <div id="dash-results-root" class="results-full-list" data-default-region="{{ tournament_focus.default_region }}" data-include-domestic="{{ '1' if include_domestic else '0' }}">
                     {% for day in recent_results_days_groups %}
                     <section class="day-block results-day-block" data-date="{{ day.date_iso }}">
                         <h3 class="day-heading results-day-heading">{{ day.heading }}</h3>
@@ -242,10 +242,28 @@
     var fullDataOnly = false;
     var activeDqMin = 0;
     var defaultRegion = '';
+    var includeDomestic = false;
+
+    function regionNeedsDomestic(rg) {
+        return rg !== 'international';
+    }
+
+    function loadIncludeDomesticFlag() {
+        var root = document.getElementById('dash-fixture-root');
+        includeDomestic = root ? root.getAttribute('data-include-domestic') === '1' : false;
+    }
+
+    function ensureDomesticLoaded() {
+        if (!defaultRegion || includeDomestic) return false;
+        if (!regionNeedsDomestic(activeRegion)) return false;
+        window.location.replace(dashboardUrl({ domestic: '1' }));
+        return true;
+    }
 
     function loadFilterState() {
         var root = document.getElementById('dash-fixture-root');
         defaultRegion = root ? (root.getAttribute('data-default-region') || '') : '';
+        loadIncludeDomesticFlag();
         try {
             var raw = localStorage.getItem(FILTER_KEY);
             if (!raw) {
@@ -416,6 +434,11 @@
                 regionRow.querySelectorAll('.chip-region').forEach(function (b) { b.classList.remove('active'); });
                 btn.classList.add('active');
                 activeRegion = btn.getAttribute('data-region') || '';
+                if (defaultRegion && !includeDomestic && regionNeedsDomestic(activeRegion)) {
+                    saveFilterState();
+                    window.location.href = dashboardUrl({ domestic: '1' });
+                    return;
+                }
                 saveFilterState();
                 applyDashFilters();
             });
@@ -526,6 +549,7 @@
         var b = document.getElementById('btn-refresh');
         if (!b) return;
         b.addEventListener('click', function () {
+            if (window.hibsShowLaunchOverlay) window.hibsShowLaunchOverlay();
             b.disabled = true;
             b.textContent = 'Refreshing…';
             fetch('/api/cache/clear?all=1', { method: 'POST' })
@@ -710,6 +734,7 @@
     document.addEventListener('DOMContentLoaded', function () {
         syncFetchDaysFromUrl();
         loadFilterState();
+        if (ensureDomesticLoaded()) return;
         restoreFilterChips();
         wireDqChips();
         wireRegionChips();

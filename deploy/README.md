@@ -91,7 +91,7 @@ Local dev (no systemd): `PORT=5002 PYTHONPATH=src python3 src/hibs_predictor/web
 
 ### Should-do
 
-- [ ] `HIBS_PREDICTION_LOG_ENABLED=1` (+ periodic `pred-log-sync`) for calibration / CLV
+- [ ] `HIBS_PREDICTION_LOG_ENABLED=1` + `HIBS_CLV_LOG_ENABLED=1` (+ daily `pred-log-sync`, weekly `calibration-fit` via `deploy/cron-hibs-calibration.sh`)
 - [ ] Scrape flags aligned with quota: `HIBS_MAX_DATA`, `HIBS_ENABLE_HEAVY_SCRAPERS`, `HIBS_ENABLE_FOTMOB_FIXTURES` (default on)
 - [ ] Sky dock: `HIBS_SHOW_SKY_PANEL=1` (default); panel hides automatically if YouTube embed probe fails
 - [ ] Deep enrich only when needed: `HIBS_DEEP_ENRICH=1` or `HIBS_TARGET_DQ_PCT` (off by default — extra HTTP)

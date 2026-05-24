@@ -1,7 +1,7 @@
-"""Transfermarkt — deferred light adapter (no production scrape yet).
+"""Transfermarkt — probe-only (no production HTML scrape).
 
-Structured HTML is available but robots/ToS are strict. This module exposes an
-honest health probe and placeholder hooks until a reviewed parser exists.
+Structured HTML exists but site terms discourage automated extraction. Production squad
+and injury context uses API-Football (``injuries``, ``players/squads``) instead.
 """
 
 from __future__ import annotations
@@ -15,6 +15,10 @@ _HEADERS = {
     "Accept-Language": "en",
 }
 ROBOTS_URL = "https://www.transfermarkt.com/robots.txt"
+_PRODUCTION_NOTE = (
+    "Probe-only (robots + ToS). Production path: API-Football injuries + players/squads "
+    "(HIBS_ENABLE_API_SQUAD_DEPTH=1). Transfermarkt HTML parser deferred."
+)
 
 
 def probe_availability() -> Dict[str, Any]:
@@ -25,11 +29,15 @@ def probe_availability() -> Dict[str, Any]:
         return {
             "ok": ok,
             "status": "deferred",
-            "note": (
-                "Probe-only (robots.txt). No squad/injury parser — API-Football injuries are the "
-                "production path; Transfermarkt backlog pending ToS review."
-            ),
+            "note": _PRODUCTION_NOTE,
             "robots_http": r.status_code,
+            "production_alternative": "api_football_injuries_squads",
         }
     except Exception as exc:
-        return {"ok": False, "status": "deferred", "error": str(exc)[:160]}
+        return {
+            "ok": False,
+            "status": "deferred",
+            "note": _PRODUCTION_NOTE,
+            "error": str(exc)[:160],
+            "production_alternative": "api_football_injuries_squads",
+        }

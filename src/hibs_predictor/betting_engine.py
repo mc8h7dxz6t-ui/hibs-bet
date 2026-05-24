@@ -828,12 +828,44 @@ class BettingEngine:
         except Exception:
             return 0.0
 
+    @staticmethod
+    def _read_dixon_coles_rho() -> float:
+        """Low-score correlation (typical football rho ~ -0.13). Set 0 to disable."""
+        try:
+            return float(os.getenv("HIBS_DIXON_COLES_RHO", "-0.10"))
+        except ValueError:
+            return -0.10
+
+    @staticmethod
+    def _dixon_coles_tau(h: int, a: int, lam_h: float, lam_a: float, rho: float) -> float:
+        """Dixon–Coles adjustment for (0,0), (1,1), (0,1), (1,0); 1 elsewhere."""
+        if abs(rho) < 1e-9:
+            return 1.0
+        if h == 0 and a == 0:
+            return 1.0 - lam_h * lam_a * rho
+        if h == 0 and a == 1:
+            return 1.0 + lam_h * rho
+        if h == 1 and a == 0:
+            return 1.0 + lam_a * rho
+        if h == 1 and a == 1:
+            return 1.0 - rho
+        return 1.0
+
     def _poisson_match_probs(self, xg_home: float, xg_away: float) -> Dict[str, float]:
         max_goals = 8
+        lam_h = max(0.1, float(xg_home))
+        lam_a = max(0.1, float(xg_away))
+        rho = self._read_dixon_coles_rho()
         home_win = draw = away_win = 0.0
         for h in range(max_goals + 1):
             for a in range(max_goals + 1):
-                p = self._poisson_prob(max(0.1, xg_home), h) * self._poisson_prob(max(0.1, xg_away), a)
+                p = (
+                    self._poisson_prob(lam_h, h)
+                    * self._poisson_prob(lam_a, a)
+                    * self._dixon_coles_tau(h, a, lam_h, lam_a, rho)
+                )
+                if p <= 0:
+                    continue
                 if h > a:
                     home_win += p
                 elif h == a:
@@ -1167,6 +1199,9 @@ class BettingEngine:
                 blend = float(os.getenv("HIBS_CALIB_MARKET_BLEND", "0.08"))
             except ValueError:
                 blend = 0.08
+            dq_pct_blend = float(dq_pre.get("score_pct") or 0)
+            if dq_pct_blend > 0 and dq_pct_blend < 75.0:
+                blend = min(0.18, blend + (75.0 - dq_pct_blend) * 0.0012)
             ensemble_probs = self._blend_1x2_toward_implied(ensemble_probs, bookmaker_odds, blend)
 
         use_cal_side = mode == "calibrated_poisson" or (

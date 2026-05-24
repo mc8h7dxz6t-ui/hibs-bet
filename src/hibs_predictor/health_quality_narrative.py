@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Dict, List
 
 from dotenv import load_dotenv
 
 _API_EFFECT: Dict[str, str] = {
-    "api_football": "Core: fixtures, injuries, team stats, and most xG/odds paths. If down, enrichment falls back to Football-Data or proxies — expect lower data_quality and weaker Poisson inputs.",
+    "api_football": "Core: fixtures, injuries, team stats, squad depth (players/squads), and most xG/odds paths. If down, enrichment falls back to Football-Data or proxies — expect lower data_quality and weaker Poisson inputs.",
     "football_data_org": "Backup fixture list when API-Football is unavailable. Does not replace all stats or injuries.",
     "odds_api": "Secondary / cross-check odds when enabled. Improves implied-probability checks and dual-source odds diff.",
 }
@@ -16,10 +17,13 @@ _API_EFFECT: Dict[str, str] = {
 _SCRAPER_EFFECT: Dict[str, str] = {
     "statsbomb_open": "Open-data JSON (no key). Competition list always; optional per-fixture goals-in-window proxy when enabled. Rarely shifts 1X2 unless blended priors are on.",
     "understat": "League-page xG when the embed parses. Heavy + light paths can feed optional xG blend in the betting engine.",
-    "fbref": "Squad aggregates + schedule xG from HTML when heavy scrapers run. May 403 from datacenter IPs — set HIBS_FBREF_BLOCKED=1 on VPS; core 1X2 still runs on APIs.",
-    "fotmob": "Daily match JSON fixture fallback when API lists are empty. Uses /api/data/matches (not legacy /api/matches).",
+    "fbref": "Squad aggregates + schedule xG from HTML when heavy scrapers run. May 403 from datacenter IPs — set HIBS_FBREF_BLOCKED=1 on VPS; curl_cffi rarely helps on VPS. Understat + FotMob + API xG cover gaps.",
+    "fotmob": "Daily match JSON fixture fallback when API lists are empty. League-table xG for UEFA cups + optional domestic. Primary xG fallback when FBref blocked.",
     "soccerstats": "Scraped league tables when API standings are thin; Norway/Finland/Scotland L1-L2 supported.",
     "sofascore": "Recent-match listing from public endpoints. Often 403 outside a browser; no core impact when absent.",
+    "transfermarkt": "Deferred probe-only (ToS). Production squad/injury context uses API-Football injuries + players/squads — not Transfermarkt HTML.",
+    "xgstat": "Deferred — no public JSON API. xG from Understat, FotMob, API fixture/recent-match paths instead.",
+    "besoccer": "Deferred — no stable JSON API. Standings/stats from SoccerStats, API-Football, FotMob where mapped.",
 }
 
 
@@ -38,6 +42,109 @@ def _pred_audit_line() -> Dict[str, Any]:
         "ms": None,
         "prediction_effect": "When enabled, stores snapshots for post-match calibration (Brier, etc.). pred-log-sync joins FT scores and API Expected Goals when available. Does not change live 1X2 probabilities.",
     }
+
+
+def _clv_log_line() -> Dict[str, Any]:
+    load_dotenv()
+    try:
+        from hibs_predictor.prediction_log import _clv_enabled, _enabled as prediction_audit_enabled
+
+        audit_on = prediction_audit_enabled()
+        clv_on = _clv_enabled()
+    except Exception:
+        audit_on = clv_on = False
+    return {
+        "id": "clv_log",
+        "label": "CLV logging (opening + closing odds)",
+        "ok": audit_on and clv_on,
+        "ms": None,
+        "prediction_effect": (
+            "When HIBS_CLV_LOG_ENABLED=1, snapshots store opening 1X2 and best-bet odds; "
+            "pred-log-sync joins closing 1X2 from API-Football and computes clv_pp. "
+            "Does not change live probabilities."
+            if clv_on
+            else "Set HIBS_CLV_LOG_ENABLED=1 with prediction audit on to track beat-close % by league."
+        ),
+    }
+
+
+def _calibration_cache_line() -> Dict[str, Any]:
+    load_dotenv()
+    try:
+        from hibs_predictor.historic_calibration import calibration_cache_path
+
+        path = calibration_cache_path()
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            n = len(data.get("leagues") or {})
+            gen = data.get("generated_at") or "unknown"
+            return {
+                "id": "calibration_cache",
+                "label": "League calibration shrink cache",
+                "ok": n > 0,
+                "ms": None,
+                "prediction_effect": (
+                    f"{path}: {n} league(s), generated {gen}. "
+                    "Engine reads shrink factors before value gates. Refresh weekly via calibration-fit."
+                ),
+            }
+        return {
+            "id": "calibration_cache",
+            "label": "League calibration shrink cache",
+            "ok": False,
+            "ms": None,
+            "prediction_effect": (
+                f"No cache at {path} yet. Run python -m hibs_predictor.main calibration-fit "
+                "after pred-log-sync accumulates scored rows."
+            ),
+        }
+    except Exception as exc:
+        return {
+            "id": "calibration_cache",
+            "label": "League calibration shrink cache",
+            "ok": False,
+            "ms": None,
+            "prediction_effect": f"Cache probe failed: {exc!s}"[:160],
+        }
+
+
+def _audit_ops_summary() -> Dict[str, Any]:
+    """CLV beat-close + calibration cache stats for /api/health and status page."""
+    load_dotenv()
+    out: Dict[str, Any] = {"prediction_log_enabled": False, "clv_log_enabled": False}
+    try:
+        from hibs_predictor.prediction_log import (
+            _clv_enabled,
+            _enabled as prediction_audit_enabled,
+            clv_beat_close_by_league,
+        )
+
+        out["prediction_log_enabled"] = prediction_audit_enabled()
+        out["clv_log_enabled"] = _clv_enabled()
+        out["clv_by_league"] = clv_beat_close_by_league()
+    except Exception as exc:
+        out["clv_by_league"] = {"enabled": False, "leagues": [], "error": str(exc)[:120]}
+    try:
+        from hibs_predictor.historic_calibration import calibration_cache_path
+
+        path = calibration_cache_path()
+        out["calibration_cache_path"] = path
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            out["calibration_cache"] = {
+                "ok": True,
+                "generated_at": data.get("generated_at"),
+                "baseline_brier": data.get("baseline_brier"),
+                "n_leagues": len(data.get("leagues") or {}),
+                "leagues": list((data.get("leagues") or {}).keys())[:12],
+            }
+        else:
+            out["calibration_cache"] = {"ok": False, "message": "Run calibration-fit after scored audit rows exist."}
+    except Exception as exc:
+        out["calibration_cache"] = {"ok": False, "message": str(exc)[:120]}
+    return out
 
 
 def augment_health_for_ui(health: Dict[str, Any]) -> Dict[str, Any]:
@@ -66,6 +173,8 @@ def augment_health_for_ui(health: Dict[str, Any]) -> Dict[str, Any]:
 
     features: List[Dict[str, Any]] = [
         _pred_audit_line(),
+        _clv_log_line(),
+        _calibration_cache_line(),
         {
             "id": "heavy_scrapers",
             "label": "Heavy scrapers (FBref + full Understat)",
@@ -132,6 +241,20 @@ def augment_health_for_ui(health: Dict[str, Any]) -> Dict[str, Any]:
             ),
         }
     ]
+
+    out["audit_ops"] = _audit_ops_summary()
+    clv = out["audit_ops"].get("clv_by_league") or {}
+    if int(clv.get("n_clv_rows") or 0) > 0 and clv.get("beat_close_pct") is not None:
+        bullets.append(
+            f"CLV audit: {clv['n_clv_rows']} value-bet row(s), beat-close {clv['beat_close_pct']}% overall "
+            f"(see /status audit section or /api/audit/summary)."
+        )
+    cal = out["audit_ops"].get("calibration_cache") or {}
+    if cal.get("ok") and cal.get("n_leagues"):
+        bullets.append(
+            f"League calibration cache: {cal['n_leagues']} league shrink factor(s) "
+            f"(generated {cal.get('generated_at', '?')})."
+        )
 
     out["apis"] = apis
     out["scrapers"] = scrapers

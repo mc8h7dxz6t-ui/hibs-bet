@@ -328,6 +328,13 @@ def run_pred_log_prune(args: argparse.Namespace) -> None:
     print(f"Deleted {n} snapshot row(s).")
 
 
+def run_calibration_fit() -> None:
+    """Fit league shrink factors from audit DB → .cache/calibration_v1.json."""
+    from hibs_predictor.calibration_fit import main as calibration_fit_main
+
+    calibration_fit_main()
+
+
 def run_data_sources_probe() -> None:
     """Print JSON reliability probe for APIs + scrapers + StatsBomb open data (needs network)."""
     import json
@@ -390,6 +397,11 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     subparsers.add_parser(
+        "calibration-fit",
+        help="Fit league Brier shrink from audit DB → .cache/calibration_v1.json",
+    )
+
+    subparsers.add_parser(
         "data-sources-probe",
         help="JSON probe: policy window + reliability of StatsBomb/Understat/FBref/Sofascore/API-Football",
     )
@@ -415,6 +427,8 @@ def main() -> None:
         run_pred_log_report(args)
     elif args.command == "pred-log-prune":
         run_pred_log_prune(args)
+    elif args.command == "calibration-fit":
+        run_calibration_fit()
     elif args.command == "data-sources-probe":
         run_data_sources_probe()
     else:

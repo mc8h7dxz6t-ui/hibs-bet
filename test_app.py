@@ -305,6 +305,13 @@ def test_insights_tables_routes_and_snapshots():
         assert "Aberdeen" in body and "Hibs" in body and "Dundee" in body
         assert "What this page does" not in body
         assert "Insights" in body
+        assert 'id="hibs-launch-overlay"' in body
+        assert "hibs-launch-tip" in body
+        assert "hibsShowLaunchOverlay" in body
+        assert "hibs-launch-hidden" not in body.split("hibs-launch-overlay")[1][:400]
+        assert "hibs-launch-critical" in body
+        assert "MIN_DISPLAY_MS" in body
+        assert "launch-wait.mp4" not in body
         insights_body = insights.get_data(as_text=True)
         assert "What this app does" in insights_body
         assert "<strong>1</strong> leagues loaded" in insights_body
@@ -424,6 +431,7 @@ def test_main_cli_help():
             "pred-log-sync",
             "pred-log-report",
             "pred-log-prune",
+            "calibration-fit",
             "data-sources-probe",
         ):
             assert needle in out, f"missing {needle} in help"
@@ -957,6 +965,36 @@ def test_dashboard_days_grouping():
         return True
     except Exception as e:
         print(f"  ✗ Dashboard grouping test failed: {e}")
+        return False
+
+
+def test_league_fixture_cache_bust_on_partial_enrich():
+    """Per-league disk cache must not serve rows missing form/stats after API 429."""
+    print("\nTesting partial enrich cache bust...")
+    try:
+        from hibs_predictor.web import _league_fixture_cache_fresh, _slim_row_enrich_fresh
+
+        complete = {
+            "home_id": 1,
+            "away_id": 2,
+            "home_last10": [{"result": "W"}],
+            "away_last10": [{"result": "L"}],
+            "home_stats": {"played": 10, "goals_for": 12, "goals_against": 8},
+            "away_stats": {"played": 10, "goals_for": 9, "goals_against": 11},
+            "enriched_at": "2026-05-24T12:00:00",
+        }
+        thin = dict(complete)
+        thin["home_last10"] = []
+        thin["home_stats"] = {}
+
+        assert _slim_row_enrich_fresh(complete) is False  # no real recent rows
+        assert _slim_row_enrich_fresh(thin) is False
+        assert _league_fixture_cache_fresh([complete, thin]) is False
+        assert _league_fixture_cache_fresh([]) is False
+        print("  ✓ Partial enrich cache bust OK")
+        return True
+    except Exception as e:
+        print(f"  ✗ Partial enrich cache bust test failed: {e}")
         return False
 
 
@@ -2300,6 +2338,7 @@ def main():
         test_fixture_row_btts_win_columns,
         test_pick_menu,
         test_dashboard_days_grouping,
+        test_league_fixture_cache_bust_on_partial_enrich,
         test_competition_display_titles,
         test_kickoff_display_tz,
         test_fixture_window_includes_todays_kicked_off,

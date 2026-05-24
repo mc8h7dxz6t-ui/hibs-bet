@@ -36,16 +36,65 @@ def test_focus_off_outside_auto_window(monkeypatch):
     assert dashboard_default_region() == ""
 
 
+def test_focus_off_before_world_cup_starts(monkeypatch):
+    """Pre-tournament (e.g. May 2026): domestic leagues fetch normally."""
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 5, 20),
+    )
+    assert tournament_focus_active() is False
+    assert league_codes_for_fetch() == ALL_LEAGUE_CODES
+
+
+def test_focus_off_after_world_cup_ends(monkeypatch):
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 7, 19),
+    )
+    assert tournament_focus_active() is False
+    assert league_codes_for_fetch() == ALL_LEAGUE_CODES
+
+
+def test_focus_auto_on_at_window_start(monkeypatch):
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 6, 11),
+    )
+    assert tournament_focus_mode() == "worldcup"
+    assert tournament_focus_active() is True
+    assert league_codes_for_fetch() == INTERNATIONAL_FOCUS_LEAGUE_CODES
+    assert dashboard_default_region() == "international"
+
+
 def test_focus_auto_on_in_world_cup_window(monkeypatch):
     monkeypatch.setattr(
         "hibs_predictor.tournament_focus._today_utc",
-        lambda: date(2026, 6, 10),
+        lambda: date(2026, 6, 20),
     )
     assert tournament_focus_mode() == "worldcup"
     assert tournament_focus_active() is True
     assert league_codes_for_fetch() == INTERNATIONAL_FOCUS_LEAGUE_CODES
     assert dashboard_default_region() == "international"
     assert effective_dashboard_league_order() == INTERNATIONAL_FOCUS_LEAGUE_CODES
+
+
+def test_focus_auto_on_at_window_end(monkeypatch):
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 7, 18),
+    )
+    assert tournament_focus_active() is True
+    assert league_codes_for_fetch() == INTERNATIONAL_FOCUS_LEAGUE_CODES
+
+
+def test_include_domestic_during_focus(monkeypatch):
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 6, 20),
+    )
+    assert tournament_focus_active() is True
+    assert league_codes_for_fetch(include_domestic=True) == ALL_LEAGUE_CODES
+    assert effective_dashboard_league_order(include_domestic=True) != INTERNATIONAL_FOCUS_LEAGUE_CODES
 
 
 def test_focus_env_worldcup_override(monkeypatch):
@@ -96,7 +145,7 @@ def test_prioritize_fixtures_for_focus():
         {"league": "WORLD_CUP", "kickoff_sort": "2026-06-11T15:00:00Z"},
         {"league": "NATIONS_LEAGUE", "kickoff_sort": "2026-06-10T18:00:00Z"},
     ]
-    ordered = prioritize_fixtures_for_focus(fixtures, today=date(2026, 6, 10))
+    ordered = prioritize_fixtures_for_focus(fixtures, today=date(2026, 6, 20))
     assert [f["league"] for f in ordered] == ["WORLD_CUP", "NATIONS_LEAGUE", "EPL"]
 
 

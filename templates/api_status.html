@@ -43,6 +43,12 @@
             <div id="status-features" class="health-grid"></div>
         </div>
         <div class="status-section">
+            <h2>Audit &amp; calibration</h2>
+            <p id="status-audit-headline" class="status-impact-headline">—</p>
+            <ul id="status-audit-clv" class="status-impact-list"></ul>
+            <ul id="status-audit-cal" class="status-impact-list" style="margin-top:8px;"></ul>
+        </div>
+        <div class="status-section">
             <h2>xG priority chain</h2>
             <p id="status-xg-headline" class="status-impact-headline">—</p>
             <ul id="status-xg-ops" class="status-impact-list"></ul>
@@ -156,6 +162,48 @@
                     li.innerHTML = '<strong>' + esc(row.code) + '</strong> — ' + esc(row.note);
                     xgLg.appendChild(li);
                 });
+            }
+            var ao = d.audit_ops || {};
+            var clv = ao.clv_by_league || {};
+            var clvN = parseInt(clv.n_clv_rows, 10) || 0;
+            var ah = document.getElementById('status-audit-headline');
+            if (ah) {
+                if (clvN > 0 && clv.beat_close_pct != null) {
+                    ah.textContent = 'CLV: ' + clvN + ' row(s), beat-close ' + clv.beat_close_pct + '% overall';
+                } else if (ao.clv_log_enabled) {
+                    ah.textContent = 'CLV logging on — run pred-log-sync after matches finish to populate closing odds.';
+                } else if (ao.prediction_log_enabled) {
+                    ah.textContent = 'Prediction audit on — set HIBS_CLV_LOG_ENABLED=1 for beat-close tracking.';
+                } else {
+                    ah.textContent = 'Prediction audit off — enable HIBS_PREDICTION_LOG_ENABLED=1 for calibration / CLV.';
+                }
+            }
+            var clvUl = document.getElementById('status-audit-clv');
+            if (clvUl) {
+                clvUl.innerHTML = '';
+                (clv.leagues || []).forEach(function (row) {
+                    var li = document.createElement('li');
+                    li.innerHTML = '<strong>' + esc(row.league) + '</strong>: '
+                        + esc(row.n_clv) + ' CLV row(s), beat-close '
+                        + esc(row.beat_close_pct) + '%, avg CLV '
+                        + esc(row.avg_clv_pp) + ' pp';
+                    clvUl.appendChild(li);
+                });
+            }
+            var calUl = document.getElementById('status-audit-cal');
+            var cal = ao.calibration_cache || {};
+            if (calUl) {
+                calUl.innerHTML = '';
+                if (cal.ok) {
+                    var li = document.createElement('li');
+                    li.textContent = 'Shrink cache: ' + (cal.n_leagues || 0) + ' league(s), generated '
+                        + (cal.generated_at || '?') + ', baseline Brier ' + (cal.baseline_brier || '?');
+                    calUl.appendChild(li);
+                } else {
+                    var li2 = document.createElement('li');
+                    li2.textContent = cal.message || 'No calibration cache — run calibration-fit weekly after pred-log-sync.';
+                    calUl.appendChild(li2);
+                }
             }
             var fh = '';
             (d.features || []).forEach(function (f) { fh += featureRowHtml(f); });

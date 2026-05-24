@@ -76,6 +76,16 @@ def _api_football_errors_truthy(errors: Any) -> bool:
     return bool(errors)
 
 
+def _api_football_rate_limited(errors: Any) -> bool:
+    if not isinstance(errors, dict):
+        return False
+    for key, val in errors.items():
+        text = f"{key} {val}".lower()
+        if "ratelimit" in text.replace("_", "") or "too many requests" in text:
+            return True
+    return False
+
+
 class BaseApiClient:
     def __init__(self, api_key: str, base_url: str, header_name: str, service_name: str) -> None:
         self.api_key = api_key
@@ -338,7 +348,8 @@ class ApiSportsFootballClient(BaseApiClient):
                     )
             else:
                 print(f"[API-Sports errors] {endpoint} params={params}: {errs}")
-            self.rate_limiter.record_request(self.service_name)
+            if not _api_football_rate_limited(errs):
+                self.rate_limiter.record_request(self.service_name)
             return {"response": [], "errors": errs, "results": data.get("results", 0)}
 
         self.rate_limiter.record_request(self.service_name)
@@ -385,6 +396,32 @@ class ApiSportsFootballClient(BaseApiClient):
         rows = resp if isinstance(resp, list) else []
         self.cache.set(cache_key, rows, ttl_hours=24)
         return rows
+
+    def fetch_team_squad(
+        self,
+        team_id: int,
+        *,
+        season: Optional[int] = None,
+        ttl_hours: float = 24.0,
+    ) -> List[Dict[str, Any]]:
+        """Current squad roster (API-Football ``players/squads``). Cached per team."""
+        cache_key = f"squad_team_{int(team_id)}"
+        if season is not None:
+            cache_key = f"{cache_key}_{int(season)}"
+        cached = self.cache.get(cache_key, ttl_hours=ttl_hours)
+        if cached is not None:
+            return cached if isinstance(cached, list) else []
+        params: Dict[str, Any] = {"team": int(team_id)}
+        data = self._get_json("players/squads", params=params, use_cache=False)
+        resp = data.get("response", [])
+        players: List[Dict[str, Any]] = []
+        if isinstance(resp, list) and resp:
+            block = resp[0] if isinstance(resp[0], dict) else {}
+            raw = block.get("players")
+            if isinstance(raw, list):
+                players = [p for p in raw if isinstance(p, dict)]
+        self.cache.set(cache_key, players, ttl_hours=ttl_hours)
+        return players
 
     def fetch_odds(self, fixture_id: int) -> List[Dict[str, Any]]:
         endpoint = "odds"

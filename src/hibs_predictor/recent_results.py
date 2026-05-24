@@ -106,8 +106,8 @@ def results_window_utc(now: Optional[datetime] = None) -> Tuple[datetime, dateti
     return start_local.astimezone(timezone.utc), now
 
 
-def _results_cache_key() -> str:
-    focus = "intl" if tournament_focus_active() else "all"
+def _results_cache_key(*, include_domestic: bool = False) -> str:
+    focus = "full" if include_domestic else ("intl" if tournament_focus_active() else "all")
     return f"recent_results_{results_days()}d_{focus}_{_RESULTS_CACHE_VERSION}"
 
 
@@ -419,18 +419,23 @@ def finalize_results_bundle(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def fetch_recent_results(aggregator: Any, *, cache: Optional[Cache] = None) -> Dict[str, Any]:
+def fetch_recent_results(
+    aggregator: Any,
+    *,
+    cache: Optional[Cache] = None,
+    include_domestic: bool = False,
+) -> Dict[str, Any]:
     """Batched, cached fetch of finished fixtures for loaded/focus leagues."""
     cache = cache or Cache()
     ttl = _cache_ttl_hours(1.0)
-    ck = _results_cache_key()
+    ck = _results_cache_key(include_domestic=include_domestic)
     cached = cache.get(ck, ttl_hours=ttl)
     if isinstance(cached, dict) and isinstance(cached.get("all"), list):
         bundle = dict(cached)
         bundle["results_days"] = results_days()
         return bundle
 
-    codes = list(league_codes_for_fetch())
+    codes = list(league_codes_for_fetch(include_domestic=include_domestic))
     workers = min(max(1, int(os.getenv("HIBS_FIXTURE_FETCH_WORKERS", "4") or 4)), len(codes) or 1)
     combined: Dict[str, Dict[str, Any]] = {}
     with ThreadPoolExecutor(max_workers=workers) as pool:

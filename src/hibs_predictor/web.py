@@ -141,22 +141,22 @@ def _env_truthy(name: str) -> bool:
     return (os.getenv(name) or "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def _dashboard_league_order() -> List[str]:
+def _dashboard_league_order(*, include_domestic: bool = False) -> List[str]:
     from hibs_predictor.tournament_focus import effective_dashboard_league_order
 
-    return effective_dashboard_league_order()
+    return effective_dashboard_league_order(include_domestic=include_domestic)
 
 
-def _league_codes_for_fetch() -> List[str]:
+def _league_codes_for_fetch(*, include_domestic: bool = False) -> List[str]:
     from hibs_predictor.tournament_focus import league_codes_for_fetch
 
-    return league_codes_for_fetch()
+    return league_codes_for_fetch(include_domestic=include_domestic)
 
 
-def _tournament_focus_context() -> Dict[str, Any]:
+def _tournament_focus_context(*, include_domestic: bool = False) -> Dict[str, Any]:
     from hibs_predictor.tournament_focus import tournament_focus_context
 
-    return tournament_focus_context()
+    return tournament_focus_context(include_domestic=include_domestic)
 
 
 def _show_sky_panel() -> bool:
@@ -166,6 +166,16 @@ def _show_sky_panel() -> bool:
         "false",
         "no",
         "off",
+    )
+
+
+def _launch_media_enabled() -> bool:
+    """Optional muted launch-wait.mp4 on dashboard overlay (HIBS_LAUNCH_MEDIA=1)."""
+    return (os.getenv("HIBS_LAUNCH_MEDIA") or "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
     )
 
 
@@ -190,7 +200,9 @@ def _sky_dock_context() -> Dict[str, Any]:
 
 @app.context_processor
 def inject_sky_dock():
-    return _sky_dock_context()
+    ctx = _sky_dock_context()
+    ctx["launch_media_enabled"] = _launch_media_enabled()
+    return ctx
 
 
 def _fixture_key(fixture: Dict[str, Any]) -> str:
@@ -275,10 +287,13 @@ def _ui_show_dq90_chip() -> bool:
     return (os.getenv("HIBS_UI_SHOW_DQ90_CHIP") or "1").strip().lower() not in ("0", "false", "no", "off")
 
 
-def _all_fixtures_cache_key() -> str:
+def _all_fixtures_cache_key(*, include_domestic: bool = False) -> str:
     from hibs_predictor.tournament_focus import tournament_focus_active
 
-    focus = "intl" if tournament_focus_active() else "all"
+    if tournament_focus_active():
+        focus = "full" if include_domestic else "intl"
+    else:
+        focus = "all"
     return f"all_fixtures_{_fetch_window_days()}d_{focus}_{_FIXTURE_CACHE_VERSION}"
 
 
@@ -392,10 +407,17 @@ def _maybe_warm_fixture_cache() -> None:
 def _slim_row_enrich_fresh(row: Dict[str, Any]) -> bool:
     """True when a cached per-league fixture row can skip another full enrich pass."""
     from hibs_predictor.data_aggregator import DataAggregator
+    from hibs_predictor.data_quality import _has_stats
 
     home_id = row.get("home_id")
     away_id = row.get("away_id")
-    if not row.get("home_last10") or not row.get("away_last10"):
+    if home_id and not row.get("home_last10"):
+        return False
+    if away_id and not row.get("away_last10"):
+        return False
+    if home_id and not _has_stats(row.get("home_stats")):
+        return False
+    if away_id and not _has_stats(row.get("away_stats")):
         return False
     proxy = {
         "enriched_at": row.get("enriched_at"),
@@ -403,6 +425,13 @@ def _slim_row_enrich_fresh(row: Dict[str, Any]) -> bool:
         "away_recent": row.get("away_last10") or [],
     }
     return DataAggregator._enriched_cache_fresh(proxy, home_id, away_id)
+
+
+def _league_fixture_cache_fresh(rows: List[Dict[str, Any]]) -> bool:
+    """False when any row in a per-league disk cache needs another enrich pass."""
+    if not rows:
+        return False
+    return all(_slim_row_enrich_fresh(row) for row in rows)
 
 
 def _league_codes_enrich_priority_order(codes: List[str]) -> List[str]:
@@ -423,9 +452,9 @@ def _league_codes_enrich_priority_order(codes: List[str]) -> List[str]:
     return league_codes_priority_today(codes, preview)
 
 
-def _fetch_all_league_fixtures_parallel() -> List[Dict]:
+def _fetch_all_league_fixtures_parallel(*, include_domestic: bool = False) -> List[Dict]:
     """Fetch per-league fixture rows concurrently (each league uses its own disk cache)."""
-    codes = _league_codes_enrich_priority_order(_league_codes_for_fetch())
+    codes = _league_codes_enrich_priority_order(_league_codes_for_fetch(include_domestic=include_domestic))
     workers = min(_fixture_fetch_workers(), len(codes))
     out: List[Dict] = []
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -452,6 +481,11 @@ def _refresh_live_on_bundle(bundle: Dict[str, Any]) -> None:
         print(f"[Live scores] refresh failed: {exc!r}")
 
 
+def _all_fixtures_bundle_fresh(bundle: Dict[str, Any]) -> bool:
+    """False when bundled rows are missing core form/stats (post-429 thin snapshots)."""
+    return _league_fixture_cache_fresh(bundle.get("all") or [])
+
+
 def clear_application_caches(*, all_disk: bool = False) -> int:
     """Clear in-memory health cache and on-disk fixture caches (or all JSON when all_disk)."""
     _clear_health_cache()
@@ -460,7 +494,7 @@ def clear_application_caches(*, all_disk: bool = False) -> int:
     if all_disk:
         return cache.clear_all()
     removed = 0
-    for pattern in ("all_fixtures_", "fixtures_", "recent_results_", "results_"):
+    for pattern in ("all_fixtures_", "fixtures_", "recent_results_", "results_", "enriched_fixture_"):
         removed += cache.clear_pattern(pattern, prefix=True)
     return removed
 
@@ -687,9 +721,9 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     cache_key = f"fixtures_{days}d_{league_code}_{_FIXTURE_CACHE_VERSION}_{int(prefer_fdo)}{int(skip_as_fx)}"
     cached = cache.get(cache_key, ttl_hours=ttl)
     if cached:
-        if cached:
+        if _league_fixture_cache_fresh(cached):
             return cached
-        _hibs_debug_log(f"skip empty per-league cache {league_code} key={cache_key}")
+        _hibs_debug_log(f"partial enrich cache bust {league_code} key={cache_key}")
 
     league = LEAGUES.get(league_code, {})
     now = datetime.now(timezone.utc)
@@ -1224,13 +1258,15 @@ def _dedupe_table_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(by_team.values(), key=lambda r: (_safe_int_value(r.get("position"), 999), str(r.get("team") or "")))
 
 
-def _build_league_tables(fixtures: List[Dict[str, Any]], *, include_live: bool = False) -> List[Dict[str, Any]]:
+def _build_league_tables(
+    fixtures: List[Dict[str, Any]], *, include_live: bool = False, include_domestic: bool = False
+) -> List[Dict[str, Any]]:
     fixture_rows = _fixture_position_rows(fixtures)
     league_codes = set(fixture_rows)
     league_codes.update(str(f.get("league") or "") for f in fixtures if f.get("league"))
     if include_live:
         league_codes.update(_dashboard_league_order())
-    order_index = {c: i for i, c in enumerate(_dashboard_league_order())}
+    order_index = {c: i for i, c in enumerate(_dashboard_league_order(include_domestic=include_domestic))}
     tables: List[Dict[str, Any]] = []
     for league_code in sorted(league_codes, key=lambda c: (order_index.get(c, 999), c)):
         rows: List[Dict[str, Any]] = []
@@ -1317,7 +1353,12 @@ def _attach_table_snapshots(fixtures: List[Dict[str, Any]], tables: List[Dict[st
         )
 
 
-def _finalize_fixture_bundle(all_fixtures: List[Dict[str, Any]], *, attach_live: bool = False) -> Dict[str, Any]:
+def _finalize_fixture_bundle(
+    all_fixtures: List[Dict[str, Any]],
+    *,
+    attach_live: bool = False,
+    include_domestic: bool = False,
+) -> Dict[str, Any]:
     from hibs_predictor.display_tz import enrich_fixtures_kickoff
 
     all_fixtures = enrich_fixtures_kickoff(all_fixtures)
@@ -1328,11 +1369,11 @@ def _finalize_fixture_bundle(all_fixtures: List[Dict[str, Any]], *, attach_live:
     _ensure_fixture_data_quality(all_fixtures)
     _ensure_fixture_pick_menus(all_fixtures)
     all_fixtures.sort(key=lambda x: x.get("kickoff_sort") or x.get("date") or "")
-    league_tables = _build_league_tables(all_fixtures, include_live=False)
+    league_tables = _build_league_tables(all_fixtures, include_live=False, include_domestic=include_domestic)
     _attach_table_snapshots(all_fixtures, league_tables)
     value_bets_only = [f for f in all_fixtures if f.get("has_value_bet")]
     value_bets_only.sort(key=lambda x: -(x.get("prediction", {}).get("best_bet_roi") or 0))
-    fixtures_by_league: Dict[str, List] = {c: [] for c in _dashboard_league_order()}
+    fixtures_by_league: Dict[str, List] = {c: [] for c in _dashboard_league_order(include_domestic=include_domestic)}
     for f in all_fixtures:
         lc = f.get("league")
         if lc in fixtures_by_league:
@@ -1344,12 +1385,14 @@ def _finalize_fixture_bundle(all_fixtures: List[Dict[str, Any]], *, attach_live:
         for region, codes in LEAGUE_REGIONS.items():
             if f.get("league") in codes:
                 by_region[region].append(f)
-    coverage_summary = _fixture_coverage_summary(fixtures_by_league, len(all_fixtures))
+    coverage_summary = _fixture_coverage_summary(
+        fixtures_by_league, len(all_fixtures), include_domestic=include_domestic
+    )
     return {
         "all": all_fixtures,
         "by_region": by_region,
         "by_league": fixtures_by_league,
-        "dashboard_days": _dashboard_days_groups(all_fixtures),
+        "dashboard_days": _dashboard_days_groups(all_fixtures, include_domestic=include_domestic),
         "value_bets": value_bets_only,
         "total": len(all_fixtures),
         "value_bet_count": len(value_bets_only),
@@ -1361,15 +1404,21 @@ def _finalize_fixture_bundle(all_fixtures: List[Dict[str, Any]], *, attach_live:
     }
 
 
-def _fixture_coverage_summary(by_league: Dict[str, List], total: int) -> Dict[str, Any]:
+def _fixture_coverage_summary(
+    by_league: Dict[str, List],
+    total: int,
+    *,
+    include_domestic: bool = False,
+) -> Dict[str, Any]:
     """User-facing note explaining why filter chips only show leagues with returned fixtures."""
     from hibs_predictor.tournament_focus import league_codes_for_fetch, tournament_focus_active
 
     focus_active = tournament_focus_active()
-    fetch_codes = set(league_codes_for_fetch()) if focus_active else None
+    intl_only = focus_active and not include_domestic
+    fetch_codes = set(league_codes_for_fetch(include_domestic=include_domestic)) if focus_active else None
     loaded: List[Dict[str, Any]] = []
     empty: List[Dict[str, Any]] = []
-    for code in _dashboard_league_order():
+    for code in _dashboard_league_order(include_domestic=include_domestic):
         if code not in LEAGUES:
             continue
         if fetch_codes is not None and code not in fetch_codes:
@@ -1389,15 +1438,24 @@ def _fixture_coverage_summary(by_league: Dict[str, List], total: int) -> Dict[st
             empty.append(row)
     days = _fetch_window_days()
     configured_n = len(loaded) + len(empty)
-    if focus_active:
+    if intl_only:
         summary = (
             f"{len(loaded)} of {configured_n} international focus leagues returned fixtures "
             f"in the next {days} days."
         )
         reason = (
-            "International focus mode is active — only World Cup, Nations League and Euros are fetched. "
+            "International focus mode is active — only World Cup, Nations League and Euros are fetched by default. "
             "Filter chips reflect leagues with fixtures in the current window. "
             "Use All / UK / European region chips on the dashboard for domestic leagues when needed."
+        )
+    elif focus_active:
+        summary = (
+            f"{len(loaded)} of {configured_n} configured leagues returned fixtures "
+            f"in the next {days} days."
+        )
+        reason = (
+            "World Cup focus is active but domestic leagues are included for this view "
+            "(All / UK / European region selected). Filter chips reflect leagues with fixtures in the window."
         )
     else:
         summary = (
@@ -1444,31 +1502,33 @@ def _dashboard_info_box(fixture_coverage: Dict[str, Any], total: int) -> Dict[st
     }
 
 
-def fetch_all_fixtures(*, attach_live: bool = False) -> Dict:
+def fetch_all_fixtures(*, attach_live: bool = False, include_domestic: bool = False) -> Dict:
     cache = Cache()
     _maybe_prune_cache(cache)
     ttl = _cache_ttl_hours(1.0)
-    ck = _all_fixtures_cache_key()
+    ck = _all_fixtures_cache_key(include_domestic=include_domestic)
     cached = cache.get(ck, ttl_hours=ttl)
     if cached:
-        if _is_complete_fixture_bundle(cached):
+        if _is_complete_fixture_bundle(cached) and _all_fixtures_bundle_fresh(cached):
             bundle = dict(cached)
             bundle["fetch_days"] = _fetch_window_days()
             if attach_live:
                 _refresh_live_on_bundle(bundle)
             return bundle
+        if _is_complete_fixture_bundle(cached):
+            _hibs_debug_log(f"partial all_fixtures bundle bust key={ck}")
         all_f = cached.get("all") if isinstance(cached, dict) else None
         if not all_f and isinstance(cached, list):
             all_f = cached
         if all_f:
-            bundle = _finalize_fixture_bundle(all_f, attach_live=attach_live)
+            bundle = _finalize_fixture_bundle(all_f, attach_live=attach_live, include_domestic=include_domestic)
             if bundle.get("total"):
                 cache.set(ck, bundle, ttl_hours=ttl)
             return bundle
         _hibs_debug_log(f"skip empty all_fixtures cache key={ck}")
 
-    all_fixtures = _fetch_all_league_fixtures_parallel()
-    result = _finalize_fixture_bundle(all_fixtures, attach_live=attach_live)
+    all_fixtures = _fetch_all_league_fixtures_parallel(include_domestic=include_domestic)
+    result = _finalize_fixture_bundle(all_fixtures, attach_live=attach_live, include_domestic=include_domestic)
     if result.get("total"):
         cache.set(ck, result, ttl_hours=ttl)
     else:
@@ -1535,7 +1595,11 @@ def _league_block_display_name(league_code: str, fixtures: List[Dict[str, Any]])
     return LEAGUES.get(league_code, {}).get("name", league_code)
 
 
-def _dashboard_days_groups(all_fixtures: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _dashboard_days_groups(
+    all_fixtures: List[Dict[str, Any]],
+    *,
+    include_domestic: bool = False,
+) -> List[Dict[str, Any]]:
     """Group fixtures by local calendar day, leagues in DASHBOARD_LEAGUE_ORDER, each league by KO time."""
     from collections import defaultdict
     from hibs_predictor.display_tz import day_heading_for_local_date, local_today
@@ -1552,7 +1616,7 @@ def _dashboard_days_groups(all_fixtures: List[Dict[str, Any]]) -> List[Dict[str,
         if lc:
             by_day[day_iso][lc].append(f)
     today_local = local_today()
-    order_index = {c: i for i, c in enumerate(_dashboard_league_order())}
+    order_index = {c: i for i, c in enumerate(_dashboard_league_order(include_domestic=include_domestic))}
     out: List[Dict[str, Any]] = []
     for day_iso in sorted(by_day.keys()):
         leagues_block: List[Dict[str, Any]] = []
@@ -1572,7 +1636,7 @@ def _dashboard_days_groups(all_fixtures: List[Dict[str, Any]]) -> List[Dict[str,
             )
             seen_lc.add(lc)
 
-        for lc in _dashboard_league_order():
+        for lc in _dashboard_league_order(include_domestic=include_domestic):
             _append_league(lc)
         for lc in sorted(by_day[day_iso].keys(), key=lambda c: (order_index.get(c, 999), c)):
             if lc not in seen_lc and by_day[day_iso][lc]:
@@ -1585,13 +1649,13 @@ def _dashboard_days_groups(all_fixtures: List[Dict[str, Any]]) -> List[Dict[str,
     return out
 
 
-def _leagues_for_filter(by_league: Dict[str, List]) -> List[tuple]:
+def _leagues_for_filter(by_league: Dict[str, List], *, include_domestic: bool = False) -> List[tuple]:
     """League filter chips in dashboard order — every competition with fixtures in the window."""
-    order_index = {c: i for i, c in enumerate(_dashboard_league_order())}
+    order_index = {c: i for i, c in enumerate(_dashboard_league_order(include_domestic=include_domestic))}
     min_n = _min_league_chip_fixtures()
     codes: List[str] = []
     seen: set = set()
-    for c in _dashboard_league_order():
+    for c in _dashboard_league_order(include_domestic=include_domestic):
         if c in LEAGUES and len(by_league.get(c) or []) >= min_n:
             codes.append(c)
             seen.add(c)
@@ -1626,9 +1690,10 @@ def _assistant_bundle(fixtures: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 @app.route("/")
 def index():
+    include_domestic = request.args.get("domestic") == "1"
     if request.args.get("refresh") == "1":
         clear_application_caches(all_disk=request.args.get("all") == "1")
-    else:
+    elif not include_domestic:
         cached_page = _dashboard_page_cache_get()
         if cached_page is not None:
             body, etag = cached_page
@@ -1642,10 +1707,10 @@ def index():
             return _set_fetch_days_cookie_if_requested(resp)
 
     attach_live = not _dashboard_lite_mode()
-    data = fetch_all_fixtures(attach_live=attach_live)
+    data = fetch_all_fixtures(attach_live=attach_live, include_domestic=include_domestic)
     from hibs_predictor.recent_results import fetch_recent_results
 
-    recent_results = fetch_recent_results(aggregator)
+    recent_results = fetch_recent_results(aggregator, include_domestic=include_domestic)
     if _dashboard_lite_mode():
         assistant_packets: List[Dict[str, Any]] = []
         assistant_bundle: Dict[str, Any] = {"packets": [], "recommendations": [], "acca_candidates": [], "count": 0}
@@ -1666,10 +1731,11 @@ def index():
         dashboard_info=_dashboard_info_box(fixture_coverage, data["total"]),
         league_regions=LEAGUE_REGIONS,
         dashboard_filter_regions=DASHBOARD_FILTER_REGIONS,
-        leagues_for_filter=_leagues_for_filter(data["by_league"]),
+        leagues_for_filter=_leagues_for_filter(data["by_league"], include_domestic=include_domestic),
         min_league_chip_fixtures=_min_league_chip_fixtures(),
-        dashboard_league_order=_dashboard_league_order(),
-        tournament_focus=_tournament_focus_context(),
+        dashboard_league_order=_dashboard_league_order(include_domestic=include_domestic),
+        tournament_focus=_tournament_focus_context(include_domestic=include_domestic),
+        include_domestic=include_domestic,
         fetch_days=data.get("fetch_days", _fetch_window_days()),
         has_api_clients=data.get(
             "has_api_clients",

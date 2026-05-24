@@ -43,7 +43,8 @@ HIBS_WARM_FIXTURE_CACHE=1
 HIBS_ENABLE_PLAYER_INSIGHT=1
 HIBS_USE_INJURY_LAMBDA_ADJUST=1
 HIBS_FBREF_BLOCKED=1
-# World Cup window (May–Jul 2026): auto-limits fetch to internationals unless overridden.
+# World Cup window (2026-06-11 → 2026-07-18): auto-limits fetch to internationals unless overridden.
+# Do NOT set HIBS_TOURNAMENT_FOCUS=worldcup before the window — use auto dates or HIBS_TOURNAMENT_FOCUS=0 to keep domestic.
 # HIBS_TOURNAMENT_FOCUS=worldcup
 # HIBS_TOURNAMENT_FOCUS=0
 EOF

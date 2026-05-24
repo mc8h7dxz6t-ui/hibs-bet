@@ -63,6 +63,7 @@ def _supplemental_pts(sup: Any) -> float:
             "sofascore_xg",
             "fotmob_xg",
             "soccerstats_positions",
+            "api_squad_depth",
         )
     )
     if high_value:

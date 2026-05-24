@@ -20,7 +20,7 @@ SOURCE_CATALOG: List[Dict[str, Any]] = [
         "focus": "Fixtures, standings, team stats, recent form, injuries, odds and selected fixture statistics",
         "status": "wired",
         "module": "hibs_predictor.api_clients.ApiSportsFootballClient",
-        "notes": "Documented API-Football endpoints; standings try current then previous season for completed/thin windows.",
+        "notes": "Documented API-Football endpoints; standings try current then previous season for completed/thin windows. Squad depth via ``players/squads`` when ``HIBS_ENABLE_API_SQUAD_DEPTH=1``.",
     },
     {
         "id": "football_data_org",
@@ -44,7 +44,7 @@ SOURCE_CATALOG: List[Dict[str, Any]] = [
         "focus": "Deep squad tables, advanced metrics, Opta-backed stats on many leagues",
         "status": "wired",
         "module": "hibs_predictor.scrapers.fbref_client",
-        "notes": "HTML tables; follow Sports Reference robots; heavy path in collect_supplemental. May 403 from datacenter IPs — set HIBS_FBREF_BLOCKED=1 on VPS.",
+        "notes": "HTML tables; follow Sports Reference robots; heavy path in collect_supplemental. May 403 from datacenter IPs — set HIBS_FBREF_BLOCKED=1 on VPS; curl_cffi rarely fixes datacenter blocks.",
     },
     {
         "id": "understat",
@@ -100,7 +100,7 @@ SOURCE_CATALOG: List[Dict[str, Any]] = [
         "focus": "xG/team-stat enrichment",
         "status": "deferred",
         "module": "hibs_predictor.scrapers.xgstat_client",
-        "notes": "Probe-only: no stable public JSON API found; not in enrichment pipeline.",
+        "notes": "Probe-only: no stable public JSON API found; xG covered by Understat/FotMob/API chain.",
     },
     {
         "id": "besoccer",
@@ -108,7 +108,7 @@ SOURCE_CATALOG: List[Dict[str, Any]] = [
         "focus": "Fixtures, tables, team/news pages",
         "status": "deferred",
         "module": "hibs_predictor.scrapers.besoccer_client",
-        "notes": "Probe-only: site reachable but no documented public JSON feed; not wired.",
+        "notes": "Probe-only: site reachable but no documented public JSON feed; use SoccerStats/API-FotMob instead.",
     },
     {
         "id": "transfermarkt",
@@ -116,7 +116,7 @@ SOURCE_CATALOG: List[Dict[str, Any]] = [
         "focus": "Transfers, market values, injuries, squad depth",
         "status": "deferred",
         "module": "hibs_predictor.scrapers.transfermarkt_client",
-        "notes": "Robots probe only; injuries via API-Football. Squad/injury HTML parser deferred pending ToS review.",
+        "notes": "Robots probe only; production injuries + squad via API-Football (not Transfermarkt HTML).",
     },
     {
         "id": "footystats",

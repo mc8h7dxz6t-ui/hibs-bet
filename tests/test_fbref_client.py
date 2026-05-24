@@ -66,6 +66,8 @@ def test_probe_squad_table_blocked_env(monkeypatch):
     assert pr["ok"] is False
     assert pr["blocked"] is True
     assert pr.get("skipped_env") is True
+    assert "curl_cffi" in pr
+    assert "Understat" in (pr.get("error") or "")
 
 
 def test_probe_squad_table_http_403():

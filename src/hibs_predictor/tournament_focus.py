@@ -1,7 +1,9 @@
 """Tournament / international focus mode (World Cup window, env-driven).
 
-When active, fixture fetch is limited to international competition codes (fewer API
-calls on VPS) and the dashboard defaults to the International region filter.
+When active, fixture fetch defaults to international competition codes only (fewer
+API calls on VPS) and the dashboard defaults to the International region filter.
+Pass ``include_domestic=True`` (dashboard ``?domestic=1``) to fetch all leagues when
+the user picks All / UK / European region chips.
 """
 
 from __future__ import annotations
@@ -19,8 +21,8 @@ INTERNATIONAL_FOCUS_LEAGUE_CODES = [
     "EUROS",
 ]
 
-_DEFAULT_AUTO_START = date(2026, 5, 15)
-_DEFAULT_AUTO_END = date(2026, 7, 31)
+_DEFAULT_AUTO_START = date(2026, 6, 11)
+_DEFAULT_AUTO_END = date(2026, 7, 18)
 
 
 def _env_truthy(name: str) -> bool:
@@ -107,14 +109,22 @@ def dashboard_default_region(*, today: Optional[date] = None) -> str:
     return "international" if tournament_focus_active(today=today) else ""
 
 
-def league_codes_for_fetch(*, today: Optional[date] = None) -> List[str]:
-    if tournament_focus_active(today=today):
+def league_codes_for_fetch(
+    *,
+    today: Optional[date] = None,
+    include_domestic: bool = False,
+) -> List[str]:
+    if tournament_focus_active(today=today) and not include_domestic:
         return list(INTERNATIONAL_FOCUS_LEAGUE_CODES)
     return list(ALL_LEAGUE_CODES)
 
 
-def effective_dashboard_league_order(*, today: Optional[date] = None) -> List[str]:
-    if tournament_focus_active(today=today):
+def effective_dashboard_league_order(
+    *,
+    today: Optional[date] = None,
+    include_domestic: bool = False,
+) -> List[str]:
+    if tournament_focus_active(today=today) and not include_domestic:
         return list(INTERNATIONAL_FOCUS_LEAGUE_CODES)
     return list(DASHBOARD_LEAGUE_ORDER)
 
@@ -146,16 +156,22 @@ def prioritize_fixtures_for_focus(
     return primary + secondary
 
 
-def tournament_focus_context(*, today: Optional[date] = None) -> Dict[str, Any]:
+def tournament_focus_context(
+    *,
+    today: Optional[date] = None,
+    include_domestic: bool = False,
+) -> Dict[str, Any]:
     active = tournament_focus_active(today=today)
     mode = tournament_focus_mode(today=today) or ""
     start, end = _auto_window()
+    intl_only = active and not include_domestic
     return {
         "active": active,
         "mode": mode,
         "label": tournament_focus_label(today=today) if active else "",
         "default_region": dashboard_default_region(today=today),
-        "fetch_leagues": list(INTERNATIONAL_FOCUS_LEAGUE_CODES) if active else [],
+        "fetch_leagues": list(league_codes_for_fetch(today=today, include_domestic=include_domestic)),
+        "intl_only_fetch": intl_only,
         "auto_window_start": start.isoformat(),
         "auto_window_end": end.isoformat(),
     }

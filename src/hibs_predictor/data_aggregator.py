@@ -795,51 +795,66 @@ class DataAggregator:
             fid_int = int(raw_fid) if raw_fid not in (None, "", "0", 0) else 0
         except (TypeError, ValueError):
             fid_int = 0
-        if fid_int and "api_sports" in self.clients and os.getenv("HIBS_SKIP_API_INJURIES", "0").lower() not in (
-            "1",
-            "true",
-            "yes",
+        core_ready = self._core_enrich_ready(enriched, home_id, away_id)
+        if (
+            core_ready
+            and fid_int
+            and "api_sports" in self.clients
+            and os.getenv("HIBS_SKIP_API_INJURIES", "0").lower() not in ("1", "true", "yes")
         ):
             try:
                 enriched["fixture_injuries"] = self.clients["api_sports"].fetch_injuries(fid_int)
             except Exception:
                 enriched["fixture_injuries"] = []
         else:
-            enriched["fixture_injuries"] = []
-        try:
-            self._maybe_attach_player_insight(enriched, league_code, season)
-        except Exception as exc:
-            print(f"[enrich player_insight] {league_code} fid={fixture_id_str}: {exc!r}")
+            enriched.setdefault("fixture_injuries", [])
+        if core_ready:
+            try:
+                self._maybe_attach_player_insight(enriched, league_code, season)
+            except Exception as exc:
+                print(f"[enrich player_insight] {league_code} fid={fixture_id_str}: {exc!r}")
         try:
             from hibs_predictor.team_news_enrich import apply_team_news_fields
 
             apply_team_news_fields(enriched)
         except Exception as exc:
             print(f"[enrich team_news] {league_code} fid={fixture_id_str}: {exc!r}")
-        try:
-            from hibs_predictor.lineup_enrich import (
-                apply_lineup_fields,
-                lineup_cache_ttl_hours,
-                should_fetch_lineups,
-            )
-
-            raw_lineups = None
-            if fid_int and "api_sports" in self.clients and should_fetch_lineups(
-                enriched, api_client_present=True
-            ):
-                ttl = lineup_cache_ttl_hours(enriched)
-                raw_lineups = self.clients["api_sports"].fetch_fixture_lineups(fid_int, ttl_hours=ttl)
-            apply_lineup_fields(enriched, raw_lineups=raw_lineups)
-        except Exception as exc:
-            print(f"[enrich lineup] {league_code} fid={fixture_id_str}: {exc!r}")
+        if core_ready and fid_int and "api_sports" in self.clients:
             try:
-                from hibs_predictor.lineup_enrich import apply_lineup_fields
+                from hibs_predictor.squad_depth_enrich import attach_api_squad_depth
 
-                apply_lineup_fields(enriched)
-            except Exception:
-                enriched.setdefault("fixture_lineups", None)
-                enriched.setdefault("lineup_confirmed", False)
-                enriched.setdefault("lineup_meta", {})
+                attach_api_squad_depth(enriched, self.clients["api_sports"], season=season)
+            except Exception as exc:
+                print(f"[enrich squad_depth] {league_code} fid={fixture_id_str}: {exc!r}")
+        if core_ready:
+            try:
+                from hibs_predictor.lineup_enrich import (
+                    apply_lineup_fields,
+                    lineup_cache_ttl_hours,
+                    should_fetch_lineups,
+                )
+
+                raw_lineups = None
+                if fid_int and "api_sports" in self.clients and should_fetch_lineups(
+                    enriched, api_client_present=True
+                ):
+                    ttl = lineup_cache_ttl_hours(enriched)
+                    raw_lineups = self.clients["api_sports"].fetch_fixture_lineups(fid_int, ttl_hours=ttl)
+                apply_lineup_fields(enriched, raw_lineups=raw_lineups)
+            except Exception as exc:
+                print(f"[enrich lineup] {league_code} fid={fixture_id_str}: {exc!r}")
+                try:
+                    from hibs_predictor.lineup_enrich import apply_lineup_fields
+
+                    apply_lineup_fields(enriched)
+                except Exception:
+                    enriched.setdefault("fixture_lineups", None)
+                    enriched.setdefault("lineup_confirmed", False)
+                    enriched.setdefault("lineup_meta", {})
+        else:
+            enriched.setdefault("fixture_lineups", None)
+            enriched.setdefault("lineup_confirmed", False)
+            enriched.setdefault("lineup_meta", {})
         try:
             enriched["supplemental"] = collect_supplemental(fixture, league_code, enriched)
         except Exception as exc:
@@ -900,12 +915,27 @@ class DataAggregator:
         home_id: Optional[int],
         away_id: Optional[int],
     ) -> bool:
-        """True when a team id exists but no finished recent matches were loaded (retry, don't freeze empty)."""
+        """True when core API inputs are missing (retry, don't freeze thin rows after 429)."""
+        from hibs_predictor.data_quality import _has_stats
+
         if home_id and not (enriched.get("home_recent") or []):
             return True
         if away_id and not (enriched.get("away_recent") or []):
             return True
+        if home_id and not _has_stats(enriched.get("home_stats")):
+            return True
+        if away_id and not _has_stats(enriched.get("away_stats")):
+            return True
         return False
+
+    @staticmethod
+    def _core_enrich_ready(
+        enriched: Dict[str, Any],
+        home_id: Optional[int],
+        away_id: Optional[int],
+    ) -> bool:
+        """Skip optional API calls (lineups, squad, injuries) until form + stats are loaded."""
+        return not DataAggregator._enriched_needs_recent_refetch(enriched, home_id, away_id)
 
     def _fetch_team_stats(
         self,

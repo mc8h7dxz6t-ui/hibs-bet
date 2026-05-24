@@ -194,15 +194,18 @@ def _audit_snapshot() -> Dict[str, Any]:
             "message": report.get("message") or "No scored predictions yet; enable logging and sync results after matches finish.",
             "n_used_metrics": 0,
             "brier_by_data_quality_bucket": report.get("brier_by_data_quality_bucket") or [],
+            "clv_by_league": report.get("clv_by_league"),
         }
-    return {
+    out_audit = {
         "ok": True,
         "n_used_metrics": report.get("n_used_metrics"),
         "brier_score_1x2": report.get("brier_score_1x2"),
         "log_loss_1x2": report.get("log_loss_1x2"),
         "value_hit_rate": report.get("value_hit_rate"),
         "brier_by_data_quality_bucket": report.get("brier_by_data_quality_bucket") or [],
+        "clv_by_league": report.get("clv_by_league"),
     }
+    return out_audit
 
 
 def build_insights(fixtures: List[Dict[str, Any]]) -> Dict[str, Any]:

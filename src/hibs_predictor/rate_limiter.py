@@ -1,6 +1,7 @@
 """Rate limiter for tracking API calls against free-tier limits."""
 
 import json
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict
@@ -11,7 +12,7 @@ class RateLimiter:
         self.state_file = Path(state_file)
         self.limits = {
             "football_data_org": 100,
-            "api_sports": 150,
+            "api_sports": int(os.getenv("HIBS_API_SPORTS_HOURLY_LIMIT", "400")),
             "sportsmonk": 150,
             "odds_api": 500,
             "stats_api": 150,
@@ -20,10 +21,15 @@ class RateLimiter:
 
     def _load_state(self) -> None:
         if self.state_file.exists():
-            with open(self.state_file, "r") as f:
-                self.state = json.load(f)
-        else:
-            self.state = {key: {"count": 0, "reset_at": None} for key in self.limits}
+            try:
+                with open(self.state_file, "r") as f:
+                    self.state = json.load(f)
+                if not isinstance(self.state, dict):
+                    raise ValueError("rate limit state is not an object")
+                return
+            except (json.JSONDecodeError, ValueError, OSError):
+                pass
+        self.state = {key: {"count": 0, "reset_at": None} for key in self.limits}
 
     def _save_state(self) -> None:
         with open(self.state_file, "w") as f:

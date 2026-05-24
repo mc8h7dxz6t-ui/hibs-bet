@@ -1,0 +1,19 @@
+<div id="hibs-launch-overlay" class="hibs-launch-overlay" role="status" aria-live="polite" aria-busy="true" aria-label="Loading dashboard" style="position:fixed;inset:0;z-index:100010;display:flex;align-items:center;justify-content:center;background:#060e18;">
+    <div class="hibs-launch-backdrop"></div>
+    {% if launch_media_enabled %}
+    <div class="hibs-launch-video-wrap">
+        <video class="hibs-launch-video" muted autoplay loop playsinline
+               src="{{ url_for('static', filename='launch-wait.mp4') }}"
+               aria-hidden="true"></video>
+    </div>
+    {% endif %}
+    <div class="hibs-launch-panel">
+        <img class="hibs-launch-crest" src="{{ url_for('static', filename='badge_harp_shield.png') }}" alt="" width="92" height="92">
+        <p class="hibs-launch-brand">hibs-bet</p>
+        <p class="hibs-launch-tagline">Edinburgh Betting Intelligence</p>
+        <div class="hibs-launch-tip-wrap">
+            <p class="hibs-launch-tip" id="hibs-launch-tip">Fetching fixtures…</p>
+        </div>
+        <div class="hibs-launch-bar" aria-hidden="true"><span class="hibs-launch-bar-fill"></span></div>
+    </div>
+</div>
