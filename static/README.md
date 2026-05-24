@@ -1,5 +1,9 @@
 # Static assets
 
+## Badge assets
+
+Use `badge_harp_shield.png` for all user-facing crest/badge UI (headers, favicon, launch overlay, watermarks). `hibs_badge.svg` is deprecated and must not be used — it is not an official Hibernian crest.
+
 ## Optional launch video (`launch-wait.mp4`)
 
 The dashboard can show a full-screen loading overlay while fixtures and enrichment load. By default it uses CSS-only branding (Hibs crest + rotating tips).
