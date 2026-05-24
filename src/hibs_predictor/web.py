@@ -2098,6 +2098,22 @@ def api_audit_summary():
     return jsonify(report_summary_dict())
 
 
+@app.route("/api/monitor/summary")
+@login_required
+def api_monitor_summary():
+    """Rolling-window prediction vs outcome metrics (HIBS_MONITOR_DAYS, default 28)."""
+    from hibs_predictor.prediction_log import monitor_summary_dict
+
+    days_arg = request.args.get("days")
+    days: Optional[int] = None
+    if days_arg:
+        try:
+            days = max(1, min(365, int(days_arg)))
+        except ValueError:
+            return jsonify({"ok": False, "error": "invalid_days"}), 400
+    return jsonify(monitor_summary_dict(days=days))
+
+
 @app.route("/api/cache/clear", methods=["POST", "GET"])
 @login_required
 def api_cache_clear():

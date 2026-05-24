@@ -560,6 +560,240 @@ def _rows_with_results(conn: sqlite3.Connection) -> List[sqlite3.Row]:
     )
 
 
+def _monitor_days() -> int:
+    try:
+        return max(1, int(os.getenv("HIBS_MONITOR_DAYS", "28")))
+    except ValueError:
+        return 28
+
+
+def _monitor_cutoff_iso(*, days: Optional[int] = None) -> str:
+    d = days if days is not None else _monitor_days()
+    return (datetime.now(timezone.utc) - timedelta(days=int(d))).isoformat()
+
+
+def pred_log_sync_cron_status() -> Dict[str, Any]:
+    """Whether pred-log-sync appears scheduled (crontab) and log freshness."""
+    log_path = (os.getenv("HIBS_PRED_LOG_SYNC_LOG") or "/var/log/hibs-bet/pred-log-sync.log").strip()
+    marker = "pred-log-sync"
+    scheduled = False
+    cron_user = ""
+    try:
+        import subprocess
+
+        for user in ("www-data", "root"):
+            proc = subprocess.run(
+                ["crontab", "-u", user, "-l"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if proc.returncode == 0 and marker in (proc.stdout or ""):
+                scheduled = True
+                cron_user = user
+                break
+    except Exception:
+        pass
+
+    log_exists = os.path.isfile(log_path)
+    log_age_hours: Optional[float] = None
+    if log_exists:
+        log_age_hours = round((datetime.now(timezone.utc).timestamp() - os.path.getmtime(log_path)) / 3600.0, 1)
+
+    needs_reminder = prediction_log_enabled() and not scheduled
+    message = ""
+    if needs_reminder:
+        message = (
+            "Install daily pred-log-sync: sudo bash /opt/hibs-bet/deploy/cron-hibs-calibration.sh --install"
+        )
+    elif scheduled and log_exists and log_age_hours is not None and log_age_hours > 48:
+        message = f"Cron present but log stale ({log_age_hours}h) — check {log_path}"
+
+    return {
+        "scheduled": scheduled,
+        "cron_user": cron_user or None,
+        "log_path": log_path,
+        "log_exists": log_exists,
+        "log_age_hours": log_age_hours,
+        "needs_reminder": needs_reminder,
+        "message": message,
+    }
+
+
+def _rows_in_monitor_window(
+    conn: sqlite3.Connection,
+    *,
+    days: Optional[int] = None,
+    scored_only: bool = False,
+) -> List[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    cutoff = _monitor_cutoff_iso(days=days)
+    sql = """
+        SELECT id, league_code, prediction_json, result_outcome, data_quality_pct,
+               enrich_summary_json, captured_at
+        FROM prediction_snapshots
+        WHERE captured_at >= ?
+    """
+    if scored_only:
+        sql += " AND result_outcome IS NOT NULL AND result_outcome != ''"
+    sql += " ORDER BY captured_at"
+    return list(conn.execute(sql, (cutoff,)).fetchall())
+
+
+def monitor_summary_dict(*, days: Optional[int] = None) -> Dict[str, Any]:
+    """Rolling-window prediction vs outcome metrics (default HIBS_MONITOR_DAYS=28)."""
+    window_days = days if days is not None else _monitor_days()
+    cutoff = _monitor_cutoff_iso(days=window_days)
+    enabled = prediction_log_enabled()
+    base: Dict[str, Any] = {
+        "ok": True,
+        "enabled": enabled,
+        "window_days": window_days,
+        "window_start_utc": cutoff[:10],
+        "db_path": _db_path(),
+        "prediction_log_enabled": enabled,
+        "clv_log_enabled": _clv_enabled(),
+        "pred_log_sync_cron": pred_log_sync_cron_status(),
+    }
+    if not os.path.isfile(_db_path()):
+        base.update(
+            {
+                "ok": False,
+                "error": "no_database",
+                "n_logged": 0,
+                "n_scored": 0,
+                "message": "No audit database yet — enable HIBS_PREDICTION_LOG_ENABLED=1 and use the dashboard.",
+            }
+        )
+        return base
+
+    init_db()
+    conn = sqlite3.connect(_db_path(), timeout=20)
+    try:
+        rows_all = _rows_in_monitor_window(conn, days=window_days, scored_only=False)
+        rows_scored = _rows_in_monitor_window(conn, days=window_days, scored_only=True)
+    finally:
+        conn.close()
+
+    n_logged = len(rows_all)
+    n_scored = len(rows_scored)
+    base["n_logged"] = n_logged
+    base["n_scored"] = n_scored
+
+    if n_scored == 0:
+        base["message"] = (
+            "No scored rows in window yet — run pred-log-sync after matches finish."
+            if n_logged
+            else "No snapshots in window — predictions accumulate when the dashboard runs."
+        )
+        base["by_league"] = []
+        return base
+
+    brier_sum = 0.0
+    logloss_sum = 0.0
+    pick_correct = 0
+    pick_attempts = 0
+    n_metrics = 0
+    clv_n = 0
+    clv_beat = 0
+    clv_pp_sum = 0.0
+    by_league: Dict[str, Dict[str, Any]] = {}
+
+    for r in rows_scored:
+        try:
+            pred = json.loads(r["prediction_json"])
+        except Exception:
+            continue
+        probs = pred.get("probabilities") or {}
+        ph = _safe_prob(probs.get("home"))
+        pd = _safe_prob(probs.get("draw"))
+        pa = _safe_prob(probs.get("away"))
+        out = (r["result_outcome"] or "").lower()
+        if out not in ("home", "draw", "away"):
+            continue
+        yh, yd, ya = (1.0, 0.0, 0.0) if out == "home" else ((0.0, 1.0, 0.0) if out == "draw" else (0.0, 0.0, 1.0))
+        brier = (ph - yh) ** 2 + (pd - yd) ** 2 + (pa - ya) ** 2
+        p_correct = ph if out == "home" else (pd if out == "draw" else pa)
+        brier_sum += brier
+        logloss_sum += -math.log(p_correct)
+        n_metrics += 1
+
+        pick = (pred.get("predicted_outcome") or "").lower()
+        if pick in ("home", "draw", "away"):
+            pick_attempts += 1
+            if pick == out:
+                pick_correct += 1
+
+        lg = str(r["league_code"] or "unknown")
+        bucket = by_league.setdefault(
+            lg,
+            {"league": lg, "n_scored": 0, "brier_sum": 0.0, "pick_correct": 0, "pick_attempts": 0, "clv_n": 0, "clv_beat": 0},
+        )
+        bucket["n_scored"] += 1
+        bucket["brier_sum"] += brier
+        if pick in ("home", "draw", "away"):
+            bucket["pick_attempts"] += 1
+            if pick == out:
+                bucket["pick_correct"] += 1
+
+        try:
+            enrich = json.loads(r["enrich_summary_json"] or "")
+        except Exception:
+            enrich = {}
+        clv = enrich.get("clv") if isinstance(enrich, dict) else None
+        if isinstance(clv, dict) and clv.get("clv_pp") is not None:
+            try:
+                pp_f = float(clv["clv_pp"])
+            except (TypeError, ValueError):
+                pp_f = None
+            if pp_f is not None:
+                clv_n += 1
+                clv_pp_sum += pp_f
+                bucket["clv_n"] += 1
+                if pp_f > 0:
+                    clv_beat += 1
+                    bucket["clv_beat"] += 1
+
+    if n_metrics == 0:
+        base["message"] = "Scored rows in window lack parseable 1X2 results."
+        base["by_league"] = []
+        return base
+
+    n_eff = max(1, n_metrics)
+    base.update(
+        {
+            "n_used_metrics": n_metrics,
+            "brier_score_1x2": round(brier_sum / n_eff, 5),
+            "log_loss_1x2": round(logloss_sum / n_eff, 5),
+            "best_pick_accuracy_pct": round(100.0 * pick_correct / pick_attempts, 2) if pick_attempts else None,
+            "best_pick_n": pick_attempts,
+            "best_pick_correct": pick_correct,
+        }
+    )
+    if clv_n:
+        base["clv_n"] = clv_n
+        base["beat_close_pct"] = round(100.0 * clv_beat / clv_n, 2)
+        base["avg_clv_pp"] = round(clv_pp_sum / clv_n, 2)
+
+    league_rows: List[Dict[str, Any]] = []
+    for lg, b in sorted(by_league.items(), key=lambda x: -x[1]["n_scored"]):
+        ns = int(b["n_scored"])
+        pa = int(b["pick_attempts"])
+        cn = int(b["clv_n"])
+        row: Dict[str, Any] = {
+            "league": lg,
+            "n_scored": ns,
+            "brier": round(b["brier_sum"] / ns, 5) if ns else None,
+            "best_pick_accuracy_pct": round(100.0 * b["pick_correct"] / pa, 2) if pa else None,
+        }
+        if cn:
+            row["clv_n"] = cn
+            row["beat_close_pct"] = round(100.0 * b["clv_beat"] / cn, 2)
+        league_rows.append(row)
+    base["by_league"] = league_rows
+    return base
+
+
 def report_summary_dict() -> Dict[str, Any]:
     """Brier score (1X2), log loss, counts, optional value-hit — for API + CLI."""
     if not os.path.isfile(_db_path()):

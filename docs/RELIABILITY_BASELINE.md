@@ -48,7 +48,7 @@ sudo systemctl restart hibs-bet
 1. **More lineup coverage** — raise `HIBS_LINEUP_FETCH_MAX_HOURS` to `12` or `24` if quota allows.
 2. **Squad depth** — set `HIBS_SKIP_API_SQUAD_DEPTH=0` only if 429s stay low for a week.
 3. **Lighter load** — set `HIBS_FETCH_DAYS=5` or `HIBS_DASHBOARD_LITE=1` if home page times out.
-4. **World Cup window** — remove `HIBS_TOURNAMENT_FOCUS=0` or set `HIBS_TOURNAMENT_FOCUS=worldcup` from 2026-06-11.
+4. **World Cup window** — see [World Cup / international period](#world-cup--international-period) below.
 5. **Injury sensitivity** — lower `HIBS_INJURY_LAMBDA_MAX_CUT` (e.g. `0.05`) for a gentler effect.
 6. **Cup load** — cups skip full standings fetch automatically; set `HIBS_SKIP_API_STANDINGS=1` if quota is tight (form/last-10 still enrich).
 7. **Recent results scorers** — on by default (`HIBS_RESULTS_FETCH_EVENTS=1`, max 12 calls/refresh, 24h per-fixture cache). Set `HIBS_RESULTS_FETCH_EVENTS=0` to disable. Scorelines always come from fixture `goals`; scorers only from real events data.
@@ -69,3 +69,33 @@ sudo systemctl restart hibs-bet
 Or use **Settings → Clear cache** in the UI (requires login). Wait one full dashboard load (~2–3 min) before judging DQ.
 
 Check `/api/health` for API quota and enrichment errors.
+
+## World Cup / international period
+
+Auto focus window: **2026-06-11 → 2026-07-18** (override with `HIBS_TOURNAMENT_FOCUS_START` / `HIBS_TOURNAMENT_FOCUS_END`). Friendlies from ~11 June are covered when focus is on (includes `INTL_FRIENDLIES` via API-Football league 10).
+
+| When | `HIBS_TOURNAMENT_FOCUS` | Fetch behaviour | Dashboard default |
+|------|-------------------------|-----------------|-------------------|
+| Before 11 Jun 2026 | `0` (VPS baseline) | All domestic + international leagues | All regions |
+| 11 Jun – 18 Jul 2026 | unset (auto) or `worldcup` | International codes only (`WORLD_CUP`, `NATIONS_LEAGUE`, `EUROS`, friendlies) | International region |
+| User picks All / UK / European | any | Full domestic via `?domestic=1` | Selected region |
+
+**Do not** disable prediction logging, CLV, lineup/injury features, or lower DQ thresholds during the tournament — only the default league fetch set narrows when focus is active without `?domestic=1`.
+
+Suggested env during the window (after removing baseline `HIBS_TOURNAMENT_FOCUS=0`):
+
+```bash
+# Optional explicit override (auto window works without this)
+HIBS_TOURNAMENT_FOCUS=worldcup
+# Keep API budget sane on 2GB VPS
+HIBS_FETCH_DAYS=7
+HIBS_API_SPORTS_HOURLY_LIMIT=400
+HIBS_FIXTURE_FETCH_WORKERS=2
+HIBS_PREDICTION_LOG_ENABLED=1
+HIBS_CLV_LOG_ENABLED=1
+HIBS_MONITOR_DAYS=28
+```
+
+Install cron if missing: `sudo bash /opt/hibs-bet/deploy/cron-hibs-calibration.sh --install` (daily `pred-log-sync`, weekly `calibration-fit`).
+
+FotMob xG league ids: `WORLD_CUP` 77, `EUROS` 50, `NATIONS_LEAGUE` 9806–9809 (friendlies use API xG / form paths when FotMob has no table).

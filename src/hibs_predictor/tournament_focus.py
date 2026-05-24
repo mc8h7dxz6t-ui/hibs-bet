@@ -21,6 +21,9 @@ INTERNATIONAL_FOCUS_LEAGUE_CODES = [
     "EUROS",
 ]
 
+# Optional during World Cup window (API-Football league 10); not in base list until enabled.
+INTL_FRIENDLIES_CODE = "INTL_FRIENDLIES"
+
 _DEFAULT_AUTO_START = date(2026, 6, 11)
 _DEFAULT_AUTO_END = date(2026, 7, 18)
 
@@ -66,6 +69,21 @@ def _mode_from_env_raw(raw: str) -> Optional[str]:
     if raw in ("1", "true", "yes", "on"):
         return "worldcup"
     return None
+
+
+def _friendlies_in_focus(*, today: Optional[date] = None) -> bool:
+    """Include international friendlies in focus fetch when env or World Cup auto window."""
+    if _env_truthy("HIBS_TOURNAMENT_INCLUDE_FRIENDLIES"):
+        return True
+    return tournament_focus_mode(today=today) == "worldcup"
+
+
+def international_focus_league_codes(*, today: Optional[date] = None) -> List[str]:
+    """League codes fetched when tournament focus is on and domestic is excluded."""
+    codes = list(INTERNATIONAL_FOCUS_LEAGUE_CODES)
+    if _friendlies_in_focus(today=today) and INTL_FRIENDLIES_CODE not in codes:
+        codes.insert(1, INTL_FRIENDLIES_CODE)
+    return codes
 
 
 def tournament_focus_mode(*, today: Optional[date] = None) -> Optional[str]:
@@ -115,7 +133,7 @@ def league_codes_for_fetch(
     include_domestic: bool = False,
 ) -> List[str]:
     if tournament_focus_active(today=today) and not include_domestic:
-        return list(INTERNATIONAL_FOCUS_LEAGUE_CODES)
+        return international_focus_league_codes(today=today)
     return list(ALL_LEAGUE_CODES)
 
 
@@ -125,7 +143,7 @@ def effective_dashboard_league_order(
     include_domestic: bool = False,
 ) -> List[str]:
     if tournament_focus_active(today=today) and not include_domestic:
-        return list(INTERNATIONAL_FOCUS_LEAGUE_CODES)
+        return international_focus_league_codes(today=today)
     return list(DASHBOARD_LEAGUE_ORDER)
 
 
@@ -137,7 +155,7 @@ def prioritize_fixtures_for_focus(
     """International fixtures first for assistant / summaries when focus is on."""
     if not tournament_focus_active(today=today):
         return list(fixtures or [])
-    intl = set(INTERNATIONAL_FOCUS_LEAGUE_CODES)
+    intl = set(international_focus_league_codes(today=today))
     primary: List[Dict[str, Any]] = []
     secondary: List[Dict[str, Any]] = []
     for row in fixtures or []:
@@ -145,7 +163,7 @@ def prioritize_fixtures_for_focus(
             primary.append(row)
         else:
             secondary.append(row)
-    order = {code: i for i, code in enumerate(INTERNATIONAL_FOCUS_LEAGUE_CODES)}
+    order = {code: i for i, code in enumerate(international_focus_league_codes(today=today))}
     primary.sort(
         key=lambda f: (
             order.get(str(f.get("league") or ""), 99),
@@ -171,6 +189,7 @@ def tournament_focus_context(
         "label": tournament_focus_label(today=today) if active else "",
         "default_region": dashboard_default_region(today=today),
         "fetch_leagues": list(league_codes_for_fetch(today=today, include_domestic=include_domestic)),
+        "include_friendlies": _friendlies_in_focus(today=today),
         "intl_only_fetch": intl_only,
         "auto_window_start": start.isoformat(),
         "auto_window_end": end.isoformat(),

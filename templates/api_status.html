@@ -42,6 +42,12 @@
             <h2>Feature flags (live)</h2>
             <div id="status-features" class="health-grid"></div>
         </div>
+        <div class="status-section" id="model-monitor">
+            <h2>Model monitor (4 weeks)</h2>
+            <p id="status-monitor-headline" class="status-impact-headline">—</p>
+            <table class="data-table status-xg-table" id="status-monitor-leagues" style="margin-top:10px;font-size:0.78em;width:100%;"></table>
+            <p id="status-monitor-cron" class="status-note" style="margin-top:10px;"></p>
+        </div>
         <div class="status-section">
             <h2>Audit &amp; calibration</h2>
             <p id="status-audit-headline" class="status-impact-headline">—</p>
@@ -164,6 +170,43 @@
                 });
             }
             var ao = d.audit_ops || {};
+            var mon = ao.monitor || {};
+            var mh = document.getElementById('status-monitor-headline');
+            if (mh) {
+                if (parseInt(mon.n_logged, 10) > 0) {
+                    var parts = [mon.n_logged + ' logged', mon.n_scored + ' scored'];
+                    if (mon.brier_score_1x2 != null) {
+                        parts.push('Brier ' + mon.brier_score_1x2);
+                        if (mon.best_pick_accuracy_pct != null) parts.push('best pick ' + mon.best_pick_accuracy_pct + '%');
+                        if (mon.beat_close_pct != null) parts.push('beat-close ' + mon.beat_close_pct + '%');
+                    }
+                    mh.textContent = 'Last ' + (mon.window_days || 28) + 'd: ' + parts.join(' · ');
+                } else {
+                    mh.textContent = mon.message || 'No snapshots in monitor window — enable prediction log and use dashboard.';
+                }
+            }
+            var mTbl = document.getElementById('status-monitor-leagues');
+            if (mTbl) {
+                var mth = '<tr><th>League</th><th>Scored</th><th>Brier</th><th>Pick %</th><th>Beat close</th></tr>';
+                var mbody = (mon.by_league || []).map(function (row) {
+                    return '<tr><td>' + esc(row.league) + '</td><td>' + esc(row.n_scored) + '</td><td>'
+                        + esc(row.brier) + '</td><td>' + esc(row.best_pick_accuracy_pct) + '</td><td>'
+                        + (row.beat_close_pct != null ? esc(row.beat_close_pct) + '%' : '—') + '</td></tr>';
+                }).join('');
+                mTbl.innerHTML = mth + (mbody || '<tr><td colspan="5">No scored rows in window</td></tr>');
+            }
+            var mc = document.getElementById('status-monitor-cron');
+            var cron = ao.pred_log_sync_cron || mon.pred_log_sync_cron || {};
+            if (mc) {
+                if (cron.needs_reminder && cron.message) {
+                    mc.innerHTML = '<strong>Cron:</strong> ' + esc(cron.message);
+                } else if (cron.scheduled) {
+                    mc.textContent = 'pred-log-sync scheduled (' + (cron.cron_user || 'crontab') + ')'
+                        + (cron.log_age_hours != null ? ', log age ' + cron.log_age_hours + 'h' : '');
+                } else {
+                    mc.textContent = '';
+                }
+            }
             var clv = ao.clv_by_league || {};
             var clvN = parseInt(clv.n_clv_rows, 10) || 0;
             var ah = document.getElementById('status-audit-headline');

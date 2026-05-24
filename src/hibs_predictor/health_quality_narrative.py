@@ -118,11 +118,15 @@ def _audit_ops_summary() -> Dict[str, Any]:
             _clv_enabled,
             _enabled as prediction_audit_enabled,
             clv_beat_close_by_league,
+            monitor_summary_dict,
+            pred_log_sync_cron_status,
         )
 
         out["prediction_log_enabled"] = prediction_audit_enabled()
         out["clv_log_enabled"] = _clv_enabled()
         out["clv_by_league"] = clv_beat_close_by_league()
+        out["monitor"] = monitor_summary_dict()
+        out["pred_log_sync_cron"] = pred_log_sync_cron_status()
     except Exception as exc:
         out["clv_by_league"] = {"enabled": False, "leagues": [], "error": str(exc)[:120]}
     try:
@@ -254,6 +258,16 @@ def augment_health_for_ui(health: Dict[str, Any]) -> Dict[str, Any]:
         bullets.append(
             f"League calibration cache: {cal['n_leagues']} league shrink factor(s) "
             f"(generated {cal.get('generated_at', '?')})."
+        )
+    cron = out["audit_ops"].get("pred_log_sync_cron") or {}
+    if cron.get("needs_reminder") and cron.get("message"):
+        bullets.append(cron["message"])
+    mon = out["audit_ops"].get("monitor") or {}
+    if int(mon.get("n_scored") or 0) > 0 and mon.get("brier_score_1x2") is not None:
+        bullets.append(
+            f"Model monitor ({mon.get('window_days', '?')}d): {mon['n_scored']} scored, "
+            f"Brier {mon['brier_score_1x2']}, best-pick accuracy {mon.get('best_pick_accuracy_pct', '?')}% "
+            "(see Insights or /api/monitor/summary)."
         )
 
     out["apis"] = apis

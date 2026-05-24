@@ -335,6 +335,16 @@ LEAGUES = {
         "sportsmonk_id": None,
         "strength_factor": 0.95,
     },
+    "INTL_FRIENDLIES": {
+        "name": "International Friendlies",
+        "country": "International",
+        "region": "International",
+        "flag": "🌍",
+        "football_data_org_id": None,
+        "api_sports_id": 10,
+        "sportsmonk_id": None,
+        "strength_factor": 0.9,
+    },
 }
 
 # All competitions below are fetched for the dashboard window; value detection runs across
@@ -372,6 +382,7 @@ ALL_LEAGUE_CODES = [
     "WORLD_CUP",
     "EUROS",
     "NATIONS_LEAGUE",
+    "INTL_FRIENDLIES",
     "UCL",
     "EUROPA_LEAGUE",
     "UECL",
@@ -389,7 +400,7 @@ LEAGUE_REGIONS = {
         "NORWAY_ELITESERIEN", "FINLAND_VEIKKAUSLIIGA",
         "UCL", "EUROPA_LEAGUE", "UECL",
     ],
-    "🌍 International": ["WORLD_CUP", "EUROS", "NATIONS_LEAGUE"],
+    "🌍 International": ["WORLD_CUP", "EUROS", "NATIONS_LEAGUE", "INTL_FRIENDLIES"],
 }
 
 # Dashboard sidebar region chips (UK = Scotland + England only; UEFA cups are European).
@@ -431,7 +442,7 @@ _DASHBOARD_REGION_EUROPEAN = frozenset(
         "UECL",
     }
 )
-_DASHBOARD_REGION_INTERNATIONAL = frozenset({"WORLD_CUP", "EUROS", "NATIONS_LEAGUE"})
+_DASHBOARD_REGION_INTERNATIONAL = frozenset({"WORLD_CUP", "EUROS", "NATIONS_LEAGUE", "INTL_FRIENDLIES"})
 
 DASHBOARD_FILTER_REGIONS = (
     ("", "All"),

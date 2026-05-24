@@ -100,6 +100,10 @@ def xg_priority_chain_dict() -> Dict[str, Any]:
             "code": "SCOTLAND",
             "note": "FBref schedule xG when not blocked; otherwise API + SoccerStats.",
         },
+        {
+            "code": "WORLD_CUP / EUROS / NATIONS_LEAGUE",
+            "note": "FotMob ids 77 / 50 / 9806–9809 when HIBS_ENABLE_FOTMOB_XG; else API fixture xG and form-derived paths.",
+        },
     ]
     notes: List[str] = []
     if fbref_blocked:

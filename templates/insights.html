@@ -298,6 +298,45 @@
             <p class="ir-meta" style="margin-top:10px;">{{ insights.coverage.player_prop_note }}</p>
         </section>
 
+        <section class="insight-card" id="model-monitor">
+            <h2>Model monitor (4 weeks)</h2>
+            {% set m = insights.monitor %}
+            {% if m.ok and m.n_logged %}
+            <div class="insight-row">
+                <div class="ir-main">{{ m.n_logged }} logged · {{ m.n_scored }} scored (FT)</div>
+                {% if m.n_used_metrics %}
+                <span class="ir-pill">Brier {{ m.brier_score_1x2 }}</span>
+                <span class="ir-pill">Best pick {{ m.best_pick_accuracy_pct }}%</span>
+                {% if m.beat_close_pct is not none %}<span class="ir-pill ir-gold">Beat close {{ m.beat_close_pct }}%</span>{% endif %}
+                {% else %}
+                <span class="ir-pill ir-warn">Awaiting FT sync</span>
+                {% endif %}
+            </div>
+            {% if m.pred_log_sync_cron and m.pred_log_sync_cron.needs_reminder %}
+            <p class="ir-meta" style="color:var(--warn);">{{ m.pred_log_sync_cron.message }}</p>
+            {% endif %}
+            {% if m.by_league %}
+            <table class="data-table" style="margin-top:10px;font-size:0.78em;width:100%;">
+                <thead><tr><th>League</th><th>Scored</th><th>Brier</th><th>Pick %</th><th>CLV beat</th></tr></thead>
+                <tbody>
+                {% for row in m.by_league %}
+                <tr>
+                    <td>{{ row.league }}</td>
+                    <td>{{ row.n_scored }}</td>
+                    <td>{{ row.brier if row.brier is not none else '—' }}</td>
+                    <td>{{ row.best_pick_accuracy_pct if row.best_pick_accuracy_pct is not none else '—' }}</td>
+                    <td>{% if row.beat_close_pct is not none %}{{ row.beat_close_pct }}%{% else %}—{% endif %}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% else %}
+            <div class="empty-mini">{{ m.message or 'Enable HIBS_PREDICTION_LOG_ENABLED=1 and use the dashboard; run pred-log-sync after matches.' }}</div>
+            {% endif %}
+            <p class="ir-meta">Window: last {{ m.window_days or 28 }} days · <a href="/status#model-monitor">API status</a> · JSON <code>/api/monitor/summary</code></p>
+        </section>
+
         <section class="insight-card">
             <h2>Calibration Snapshot</h2>
             {% if insights.audit.n_used_metrics %}

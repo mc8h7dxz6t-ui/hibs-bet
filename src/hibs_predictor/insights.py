@@ -187,6 +187,15 @@ def _avoid_watchlist(packets: List[Dict[str, Any]], limit: int = 8) -> List[Dict
     return rows[:limit]
 
 
+def _monitor_snapshot() -> Dict[str, Any]:
+    try:
+        from hibs_predictor.prediction_log import monitor_summary_dict
+
+        return monitor_summary_dict()
+    except Exception as exc:
+        return {"ok": False, "message": f"monitor unavailable: {exc!r}"}
+
+
 def _audit_snapshot() -> Dict[str, Any]:
     try:
         report = report_summary_dict()
@@ -232,4 +241,5 @@ def build_insights(fixtures: List[Dict[str, Any]]) -> Dict[str, Any]:
         "trust_digest": _trust_digest(packets),
         "avoid_watchlist": _avoid_watchlist(packets),
         "audit": _audit_snapshot(),
+        "monitor": _monitor_snapshot(),
     }

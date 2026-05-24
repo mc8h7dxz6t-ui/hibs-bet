@@ -8,9 +8,11 @@ import pytest
 
 from hibs_predictor.config import ALL_LEAGUE_CODES
 from hibs_predictor.tournament_focus import (
+    INTL_FRIENDLIES_CODE,
     INTERNATIONAL_FOCUS_LEAGUE_CODES,
     dashboard_default_region,
     effective_dashboard_league_order,
+    international_focus_league_codes,
     league_codes_for_fetch,
     prioritize_fixtures_for_focus,
     tournament_focus_active,
@@ -24,6 +26,7 @@ def _clear_focus_env(monkeypatch):
     monkeypatch.delenv("HIBS_FOCUS_INTERNATIONAL", raising=False)
     monkeypatch.delenv("HIBS_TOURNAMENT_FOCUS_START", raising=False)
     monkeypatch.delenv("HIBS_TOURNAMENT_FOCUS_END", raising=False)
+    monkeypatch.delenv("HIBS_TOURNAMENT_INCLUDE_FRIENDLIES", raising=False)
 
 
 def test_focus_off_outside_auto_window(monkeypatch):
@@ -62,7 +65,7 @@ def test_focus_auto_on_at_window_start(monkeypatch):
     )
     assert tournament_focus_mode() == "worldcup"
     assert tournament_focus_active() is True
-    assert league_codes_for_fetch() == INTERNATIONAL_FOCUS_LEAGUE_CODES
+    assert league_codes_for_fetch() == international_focus_league_codes()
     assert dashboard_default_region() == "international"
 
 
@@ -73,9 +76,9 @@ def test_focus_auto_on_in_world_cup_window(monkeypatch):
     )
     assert tournament_focus_mode() == "worldcup"
     assert tournament_focus_active() is True
-    assert league_codes_for_fetch() == INTERNATIONAL_FOCUS_LEAGUE_CODES
+    assert league_codes_for_fetch() == international_focus_league_codes()
     assert dashboard_default_region() == "international"
-    assert effective_dashboard_league_order() == INTERNATIONAL_FOCUS_LEAGUE_CODES
+    assert effective_dashboard_league_order() == international_focus_league_codes()
 
 
 def test_focus_auto_on_at_window_end(monkeypatch):
@@ -84,7 +87,7 @@ def test_focus_auto_on_at_window_end(monkeypatch):
         lambda: date(2026, 7, 18),
     )
     assert tournament_focus_active() is True
-    assert league_codes_for_fetch() == INTERNATIONAL_FOCUS_LEAGUE_CODES
+    assert league_codes_for_fetch() == international_focus_league_codes()
 
 
 def test_include_domestic_during_focus(monkeypatch):
@@ -104,7 +107,7 @@ def test_focus_env_worldcup_override(monkeypatch):
         lambda: date(2025, 1, 1),
     )
     assert tournament_focus_mode() == "worldcup"
-    assert league_codes_for_fetch() == INTERNATIONAL_FOCUS_LEAGUE_CODES
+    assert league_codes_for_fetch() == international_focus_league_codes()
 
 
 def test_focus_env_disabled_in_window(monkeypatch):
@@ -137,6 +140,30 @@ def test_international_comp_codes_in_focus_list():
     assert "NATIONS_LEAGUE" in INTERNATIONAL_FOCUS_LEAGUE_CODES
     assert "EUROS" in INTERNATIONAL_FOCUS_LEAGUE_CODES
     assert "EPL" not in INTERNATIONAL_FOCUS_LEAGUE_CODES
+
+
+def test_friendlies_in_worldcup_auto_window(monkeypatch):
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 6, 15),
+    )
+    codes = international_focus_league_codes()
+    assert INTL_FRIENDLIES_CODE in codes
+
+
+def test_friendlies_off_outside_worldcup(monkeypatch):
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 5, 1),
+    )
+    assert INTL_FRIENDLIES_CODE not in international_focus_league_codes()
+
+
+def test_fotmob_world_cup_and_euros_mapping():
+    from hibs_predictor.scrapers.fotmob_client import FOTMOB_LEAGUE_IDS
+
+    assert 77 in FOTMOB_LEAGUE_IDS["WORLD_CUP"]
+    assert 50 in FOTMOB_LEAGUE_IDS["EUROS"]
 
 
 def test_prioritize_fixtures_for_focus():
