@@ -27,6 +27,8 @@ Prioritises **consistency over new features** — enables player/injury/lineup l
 | `HIBS_ENRICH_API_SEM` | `1` | One team-history API call at a time per worker. |
 | `HIBS_SKIP_HEAVY_WHEN_API_STRONG` | `1` | Skip Understat/FBref when APIs already strong. |
 | `HIBS_AUTH_ENABLED` | `1` | Require login on dashboard/APIs. |
+| `HIBS_RESULTS_FETCH_EVENTS` | `1` | Goal scorers on Recent results via API-Football `fixtures/events` (default on). |
+| `HIBS_RESULTS_MAX_EVENT_FETCHES` | `12` | Max new events API calls per results refresh (24h per-fixture cache). |
 
 Also set by the script (not injury/lineup specific): `HIBS_FETCH_DAYS=7`, `HIBS_MAX_DATA=1`, `HIBS_DASHBOARD_LITE=0`, `HIBS_WARM_FIXTURE_CACHE=1`.
 
@@ -49,7 +51,7 @@ sudo systemctl restart hibs-bet
 4. **World Cup window** — remove `HIBS_TOURNAMENT_FOCUS=0` or set `HIBS_TOURNAMENT_FOCUS=worldcup` from 2026-06-11.
 5. **Injury sensitivity** — lower `HIBS_INJURY_LAMBDA_MAX_CUT` (e.g. `0.05`) for a gentler effect.
 6. **Cup load** — cups skip full standings fetch automatically; set `HIBS_SKIP_API_STANDINGS=1` if quota is tight (form/last-10 still enrich).
-7. **Recent results scorers** — set `HIBS_RESULTS_FETCH_EVENTS=1` and optionally `HIBS_RESULTS_MAX_EVENT_FETCHES=12` to attach API goal scorers (uses cache; off by default).
+7. **Recent results scorers** — on by default (`HIBS_RESULTS_FETCH_EVENTS=1`, max 12 calls/refresh, 24h per-fixture cache). Set `HIBS_RESULTS_FETCH_EVENTS=0` to disable. Scorelines always come from fixture `goals`; scorers only from real events data.
 8. **Shared fixture cache** — dashboard and `/insights` reuse the same `all_fixtures_*` disk cache within TTL; avoid `?refresh=1` unless clearing stale data.
 
 Re-run the apply script after changing baseline keys; it dedupes `HIBS_*` lines and preserves your API keys.

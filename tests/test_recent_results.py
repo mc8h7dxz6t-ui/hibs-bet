@@ -8,8 +8,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from hibs_predictor.recent_results import (
+    _apply_goal_scorers_from_events,
+    _enrich_goal_scorers,
     _normalize_api_sports_result,
     _normalize_fdo_result,
+    _results_fetch_events,
     fetch_league_recent_results,
     fetch_recent_results,
     finalize_results_bundle,
@@ -135,6 +138,7 @@ def test_fetch_league_recent_results_uses_cache(monkeypatch):
 
 def test_fetch_recent_results_merges_leagues(monkeypatch):
     monkeypatch.setenv("HIBS_RESULTS_DAYS", "3")
+    monkeypatch.setenv("HIBS_RESULTS_FETCH_EVENTS", "0")
     monkeypatch.setattr(
         "hibs_predictor.recent_results.league_codes_for_fetch",
         lambda **_: ["EPL", "SCOTLAND"],
@@ -174,3 +178,145 @@ def test_results_window_three_calendar_days(monkeypatch):
     assert end == now
     local_start = start.astimezone(display_timezone()).date()
     assert (now.astimezone(display_timezone()).date() - local_start).days == 2
+
+
+def test_results_fetch_events_default_on(monkeypatch):
+    monkeypatch.delenv("HIBS_RESULTS_FETCH_EVENTS", raising=False)
+    assert _results_fetch_events() is True
+
+
+def test_results_fetch_events_explicit_off(monkeypatch):
+    monkeypatch.setenv("HIBS_RESULTS_FETCH_EVENTS", "0")
+    assert _results_fetch_events() is False
+
+
+def test_normalize_api_sports_preserves_embedded_events():
+    raw = {
+        "fixture": {
+            "id": 100,
+            "date": "2026-05-22T18:00:00+00:00",
+            "status": {"short": "FT"},
+        },
+        "teams": {
+            "home": {"id": 1, "name": "Hibs"},
+            "away": {"id": 2, "name": "Hearts"},
+        },
+        "goals": {"home": 1, "away": 0},
+        "events": [
+            {
+                "type": "Goal",
+                "detail": "Normal Goal",
+                "player": {"name": "Shaw"},
+                "team": {"name": "Hibs"},
+                "time": {"elapsed": 33},
+            }
+        ],
+    }
+    row = _normalize_api_sports_result(raw, "SCOTLAND")
+    assert row is not None
+    assert isinstance(row.get("events"), list)
+    assert len(row["events"]) == 1
+
+
+def test_apply_goal_scorers_from_events_mock_json():
+    row: dict = {"score_home": 2, "score_away": 1}
+    events = [
+        {
+            "type": "Goal",
+            "detail": "Normal Goal",
+            "player": {"name": "Shaw"},
+            "team": {"name": "Hibs"},
+            "time": {"elapsed": 12},
+        },
+        {
+            "type": "Goal",
+            "detail": "Normal Goal",
+            "player": {"name": "Newell"},
+            "team": {"name": "Hibs"},
+            "time": {"elapsed": 78},
+        },
+        {
+            "type": "Goal",
+            "detail": "Normal Goal",
+            "player": {"name": "Shankland"},
+            "team": {"name": "Hearts"},
+            "time": {"elapsed": 55},
+        },
+    ]
+    assert _apply_goal_scorers_from_events(row, events) is True
+    assert "Shaw" in row["goal_scorers_line"]
+    assert "Shankland" in row["goal_scorers_line"]
+
+
+def test_enrich_goal_scorers_uses_cache_and_respects_budget(monkeypatch):
+    monkeypatch.setenv("HIBS_RESULTS_FETCH_EVENTS", "1")
+    monkeypatch.setenv("HIBS_RESULTS_MAX_EVENT_FETCHES", "1")
+    cache = MagicMock()
+    cache.get.return_value = None
+    client = MagicMock()
+    client.rate_limiter.check_rate_limit.return_value = True
+    client._get_json.return_value = {
+        "response": [
+            {
+                "type": "Goal",
+                "detail": "Normal Goal",
+                "player": {"name": "Doku"},
+                "team": {"name": "Man City"},
+                "time": {"elapsed": 4},
+            }
+        ]
+    }
+    agg = MagicMock()
+    agg.clients = {"api_sports": client}
+    rows = [
+        {
+            "id": 501,
+            "status": "FT",
+            "score_home": 2,
+            "score_away": 0,
+            "home": "Man City",
+            "away": "Arsenal",
+        },
+        {
+            "id": 502,
+            "status": "FT",
+            "score_home": 1,
+            "score_away": 1,
+            "home": "Liverpool",
+            "away": "Chelsea",
+        },
+    ]
+    _enrich_goal_scorers(rows, agg, cache)
+    assert client._get_json.call_count == 1
+    assert "Doku" in (rows[0].get("goal_scorers_line") or "")
+    assert "goal_scorers_line" not in rows[1]
+
+
+def test_enrich_goal_scorers_skips_when_rate_limited(monkeypatch):
+    monkeypatch.setenv("HIBS_RESULTS_FETCH_EVENTS", "1")
+    cache = MagicMock()
+    cache.get.return_value = None
+    client = MagicMock()
+    client.rate_limiter.check_rate_limit.return_value = False
+    agg = MagicMock()
+    agg.clients = {"api_sports": client}
+    rows = [
+        {"id": 601, "status": "FT", "score_home": 1, "score_away": 0, "home": "A", "away": "B"},
+    ]
+    _enrich_goal_scorers(rows, agg, cache)
+    client._get_json.assert_not_called()
+    assert "goal_scorers_line" not in rows[0]
+
+
+def test_enrich_goal_scorers_skips_zero_goal_draws(monkeypatch):
+    monkeypatch.setenv("HIBS_RESULTS_FETCH_EVENTS", "1")
+    cache = MagicMock()
+    client = MagicMock()
+    agg = MagicMock()
+    agg.clients = {"api_sports": client}
+    rows = [
+        {"id": 701, "status": "FT", "score_home": 0, "score_away": 0, "home": "A", "away": "B"},
+    ]
+    _enrich_goal_scorers(rows, agg, cache)
+    client._get_json.assert_not_called()
+    cache.get.assert_not_called()

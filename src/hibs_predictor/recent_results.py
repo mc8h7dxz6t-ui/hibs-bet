@@ -39,10 +39,17 @@ def _env_truthy(name: str) -> bool:
 
 
 _EVENTS_CACHE_PREFIX = "api_sports_fixture_events_"
+_EVENTS_CACHE_TTL_HOURS = 24.0
 
 
 def _results_fetch_events() -> bool:
-    return _env_truthy("HIBS_RESULTS_FETCH_EVENTS")
+    """Default ON; set HIBS_RESULTS_FETCH_EVENTS=0 to disable fixtures/events calls."""
+    raw = os.getenv("HIBS_RESULTS_FETCH_EVENTS", "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    return True
 
 
 def _results_max_event_fetches() -> int:
@@ -52,18 +59,40 @@ def _results_max_event_fetches() -> int:
         return 12
 
 
+def _finished_result_status(row: Dict[str, Any]) -> bool:
+    return str(row.get("status") or "").upper() in _API_SPORTS_FINISHED
+
+
+def _result_has_goals(row: Dict[str, Any]) -> bool:
+    try:
+        return int(row.get("score_home") or 0) + int(row.get("score_away") or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _apply_goal_scorers_from_events(row: Dict[str, Any], events: List[Dict[str, Any]]) -> bool:
+    scorers = goal_scorers_from_events(events)
+    if scorers:
+        row["goal_scorers_line"] = format_goal_scorers_line(scorers)
+        return True
+    return False
+
+
 def _enrich_goal_scorers(rows: List[Dict[str, Any]], aggregator: Any, cache: Cache) -> None:
-    """Attach goal scorers when API events are cached or a small fetch budget allows."""
+    """Attach goal scorers for FT results in the lookback window (cached per fixture 24h)."""
     if not rows:
         return
     client = (getattr(aggregator, "clients", None) or {}).get("api_sports")
     budget = _results_max_event_fetches() if _results_fetch_events() else 0
+    rate_limiter = getattr(client, "rate_limiter", None) if client else None
     for row in rows:
+        if not _finished_result_status(row):
+            continue
         embedded = row.get("events")
         if isinstance(embedded, list) and embedded:
-            scorers = goal_scorers_from_events(embedded)
-            if scorers:
-                row["goal_scorers_line"] = format_goal_scorers_line(scorers)
+            _apply_goal_scorers_from_events(row, embedded)
+            continue
+        if not _result_has_goals(row):
             continue
         fid = row.get("id")
         if fid is None or not client:
@@ -73,21 +102,20 @@ def _enrich_goal_scorers(rows: List[Dict[str, Any]], aggregator: Any, cache: Cac
         except (TypeError, ValueError):
             continue
         ck = f"{_EVENTS_CACHE_PREFIX}{fid_int}"
-        events = cache.get(ck, ttl_hours=6.0)
+        events = cache.get(ck, ttl_hours=_EVENTS_CACHE_TTL_HOURS)
         if events is None and budget > 0:
-            if not client.rate_limiter.check_rate_limit("api_sports"):
-                continue
+            if rate_limiter is not None and not rate_limiter.check_rate_limit("api_sports"):
+                break
             try:
                 data = client._get_json("fixtures/events", params={"fixture": fid_int}, use_cache=False)
                 events = data.get("response") if isinstance(data.get("response"), list) else []
-                cache.set(ck, events, ttl_hours=6.0)
+                cache.set(ck, events, ttl_hours=_EVENTS_CACHE_TTL_HOURS)
                 budget -= 1
             except Exception:
                 events = []
+                cache.set(ck, events, ttl_hours=_EVENTS_CACHE_TTL_HOURS)
         if events:
-            scorers = goal_scorers_from_events(events)
-            if scorers:
-                row["goal_scorers_line"] = format_goal_scorers_line(scorers)
+            _apply_goal_scorers_from_events(row, events)
 
 
 def results_days() -> int:
@@ -260,7 +288,8 @@ def _normalize_api_sports_result(raw: Dict[str, Any], league_code: str) -> Optio
         api_round=comp_meta.get("api_round"),
     )
     xg_home, xg_away = _xg_from_api_sports_row(raw)
-    return {
+    embedded_events = raw.get("events")
+    row: Dict[str, Any] = {
         "id": fm.get("id"),
         "home": home.get("name", "?"),
         "away": away.get("name", "?"),
@@ -276,6 +305,9 @@ def _normalize_api_sports_result(raw: Dict[str, Any], league_code: str) -> Optio
         "has_xg": xg_home is not None and xg_away is not None,
         "competition_meta": comp_meta,
     }
+    if isinstance(embedded_events, list) and embedded_events:
+        row["events"] = embedded_events
+    return row
 
 
 def _normalize_fdo_result(match: Dict[str, Any], league_code: str) -> Optional[Dict[str, Any]]:
