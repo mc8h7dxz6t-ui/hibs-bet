@@ -33,7 +33,8 @@
             --glow:rgba(0,122,51,0.14);
             --gold:#f6d889;
             --gold-dim:rgba(246,216,137,0.11);
-            --blue:#9bd5f5;
+            --accent:#c5f5d4;
+            --blue:var(--accent);
             --red:#fca5a5;
             --text:#f8fafc;
             --muted:#94a3b8;
@@ -281,7 +282,8 @@
             --green:#c7f9d7;
             --neon-value:#b8f7d2;
             --gold:#ffe6a7;
-            --blue:#b7ddff;
+            --accent:#d4f7e0;
+            --blue:var(--accent);
             --card:rgba(24,38,32,0.86);
             --border:rgba(221,245,232,0.2);
             --glow:rgba(199,249,215,0.18);
@@ -357,7 +359,7 @@
         .in-play-xg-vs{color:var(--muted);font-size:0.75em;}
         .in-play-xg-track{display:flex;height:6px;border-radius:4px;overflow:hidden;background:rgba(148,163,184,0.2);}
         .in-play-xg-fill-h{background:var(--neon-value);display:block;height:100%;}
-        .in-play-xg-fill-a{background:rgba(96,165,250,0.85);display:block;height:100%;}
+        .in-play-xg-fill-a{background:rgba(0,122,51,0.55);display:block;height:100%;}
         .in-play-stats-table th,.in-play-stats-table td{padding:4px 6px;}
         .search-chips{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:12px;}
         .dash-search{flex:1;min-width:180px;max-width:360px;background:rgba(6,14,24,0.65);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:0.82em;transition:border-color var(--transition-fast),box-shadow var(--transition-fast);}
@@ -371,7 +373,7 @@
             font-family:'Inter',sans-serif;font-weight:600;
             transition:color var(--transition-fast),background var(--transition-fast),border-color var(--transition-fast),box-shadow var(--transition-fast);
         }
-        .chip:hover{color:var(--text);border-color:rgba(148,163,184,0.28);}
+        .chip:hover{color:var(--neon-value);border-color:rgba(0,122,51,0.38);background:rgba(0,122,51,0.08);}
         .chip.active,.chip-lg.active{
             background:rgba(0,122,51,0.14);color:var(--neon-value);border-color:rgba(0,122,51,0.45);
             box-shadow:0 0 12px rgba(0,122,51,0.12);
@@ -441,7 +443,7 @@
         .sky-browser-back:hover{border-color:var(--blue);color:var(--blue);}
         .sky-browser-url{flex:1;min-width:0;height:32px;border:1px solid var(--border);border-radius:8px;background:rgba(2,6,23,0.85);color:var(--muted);font-size:0.72em;font-family:ui-monospace,monospace;padding:0 10px;}
         .sky-browser-open{flex:0 0 auto;font-size:0.68em;font-weight:700;color:var(--blue);white-space:nowrap;text-decoration:none;padding:6px 8px;border-radius:8px;border:1px solid transparent;}
-        .sky-browser-open:hover{border-color:rgba(96,165,250,0.35);background:rgba(96,165,250,0.08);}
+        .sky-browser-open:hover{border-color:rgba(0,122,51,0.4);background:rgba(0,122,51,0.1);}
         .sky-browser-tabs{margin:0;padding:8px 10px 0;border-bottom:1px solid var(--border);flex-shrink:0;}
         .sky-browser-viewport{background:#000;}
         .sky-browser-iframe{display:block;width:100%;height:280px;border:0;}
@@ -585,7 +587,7 @@
         .fr-pred{font-size:0.72em;font-weight:700;margin-top:2px;}
         .fr-pred-home{color:#86efac;}
         .fr-pred-draw{color:#fdba74;}
-        .fr-pred-away{color:#93c5fd;}
+        .fr-pred-away{color:var(--accent);}
         .fr-od{display:block;min-width:0;text-align:center;font-variant-numeric:tabular-nums;font-weight:700;color:var(--text);padding:3px 2px;border-radius:5px;}
         .fr-chev{text-align:center;color:var(--muted);font-size:0.9em;}
         .fr-val-tag{
@@ -694,8 +696,8 @@
         .card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
         .league-pill{
             font-size:0.68em;color:var(--blue);font-weight:700;
-            background:rgba(55,204,255,0.06);padding:2px 8px;
-            border-radius:999px;border:1px solid rgba(55,204,255,0.15);
+            background:rgba(0,122,51,0.1);padding:2px 8px;
+            border-radius:999px;border:1px solid rgba(0,122,51,0.22);
             text-transform:uppercase;letter-spacing:0.04em;
         }
         .kick-off{font-size:0.72em;color:var(--muted);font-weight:600;}
@@ -758,7 +760,7 @@
         .res-L{background:rgba(255,68,68,0.15);color:var(--red);}
         .res-ha{font-size:0.7em;padding:1px 3px;border-radius:3px;flex-shrink:0;}
         .ha-H{background:rgba(124,252,0,0.08);color:var(--green);}
-        .ha-A{background:rgba(55,204,255,0.08);color:var(--blue);}
+        .ha-A{background:rgba(0,122,51,0.1);color:var(--accent);}
         .res-opp{flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
         .res-score{color:var(--text);font-weight:700;flex-shrink:0;}
         .res-date{color:var(--muted);flex-shrink:0;font-size:0.85em;}
@@ -782,7 +784,7 @@
         .gold{color:var(--gold);}
         .kelly-label{display:inline-block;padding:2px 7px;border-radius:999px;font-size:0.7em;font-weight:700;text-transform:uppercase;}
         .kelly-strong{background:rgba(124,252,0,0.12);color:var(--green);border:1px solid rgba(124,252,0,0.25);}
-        .kelly-moderate{background:rgba(55,204,255,0.09);color:var(--blue);border:1px solid rgba(55,204,255,0.2);}
+        .kelly-moderate{background:rgba(0,122,51,0.1);color:var(--accent);border:1px solid rgba(0,122,51,0.22);}
         .kelly-cautious{background:rgba(255,165,0,0.09);color:#FFA500;border:1px solid rgba(255,165,0,0.2);}
         .kelly-skip{background:rgba(255,68,68,0.07);color:var(--red);border:1px solid rgba(255,68,68,0.15);}
 
@@ -808,7 +810,7 @@
         .form-strip{display:flex;gap:3px;flex-wrap:wrap;}
         .ha-badge{font-size:0.72em;padding:1px 4px;border-radius:3px;}
         .ha-H{background:rgba(124,252,0,0.09);color:var(--green);}
-        .ha-A{background:rgba(55,204,255,0.09);color:var(--blue);}
+        .ha-A{background:rgba(0,122,51,0.1);color:var(--accent);}
         .result-W{color:var(--green);font-weight:700;}
         .result-D{color:#FFA500;font-weight:700;}
         .result-L{color:var(--red);font-weight:700;}
@@ -903,6 +905,24 @@
         .betting-guide-body p strong{color:var(--text);}
         .betting-guide-list{margin:6px 0 8px 18px;padding:0;}
         .betting-guide-note{font-size:0.68em;margin:0;}
+        .betting-guide-body a{color:var(--neon-value);text-decoration:underline;text-underline-offset:2px;}
+        .betting-guide-body a:hover{color:var(--accent);}
+        .dash-howto{border:1px solid rgba(167,243,208,0.22);border-radius:12px;margin:0 0 14px;background:linear-gradient(145deg,rgba(20,83,45,0.14),rgba(15,23,42,0.72));}
+        .dash-howto-sum{cursor:pointer;padding:10px 14px;font-size:0.78em;font-weight:700;color:var(--hibs-neon);list-style:none;}
+        .dash-howto-sum::-webkit-details-marker{display:none;}
+        .dash-howto-body{padding:0 14px 12px;font-size:0.76em;line-height:1.5;color:var(--muted);}
+        .dash-howto-body p{margin:0 0 8px;}
+        .dash-howto-body p:last-child{margin-bottom:0;}
+        .term-hint{
+            display:inline-flex;align-items:center;justify-content:center;
+            width:0.95em;height:0.95em;margin-left:3px;border-radius:50%;
+            font-size:0.72em;font-weight:800;line-height:1;vertical-align:super;
+            color:var(--accent);background:rgba(0,122,51,0.14);border:1px solid rgba(0,122,51,0.28);
+            cursor:help;user-select:none;
+        }
+        .term-hint:focus{outline:2px solid rgba(0,122,51,0.45);outline-offset:1px;}
+        a{color:var(--neon-value);}
+        a:hover{color:var(--accent);}
         .vsc-kelly[title]{cursor:help;border-bottom:1px dotted var(--muted);}
 
         /* BETSLIP DRAWER */

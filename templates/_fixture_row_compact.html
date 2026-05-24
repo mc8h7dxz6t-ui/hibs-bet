@@ -1,3 +1,4 @@
+{% from '_term_hint.html' import hint %}
 {% set p = fixture.prediction %}
 {% set model_ok = p and not (p.prediction_unavailable | default(false)) %}
 {% set show_pred = model_ok and p.probabilities_pct is defined %}
@@ -59,7 +60,7 @@
                 <span class="fr-value-lbl">{{ v.market_label }}{% if v.source == 'market_consensus' %} <em class="fr-value-src">cons</em>{% endif %}</span>
                 <span class="fr-value-odds" data-odds-dec="{{ v.odds }}" data-odds-template="@ {odds}">@ {{ "%.2f"|format(v.odds) }}</span>
                 {% if v.edge_pct is defined and v.edge_pct is not none %}
-                <span class="fr-value-edge">+{{ "%.1f"|format(v.edge_pct) }}%</span>
+                <span class="fr-value-edge" title="Edge = model chance minus book implied chance">+{{ "%.1f"|format(v.edge_pct) }}%{{ hint('Edge % = how much higher our model probability is than the book implies.') }}</span>
                 {% endif %}
                 {% if v.value_tier == 'outsider' %}<span class="fr-value-tier">dog</span>{% elif v.value_tier == 'favorite' %}<span class="fr-value-tier">fav</span>{% endif %}
             </span>

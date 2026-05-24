@@ -28,7 +28,7 @@
 
     <section class="settings-hero">
         <h1 class="settings-title">Settings</h1>
-        <p class="settings-sub">Preferences are saved in this browser and applied when pages load. The bet-engine profile is a front-end viewing preference only; it labels your preferred style, but it does not change the server-side prediction model.</p>
+        <p class="settings-sub">Everything here saves in this browser only — nothing changes how predictions are calculated on the server. Use the notes under each option if you are new to the app.</p>
     </section>
 
     <div class="settings-grid">
@@ -41,7 +41,7 @@
                     <option value="conservative">Conservative - probability-first</option>
                     <option value="value">Value-aware - edge-seeking</option>
                 </select>
-                <p>Changes labels and local UI defaults only. Server probabilities, rankings and model calculations are unchanged.</p>
+                <p><strong>Balanced</strong> — mix of probability and value labels. <strong>Conservative</strong> — emphasises model confidence. <strong>Value-aware</strong> — highlights edge and ROI. Does not change server maths.</p>
             </div>
             <div class="setting-row">
                 <label>Odds format</label>
@@ -49,7 +49,7 @@
                     <button type="button" class="ot ot-active" data-odds="dec" aria-pressed="true">Decimal</button>
                     <button type="button" class="ot" data-odds="frac" aria-pressed="false">Fractional</button>
                 </div>
-                <p>Uses the same saved odds preference as the dashboard and insights pages.</p>
+                <p><strong>Decimal</strong> (e.g. 2.50) or <strong>fractional</strong> (e.g. 6/4) — applies on dashboard, insights and acca pages.</p>
             </div>
         </section>
 
@@ -62,6 +62,7 @@
                     <option value="pastel">Pastel glow</option>
                     <option value="low-glow">Low glow</option>
                 </select>
+                <p><strong>Hibs dark</strong> — default navy/green. <strong>Pastel glow</strong> — softer greens. <strong>Low glow</strong> — less neon for long sessions.</p>
             </div>
             <div class="setting-row">
                 <label for="setting-density">Display density</label>
@@ -70,6 +71,7 @@
                     <option value="compact">Compact</option>
                     <option value="spacious">Spacious</option>
                 </select>
+                <p><strong>Comfortable</strong> — default spacing. <strong>Compact</strong> — more rows on screen. <strong>Spacious</strong> — extra padding for readability.</p>
             </div>
             <div class="setting-row">
                 <label for="setting-font">Text style</label>
@@ -78,6 +80,7 @@
                     <option value="system">System font</option>
                     <option value="large">Larger text</option>
                 </select>
+                <p>Inter matches the app branding; system font uses your OS default; larger text bumps base size for accessibility.</p>
             </div>
         </section>
 
@@ -89,7 +92,7 @@
                     <option value="5">5 days — default</option>
                     <option value="7">7 days — European finals week</option>
                 </select>
-                <p>Controls how far ahead the dashboard loads fixtures (saved in this browser). Use <strong>7 days</strong> during UEFA cup finals so late-week matches appear. Changing this reloads the dashboard with <code>?days=5</code> or <code>?days=7</code>; the server also remembers your choice in a cookie. Server default without a choice: {{ fetch_days }} days (env <code>HIBS_FETCH_DAYS</code> optional).</p>
+                <p>How many days of fixtures to load on the dashboard. Pick <strong>7 days</strong> during European finals week so late kick-offs appear. Saved in this browser and synced via <code>?days=</code> on refresh. Server default if unset: {{ fetch_days }} days.</p>
             </div>
         </section>
 
@@ -100,7 +103,7 @@
                     <input type="checkbox" data-hibs-setting-check="fullDataDefault">
                     Start dashboard with Full data filter on
                 </label>
-                <p>Useful when you want the fixture list to start with higher-coverage matches only.</p>
+                <p>When on, the dashboard opens with <strong>Full data</strong> already ticked — hides thin-coverage matches until you turn the filter off.</p>
             </div>
             <div class="setting-row">
                 <label for="setting-data-quality">Full data threshold</label>
@@ -110,7 +113,7 @@
                     <option value="85">85% - standard</option>
                     <option value="90">90% - stricter</option>
                 </select>
-                <p>This changes the local dashboard filter threshold. It does not alter collection, enrichment or predictions.</p>
+                <p>Minimum <strong>data %</strong> for the “Full data” filter (form, xG, odds, etc.). Higher = fewer fixtures, richer stats. Does not change how data is fetched.</p>
             </div>
         </section>
 

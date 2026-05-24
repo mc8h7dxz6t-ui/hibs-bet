@@ -10,6 +10,6 @@
 {% set dq = p.data_quality.score_pct|round(0, 'floor')|int %}
 {% endif %}
 {% if dq is not none %}
-<span class="fr-dq fr-dq-badge{% if compact %} fr-dq-compact{% endif %} {% if dq >= 90 %}ok{% elif dq >= 78 %}mid{% else %}low{% endif %}" title="Data input coverage {{ dq }}%{% if fixture.data_quality is defined and fixture.data_quality and fixture.data_quality.weak_keys %} · weak: {{ fixture.data_quality.weak_keys|join(', ') }}{% endif %}">{% if compact %}{{ dq }}%{% else %}{{ dq }}% data{% endif %}</span>
+<span class="fr-dq fr-dq-badge{% if compact %} fr-dq-compact{% endif %} {% if dq >= 90 %}ok{% elif dq >= 78 %}mid{% else %}low{% endif %}" title="Data quality {{ dq }}% — how much form, xG, odds and team news loaded{% if fixture.data_quality is defined and fixture.data_quality and fixture.data_quality.weak_keys %} · missing: {{ fixture.data_quality.weak_keys|join(', ') }}{% endif %}">{% if compact %}{{ dq }}%{% else %}{{ dq }}% data{% endif %}</span>
 {% endif %}
 {% endmacro %}

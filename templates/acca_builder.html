@@ -20,7 +20,7 @@
 .outcome-pill{font-size:0.68em;font-weight:700;padding:2px 9px;border-radius:999px;text-transform:uppercase;}
 .op-home{background:rgba(124,252,0,0.12);color:var(--green);border:1px solid rgba(124,252,0,0.22);}
 .op-draw{background:rgba(255,165,0,0.12);color:#FFA500;border:1px solid rgba(255,165,0,0.22);}
-.op-away{background:rgba(55,204,255,0.12);color:var(--blue);border:1px solid rgba(55,204,255,0.22);}
+.op-away{background:rgba(0,122,51,0.12);color:var(--accent);border:1px solid rgba(0,122,51,0.25);}
 .slip-odds{font-size:0.95em;font-weight:800;color:var(--gold);}
 .slip-rm{position:absolute;top:7px;right:7px;background:rgba(255,68,68,0.1);border:none;color:var(--red);width:18px;height:18px;border-radius:50%;cursor:pointer;font-size:0.7em;font-weight:800;display:flex;align-items:center;justify-content:center;}
 .slip-rm:hover{background:rgba(255,68,68,0.22);}
@@ -47,9 +47,10 @@
 .btn-clear:hover{background:rgba(255,68,68,0.1);}
 
 /* SLIP ACTIONS */
-.btn-copy-slip{width:100%;padding:11px;border:none;border-radius:8px;background:linear-gradient(135deg,#2a4a6a,#1a3048);color:#e8f4ff;font-size:0.84em;font-weight:800;font-family:'Inter',sans-serif;cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:7px;transition:opacity 0.2s;}
+.btn-copy-slip{width:100%;padding:11px;border:none;border-radius:8px;background:linear-gradient(135deg,#1f4a34,#0f2a1c);color:var(--accent);font-size:0.84em;font-weight:800;font-family:'Inter',sans-serif;cursor:pointer;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:7px;transition:opacity 0.2s;}
 .btn-copy-slip:hover{opacity:0.9;}
 .btn-copy-slip:disabled{opacity:0.3;cursor:not-allowed;}
+.acca-slip-note{font-size:0.68em;color:var(--accent);line-height:1.45;margin:0 0 10px;padding:8px 10px;border-radius:8px;border:1px solid rgba(0,122,51,0.22);background:rgba(0,122,51,0.08);}
 .disclaimer{font-size:0.62em;color:var(--muted);text-align:center;line-height:1.5;margin-top:4px;}
 .disclaimer a{color:var(--muted);}
 
@@ -64,7 +65,7 @@
 .afix{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;transition:border-color 0.2s;}
 .afix.in-slip{border-color:rgba(124,252,0,0.35);background:rgba(124,252,0,0.02);}
 .afix-top{display:flex;justify-content:space-between;margin-bottom:7px;}
-.afix-league{font-size:0.62em;color:var(--blue);font-weight:700;text-transform:uppercase;letter-spacing:0.04em;}
+.afix-league{font-size:0.62em;color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:0.04em;}
 .afix-time{font-size:0.62em;color:var(--muted);}
 .afix-teams{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px;gap:6px;}
 .afix-home{font-weight:700;font-size:0.86em;flex:1;}
@@ -87,10 +88,10 @@
 
 .acca-review-panel{margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:rgba(2,6,23,0.55);}
 .acca-review-hd{font-size:0.72em;font-weight:800;color:var(--green);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;}
-.btn-review-acca{width:100%;padding:10px;border:none;border-radius:8px;background:linear-gradient(135deg,#1e3a5f,#0f172a);color:#e8f4ff;font-size:0.78em;font-weight:800;cursor:pointer;font-family:'Inter',sans-serif;margin-bottom:8px;}
+.btn-review-acca{width:100%;padding:10px;border:none;border-radius:8px;background:linear-gradient(135deg,#1a3d2e,#0b2418);color:var(--accent);font-size:0.78em;font-weight:800;cursor:pointer;font-family:'Inter',sans-serif;margin-bottom:8px;}
 .btn-review-acca:hover{opacity:0.92;}
 .btn-review-acca:disabled{opacity:0.35;cursor:not-allowed;}
-.acca-review-out{font-size:0.74em;line-height:1.45;color:var(--text);max-height:280px;overflow-y:auto;}
+.acca-review-out{font-size:0.74em;line-height:1.45;color:var(--accent);max-height:280px;overflow-y:auto;}
 .acca-review-leg-item{margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid rgba(148,163,184,0.12);}
 .acca-review-leg-item:last-child{border-bottom:none;margin-bottom:0;}
 .acca-review-warn{color:#fde68a;font-weight:700;font-size:0.72em;}
@@ -134,6 +135,8 @@
         <div id="slip-body">
             <div class="slip-empty" id="slip-empty">⚽ Click any odds button to add a selection</div>
         </div>
+
+        <p class="acca-slip-note"><strong>Total odds</strong> multiply each leg (2.00 × 1.50 = 3.00). We assume legs are <strong>independent</strong> — picks on the same match or linked markets can overlap in real life.</p>
 
         <div class="slip-totals">
             <div class="tot-row"><span class="tot-lbl">Selections</span><span class="tot-val" id="t-count">0</span></div>

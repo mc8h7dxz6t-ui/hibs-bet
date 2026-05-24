@@ -2,6 +2,7 @@
 {% block title %}hibs-bet — Live Dashboard{% endblock %}
 {% block container_class %} dash-outer{% endblock %}
 {% block content %}
+{% from '_term_hint.html' import hint %}
 <div class="ref-page">
     <header class="site-top">
         <div class="site-top-left">
@@ -65,8 +66,8 @@
 
             <div class="search-chips dash-sidebar-filters">
                 <input type="search" id="dash-search" class="dash-search" placeholder="Search teams…" autocomplete="off" aria-label="Search fixtures">
-                <label class="chk-inline"><input type="checkbox" id="flt-value"> Value only</label>
-                <label class="chk-inline" title="Only matches meeting data coverage threshold."><input type="checkbox" id="flt-data-full"> Full data (≥{{ data_quality_ui_min }}%)</label>
+                <label class="chk-inline" title="Show only fixtures flagged as value (model edge vs book)."><input type="checkbox" id="flt-value"> Value only{{ hint('Value = our model thinks the price is better than the book implies.') }}</label>
+                <label class="chk-inline" title="Only matches meeting data coverage threshold."><input type="checkbox" id="flt-data-full"> Full data (≥{{ data_quality_ui_min }}%){{ hint('Data % = share of stats loaded (form, xG, odds, etc.). Low % = thinner analysis.') }}</label>
                 {% if data_quality_show_90_chip %}
                 <div class="chip-row" id="dq-chip-row" aria-label="Data quality filter">
                     <button type="button" class="chip chip-dq" data-dq-min="">Any data</button>
@@ -112,6 +113,15 @@
         </aside>
 
         <div class="dash-main">
+            <details class="dash-howto" id="dash-howto">
+                <summary class="dash-howto-sum">How to use this dashboard</summary>
+                <div class="dash-howto-body">
+                    <p>Browse fixtures by day and league. The <strong>data %</strong> badge shows how complete stats are for that match — higher is safer for model picks.</p>
+                    <p>Use <strong>Refresh</strong> after changing the window (5 or 7 days) or API keys. Click any <strong>row</strong> to expand form, xG, goals markets and value lines.</p>
+                    <p>Filter with search, region chips, or <strong>Value only</strong> / <strong>Full data</strong> in the sidebar. See <a href="/guide">Guide</a> for edge and Kelly, or <a href="/acca">Acca Builder</a> for multi-leg slips.</p>
+                </div>
+            </details>
+
             <div class="hero-strip">
                 <h1 class="hero-title"><span class="hero-brand">hibs-bet</span> {{ fetch_days }}-Day Fixtures</h1>
                 <p class="hero-meta"><strong>{{ total }}</strong> fixtures <span class="live-pill"><span class="live-dot"></span> LIVE DATA</span> · showing next <strong>{{ fetch_days }} days</strong> · times in <strong>{{ display_tz_label }}</strong></p>
@@ -137,7 +147,7 @@
                     <span class="ai-pill">AI PICKS</span>
                     <span class="acca-week-sub">Up to 5 legs · <a href="/acca">Acca Builder</a></span>
                 </summary>
-                <p class="muted small" style="padding:0 14px 12px;">Open Acca Builder to combine value lines ranked by model ROI.</p>
+                <p class="muted small" style="padding:0 14px 12px;color:var(--accent);line-height:1.45;">Multi-leg ideas ranked by model support. <strong>Combined odds</strong> multiply each leg’s price (e.g. 2.00 × 1.50 = 3.00). Legs are treated as <strong>independent</strong> unless noted — same match or correlated markets can overlap. <a href="/acca" style="color:var(--neon-value);">Open Acca Builder →</a></p>
             </details>
 
             {% if value_bets and value_bets|length > 0 %}
@@ -175,7 +185,7 @@
                         <h3 class="lg-heading">{{ lg.name|upper }} <span class="lg-count">({{ lg.fixtures|length }})</span></h3>
                         <div class="ft-scroll-wrap">
                         <div class="ft-head" aria-hidden="true">
-                            <span>KO</span><span class="ft-h-match">MATCH</span><span class="ft-h-prob" title="Model BTTS Yes">BTTS</span><span class="ft-h-prob" title="Model 1X2 lean (H/D/A)">Win</span><span>1</span><span>X</span><span>2</span><span title="BTTS Yes book odds">B·odds</span><span>O1.5</span><span>O2.5</span><span>U2.5</span><span>O3.5</span><span>U3.5</span><span class="ft-h-chev"></span>
+                            <span>KO</span><span class="ft-h-match">MATCH</span><span class="ft-h-prob" title="Both Teams To Score — model % for Yes">BTTS{{ hint('BTTS = both teams score at least one goal (Yes market).') }}</span><span class="ft-h-prob" title="Model 1X2 lean (H/D/A)">Win</span><span>1</span><span>X</span><span>2</span><span title="BTTS Yes book odds">B·odds</span><span>O1.5</span><span>O2.5</span><span>U2.5</span><span>O3.5</span><span>U3.5</span><span class="ft-h-chev"></span>
                         </div>
                         {% for fixture in lg.fixtures %}
                         {% include '_fixture_row_compact.html' %}

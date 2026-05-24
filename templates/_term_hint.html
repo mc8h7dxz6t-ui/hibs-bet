@@ -1,0 +1,4 @@
+{# Small (?) hint — title shows on hover/focus; keeps pro UI uncluttered. #}
+{% macro hint(text) -%}
+<span class="term-hint" tabindex="0" title="{{ text }}" aria-label="{{ text }}">?</span>
+{%- endmacro %}
