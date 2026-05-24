@@ -36,6 +36,7 @@ def _insert_row(
     predicted: str,
     probs: dict,
     clv_pp: float | None = None,
+    kickoff_iso: str | None = None,
     result_recorded_at: str | None = None,
     result_home: int | None = None,
     result_away: int | None = None,
@@ -50,6 +51,7 @@ def _insert_row(
     if clv_pp is not None:
         enrich["clv"] = {"clv_pp": clv_pp}
     fid = fixture_id if fixture_id is not None else 1000 + conn.total_changes
+    ko = kickoff_iso if kickoff_iso is not None else captured_at
     conn.execute(
         """
         INSERT INTO prediction_snapshots (
@@ -62,7 +64,7 @@ def _insert_row(
             captured_at,
             fid,
             league,
-            captured_at,
+            ko,
             "Home FC",
             "Away FC",
             json.dumps(pred),
@@ -183,9 +185,9 @@ def today_window(monkeypatch):
     noon = datetime(2026, 5, 24, 12, 0, 0, tzinfo=timezone.utc)
 
     def _bounds():
-        return (start.isoformat(), end.isoformat(), "2026-05-24", "UK")
+        return (start, end, "2026-05-24", "UK")
 
-    monkeypatch.setattr("hibs_predictor.prediction_log._today_bounds_utc", _bounds)
+    monkeypatch.setattr("hibs_predictor.prediction_log._today_bounds_datetimes", _bounds)
     return start, end, noon
 
 
@@ -270,3 +272,48 @@ def test_monitor_today_rows_wlp_and_api(audit_db, today_window):
     assert "today" in summary
     assert summary["today"]["n_logged"] == 3
     assert summary["today"]["best_pick"]["wins"] == 1
+
+
+def test_monitor_today_uses_kickoff_not_captured_at(audit_db, today_window):
+    """Snapshots captured yesterday for today's KO must still appear in Today."""
+    _start, _end, noon = today_window
+    yesterday = datetime(2026, 5, 23, 20, 0, 0, tzinfo=timezone.utc).isoformat()
+    today_ko = noon.isoformat()
+
+    conn = sqlite3.connect(str(audit_db))
+    try:
+        _insert_row(
+            conn,
+            captured_at=yesterday,
+            kickoff_iso=today_ko,
+            league="EPL",
+            outcome=None,
+            predicted="home",
+            probs={"home": 0.5, "draw": 0.25, "away": 0.25},
+            fixture_id=601,
+        )
+        _insert_row(
+            conn,
+            captured_at=noon.isoformat(),
+            kickoff_iso=datetime(2026, 5, 23, 15, 0, 0, tzinfo=timezone.utc).isoformat(),
+            league="EPL",
+            outcome="home",
+            predicted="home",
+            probs={"home": 0.9, "draw": 0.05, "away": 0.05},
+            fixture_id=602,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    today = monitor_today_dict()
+    assert today["n_logged"] == 1
+    assert today["rows"][0]["fixture_id"] == 601
+
+
+def test_monitor_today_disabled(monkeypatch, audit_db, today_window):
+    monkeypatch.setenv("HIBS_PREDICTION_LOG_ENABLED", "0")
+    rep = monitor_today_dict()
+    assert rep["enabled"] is False
+    assert rep["n_logged"] == 0
+    assert "disabled" in (rep.get("message") or "").lower()

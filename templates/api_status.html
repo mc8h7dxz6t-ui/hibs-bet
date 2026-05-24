@@ -176,13 +176,15 @@
             var td = mon.today || {};
             var mth = document.getElementById('status-monitor-today-headline');
             if (mth) {
-                if (parseInt(td.n_logged, 10) > 0) {
+                if (td.enabled === false || mon.enabled === false) {
+                    mth.textContent = 'Today: prediction log disabled (HIBS_PREDICTION_LOG_ENABLED=0).';
+                } else if (parseInt(td.n_logged, 10) > 0) {
                     var bp = td.best_pick || {};
                     mth.textContent = 'Today (' + (td.date_local || '') + ' · ' + (td.display_tz_label || 'local') + '): '
-                        + td.n_logged + ' logged · ' + (td.n_scored_ft || 0) + ' FT today · W '
+                        + td.n_logged + ' fixtures · ' + (td.n_scored_ft || 0) + ' FT synced · W '
                         + (bp.wins || 0) + ' / L ' + (bp.losses || 0) + ' / pending ' + (bp.pending || 0);
                 } else {
-                    mth.textContent = td.message || 'No predictions logged yet today.';
+                    mth.textContent = td.message || 'No fixtures kicking off today.';
                 }
             }
             var mTodayTbl = document.getElementById('status-monitor-today-rows');

@@ -620,10 +620,9 @@ def pred_log_sync_cron_status() -> Dict[str, Any]:
     }
 
 
-def _today_bounds_utc() -> Tuple[str, str, str, str]:
-    """Start/end UTC ISO for the display-TZ calendar day, plus local date and label."""
+def _today_bounds_datetimes() -> Tuple[datetime, datetime, str, str]:
+    """Start/end UTC for the display-TZ calendar day, plus local date and label."""
     from hibs_predictor.display_tz import (
-        display_timezone,
         display_tz_label,
         fixture_window_end_utc,
         fixture_window_start_utc,
@@ -632,34 +631,55 @@ def _today_bounds_utc() -> Tuple[str, str, str, str]:
 
     start = fixture_window_start_utc()
     end = fixture_window_end_utc(days=0)
-    return (
-        start.isoformat(),
-        end.isoformat(),
-        local_today().isoformat(),
-        display_tz_label(),
-    )
+    return start, end, local_today().isoformat(), display_tz_label()
 
 
-def _rows_captured_today(
+def _today_bounds_utc() -> Tuple[str, str, str, str]:
+    """Start/end UTC ISO for the display-TZ calendar day, plus local date and label."""
+    start, end, date_local, tz_label = _today_bounds_datetimes()
+    return start.isoformat(), end.isoformat(), date_local, tz_label
+
+
+def _kickoff_in_bounds(kickoff_raw: str, start: datetime, end: datetime) -> bool:
+    ko = _parse_kickoff_iso(kickoff_raw)
+    if not ko:
+        return False
+    return start <= ko <= end
+
+
+def _rows_kickoff_today(
     conn: sqlite3.Connection,
     *,
-    start_iso: str,
-    end_iso: str,
+    start_dt: datetime,
+    end_dt: datetime,
 ) -> List[sqlite3.Row]:
+    """Latest snapshot per fixture whose kick-off falls in today's display-TZ window."""
     conn.row_factory = sqlite3.Row
-    return list(
-        conn.execute(
-            """
-            SELECT id, fixture_id, league_code, captured_at, kickoff_iso,
-                   home_name, away_name, prediction_json, enrich_summary_json,
-                   result_home, result_away, result_outcome, result_status, result_recorded_at
-            FROM prediction_snapshots
-            WHERE captured_at >= ? AND captured_at <= ?
-            ORDER BY captured_at DESC
-            """,
-            (start_iso, end_iso),
-        ).fetchall()
-    )
+    buf_lo = (start_dt - timedelta(hours=24)).isoformat()
+    buf_hi = (end_dt + timedelta(hours=24)).isoformat()
+    candidates = conn.execute(
+        """
+        SELECT id, fixture_id, league_code, captured_at, kickoff_iso,
+               home_name, away_name, prediction_json, enrich_summary_json,
+               result_home, result_away, result_outcome, result_status, result_recorded_at
+        FROM prediction_snapshots
+        WHERE kickoff_iso IS NOT NULL AND kickoff_iso != ''
+          AND kickoff_iso >= ? AND kickoff_iso <= ?
+        ORDER BY captured_at DESC
+        """,
+        (buf_lo, buf_hi),
+    ).fetchall()
+    seen: set[int] = set()
+    out: List[sqlite3.Row] = []
+    for r in candidates:
+        fid = int(r["fixture_id"])
+        if fid in seen:
+            continue
+        if not _kickoff_in_bounds(str(r["kickoff_iso"] or ""), start_dt, end_dt):
+            continue
+        seen.add(fid)
+        out.append(r)
+    return out
 
 
 def _rows_scored_ft_today(
@@ -730,13 +750,15 @@ def _clv_pp_from_enrich(enrich_raw: Any) -> Optional[float]:
 
 
 def monitor_today_dict() -> Dict[str, Any]:
-    """Calendar-today slice in display timezone (HIBS_DISPLAY_TIMEZONE, default Europe/London)."""
-    start_iso, end_iso, date_local, tz_label = _today_bounds_utc()
+    """Fixtures kicking off today in display timezone (HIBS_DISPLAY_TIMEZONE, default Europe/London)."""
+    start_dt, end_dt, date_local, tz_label = _today_bounds_datetimes()
+    start_iso, end_iso = start_dt.isoformat(), end_dt.isoformat()
     from hibs_predictor.display_tz import display_timezone
 
     tz_key = getattr(display_timezone(), "key", "UTC")
     out: Dict[str, Any] = {
         "ok": True,
+        "enabled": prediction_log_enabled(),
         "date_local": date_local,
         "display_tz": tz_key,
         "display_tz_label": tz_label,
@@ -747,6 +769,9 @@ def monitor_today_dict() -> Dict[str, Any]:
         "best_pick": {"wins": 0, "losses": 0, "pending": 0},
         "rows": [],
     }
+    if not prediction_log_enabled():
+        out["message"] = "Prediction log disabled — set HIBS_PREDICTION_LOG_ENABLED=1."
+        return out
     if not os.path.isfile(_db_path()):
         out["message"] = "No audit database yet — enable HIBS_PREDICTION_LOG_ENABLED=1."
         return out
@@ -754,23 +779,19 @@ def monitor_today_dict() -> Dict[str, Any]:
     init_db()
     conn = sqlite3.connect(_db_path(), timeout=20)
     try:
-        captured = _rows_captured_today(conn, start_iso=start_iso, end_iso=end_iso)
+        kickoff_rows = _rows_kickoff_today(conn, start_dt=start_dt, end_dt=end_dt)
         scored_ft = _rows_scored_ft_today(conn, start_iso=start_iso, end_iso=end_iso)
     finally:
         conn.close()
 
-    out["n_logged"] = len(captured)
+    out["n_logged"] = len(kickoff_rows)
     out["n_scored_ft"] = len(scored_ft)
 
     wins = losses = pending = 0
-    seen_fixtures: set[int] = set()
     table_rows: List[Dict[str, Any]] = []
 
-    for r in captured:
+    for r in kickoff_rows:
         fid = int(r["fixture_id"])
-        if fid in seen_fixtures:
-            continue
-        seen_fixtures.add(fid)
         try:
             pred = json.loads(r["prediction_json"])
         except Exception:
@@ -808,8 +829,8 @@ def monitor_today_dict() -> Dict[str, Any]:
 
     out["best_pick"] = {"wins": wins, "losses": losses, "pending": pending}
     out["rows"] = table_rows
-    if not captured:
-        out["message"] = "No predictions logged yet today."
+    if not kickoff_rows:
+        out["message"] = f"No fixtures kicking off today ({date_local})."
     return out
 
 
