@@ -9,7 +9,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from hibs_predictor.prediction_log import init_db, monitor_summary_dict
+from hibs_predictor.prediction_log import (
+    init_db,
+    monitor_summary_dict,
+    monitor_today_dict,
+)
 
 
 @pytest.fixture
@@ -32,6 +36,11 @@ def _insert_row(
     predicted: str,
     probs: dict,
     clv_pp: float | None = None,
+    result_recorded_at: str | None = None,
+    result_home: int | None = None,
+    result_away: int | None = None,
+    result_status: str | None = None,
+    fixture_id: int | None = None,
 ) -> None:
     pred = {
         "probabilities": probs,
@@ -40,17 +49,18 @@ def _insert_row(
     enrich = {}
     if clv_pp is not None:
         enrich["clv"] = {"clv_pp": clv_pp}
+    fid = fixture_id if fixture_id is not None else 1000 + conn.total_changes
     conn.execute(
         """
         INSERT INTO prediction_snapshots (
             captured_at, fixture_id, league_code, kickoff_iso,
             home_name, away_name, prediction_json, enrich_summary_json,
-            result_outcome
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            result_outcome, result_home, result_away, result_status, result_recorded_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             captured_at,
-            1000 + conn.total_changes,
+            fid,
             league,
             captured_at,
             "Home FC",
@@ -58,6 +68,10 @@ def _insert_row(
             json.dumps(pred),
             json.dumps(enrich) if enrich else None,
             outcome,
+            result_home,
+            result_away,
+            result_status,
+            result_recorded_at,
         ),
     )
 
@@ -159,3 +173,100 @@ def test_monitor_respects_custom_days(audit_db, monkeypatch):
     rep = monitor_summary_dict(days=7)
     assert rep["n_logged"] == 1
     assert rep["window_days"] == 7
+
+
+@pytest.fixture
+def today_window(monkeypatch):
+    """Fixed calendar-day bounds so tests are stable regardless of run time."""
+    start = datetime(2026, 5, 24, 0, 0, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 5, 24, 23, 59, 59, tzinfo=timezone.utc)
+    noon = datetime(2026, 5, 24, 12, 0, 0, tzinfo=timezone.utc)
+
+    def _bounds():
+        return (start.isoformat(), end.isoformat(), "2026-05-24", "UK")
+
+    monkeypatch.setattr("hibs_predictor.prediction_log._today_bounds_utc", _bounds)
+    return start, end, noon
+
+
+def test_monitor_today_empty(audit_db, today_window):
+    rep = monitor_today_dict()
+    assert rep["n_logged"] == 0
+    assert rep["n_scored_ft"] == 0
+    assert rep["date_local"] == "2026-05-24"
+    assert rep["rows"] == []
+
+
+def test_monitor_today_rows_wlp_and_api(audit_db, today_window):
+    _start, _end, noon = today_window
+    yesterday = datetime(2026, 5, 23, 12, 0, 0, tzinfo=timezone.utc).isoformat()
+
+    conn = sqlite3.connect(str(audit_db))
+    try:
+        _insert_row(
+            conn,
+            captured_at=noon.isoformat(),
+            league="EPL",
+            outcome="home",
+            predicted="home",
+            probs={"home": 0.6, "draw": 0.2, "away": 0.2},
+            clv_pp=2.0,
+            result_home=2,
+            result_away=1,
+            result_status="FT",
+            result_recorded_at=noon.isoformat(),
+            fixture_id=501,
+        )
+        _insert_row(
+            conn,
+            captured_at=noon.isoformat(),
+            league="EPL",
+            outcome="away",
+            predicted="home",
+            probs={"home": 0.55, "draw": 0.25, "away": 0.2},
+            result_home=0,
+            result_away=1,
+            result_status="FT",
+            result_recorded_at=noon.isoformat(),
+            fixture_id=502,
+        )
+        _insert_row(
+            conn,
+            captured_at=noon.isoformat(),
+            league="WORLD_CUP",
+            outcome=None,
+            predicted="draw",
+            probs={"home": 0.3, "draw": 0.4, "away": 0.3},
+            fixture_id=503,
+        )
+        _insert_row(
+            conn,
+            captured_at=yesterday,
+            league="EPL",
+            outcome="home",
+            predicted="home",
+            probs={"home": 0.9, "draw": 0.05, "away": 0.05},
+            fixture_id=504,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    today = monitor_today_dict()
+    assert today["n_logged"] == 3
+    assert today["n_scored_ft"] == 2
+    assert today["best_pick"] == {"wins": 1, "losses": 1, "pending": 1}
+    assert len(today["rows"]) == 3
+    by_fid = {r["fixture_id"]: r for r in today["rows"]}
+    assert by_fid[501]["result"] == "W"
+    assert by_fid[501]["score"] == "2-1"
+    assert by_fid[501]["model_pct"] == pytest.approx(60.0)
+    assert by_fid[501]["clv_pp"] == 2.0
+    assert by_fid[502]["result"] == "L"
+    assert by_fid[503]["result"] == "pending"
+    assert by_fid[503]["score"] is None
+
+    summary = monitor_summary_dict()
+    assert "today" in summary
+    assert summary["today"]["n_logged"] == 3
+    assert summary["today"]["best_pick"]["wins"] == 1

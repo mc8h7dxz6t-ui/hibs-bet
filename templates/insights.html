@@ -299,8 +299,39 @@
         </section>
 
         <section class="insight-card" id="model-monitor">
-            <h2>Model monitor (4 weeks)</h2>
+            <h2>Model monitor</h2>
             {% set m = insights.monitor %}
+            {% set t = m.today or {} %}
+            <h3 style="font-size:0.95em;margin:12px 0 6px;">Today ({{ t.display_tz_label or display_tz_label }})</h3>
+            {% if t.n_logged %}
+            <div class="insight-row">
+                <div class="ir-main">{{ t.n_logged }} logged · {{ t.n_scored_ft }} FT synced today</div>
+                {% set bp = t.best_pick or {} %}
+                <span class="ir-pill ir-gold">W {{ bp.wins or 0 }}</span>
+                <span class="ir-pill">L {{ bp.losses or 0 }}</span>
+                <span class="ir-pill ir-warn">Pending {{ bp.pending or 0 }}</span>
+            </div>
+            {% if t.rows %}
+            <table class="data-table" style="margin-top:10px;font-size:0.78em;width:100%;">
+                <thead><tr><th>Match</th><th>Pick</th><th>Model %</th><th>Result</th><th>Score</th><th>CLV</th></tr></thead>
+                <tbody>
+                {% for row in t.rows %}
+                <tr>
+                    <td>{{ row.match }}</td>
+                    <td>{{ row.pick or '—' }}</td>
+                    <td>{% if row.model_pct is not none %}{{ row.model_pct }}%{% else %}—{% endif %}</td>
+                    <td>{% if row.result == 'W' %}<span class="ir-pill ir-gold">W</span>{% elif row.result == 'L' %}<span class="ir-pill">L</span>{% else %}<span class="ir-pill ir-warn">pending</span>{% endif %}</td>
+                    <td>{{ row.score or '—' }}</td>
+                    <td>{% if row.clv_pp is not none %}{{ row.clv_pp }} pp{% else %}—{% endif %}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% else %}
+            <div class="empty-mini">{{ t.message or 'No predictions logged yet today.' }}</div>
+            {% endif %}
+            <h3 style="font-size:0.95em;margin:16px 0 6px;">Last {{ m.window_days or 28 }} days</h3>
             {% if m.ok and m.n_logged %}
             <div class="insight-row">
                 <div class="ir-main">{{ m.n_logged }} logged · {{ m.n_scored }} scored (FT)</div>

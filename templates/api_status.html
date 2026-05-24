@@ -43,8 +43,10 @@
             <div id="status-features" class="health-grid"></div>
         </div>
         <div class="status-section" id="model-monitor">
-            <h2>Model monitor (4 weeks)</h2>
-            <p id="status-monitor-headline" class="status-impact-headline">—</p>
+            <h2>Model monitor</h2>
+            <p id="status-monitor-today-headline" class="status-impact-headline" style="font-size:0.95em;">—</p>
+            <table class="data-table status-xg-table" id="status-monitor-today-rows" style="margin-top:8px;font-size:0.78em;width:100%;"></table>
+            <p id="status-monitor-headline" class="status-impact-headline" style="margin-top:14px;">—</p>
             <table class="data-table status-xg-table" id="status-monitor-leagues" style="margin-top:10px;font-size:0.78em;width:100%;"></table>
             <p id="status-monitor-cron" class="status-note" style="margin-top:10px;"></p>
         </div>
@@ -171,6 +173,30 @@
             }
             var ao = d.audit_ops || {};
             var mon = ao.monitor || {};
+            var td = mon.today || {};
+            var mth = document.getElementById('status-monitor-today-headline');
+            if (mth) {
+                if (parseInt(td.n_logged, 10) > 0) {
+                    var bp = td.best_pick || {};
+                    mth.textContent = 'Today (' + (td.date_local || '') + ' · ' + (td.display_tz_label || 'local') + '): '
+                        + td.n_logged + ' logged · ' + (td.n_scored_ft || 0) + ' FT today · W '
+                        + (bp.wins || 0) + ' / L ' + (bp.losses || 0) + ' / pending ' + (bp.pending || 0);
+                } else {
+                    mth.textContent = td.message || 'No predictions logged yet today.';
+                }
+            }
+            var mTodayTbl = document.getElementById('status-monitor-today-rows');
+            if (mTodayTbl) {
+                var tHead = '<tr><th>Match</th><th>Pick</th><th>Model %</th><th>Result</th><th>Score</th><th>CLV</th></tr>';
+                var tBody = (td.rows || []).map(function (row) {
+                    var res = row.result === 'W' ? 'W' : (row.result === 'L' ? 'L' : 'pending');
+                    return '<tr><td>' + esc(row.match) + '</td><td>' + esc(row.pick) + '</td><td>'
+                        + (row.model_pct != null ? esc(row.model_pct) + '%' : '—') + '</td><td>' + esc(res)
+                        + '</td><td>' + esc(row.score || '—') + '</td><td>'
+                        + (row.clv_pp != null ? esc(row.clv_pp) + ' pp' : '—') + '</td></tr>';
+                }).join('');
+                mTodayTbl.innerHTML = tHead + (tBody || '<tr><td colspan="6">No rows logged today</td></tr>');
+            }
             var mh = document.getElementById('status-monitor-headline');
             if (mh) {
                 if (parseInt(mon.n_logged, 10) > 0) {

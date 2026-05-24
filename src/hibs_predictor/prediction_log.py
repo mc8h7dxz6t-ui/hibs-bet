@@ -620,6 +620,199 @@ def pred_log_sync_cron_status() -> Dict[str, Any]:
     }
 
 
+def _today_bounds_utc() -> Tuple[str, str, str, str]:
+    """Start/end UTC ISO for the display-TZ calendar day, plus local date and label."""
+    from hibs_predictor.display_tz import (
+        display_timezone,
+        display_tz_label,
+        fixture_window_end_utc,
+        fixture_window_start_utc,
+        local_today,
+    )
+
+    start = fixture_window_start_utc()
+    end = fixture_window_end_utc(days=0)
+    return (
+        start.isoformat(),
+        end.isoformat(),
+        local_today().isoformat(),
+        display_tz_label(),
+    )
+
+
+def _rows_captured_today(
+    conn: sqlite3.Connection,
+    *,
+    start_iso: str,
+    end_iso: str,
+) -> List[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    return list(
+        conn.execute(
+            """
+            SELECT id, fixture_id, league_code, captured_at, kickoff_iso,
+                   home_name, away_name, prediction_json, enrich_summary_json,
+                   result_home, result_away, result_outcome, result_status, result_recorded_at
+            FROM prediction_snapshots
+            WHERE captured_at >= ? AND captured_at <= ?
+            ORDER BY captured_at DESC
+            """,
+            (start_iso, end_iso),
+        ).fetchall()
+    )
+
+
+def _rows_scored_ft_today(
+    conn: sqlite3.Connection,
+    *,
+    start_iso: str,
+    end_iso: str,
+) -> List[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    return list(
+        conn.execute(
+            """
+            SELECT id FROM prediction_snapshots
+            WHERE result_recorded_at >= ? AND result_recorded_at <= ?
+              AND result_outcome IS NOT NULL AND result_outcome != ''
+            """,
+            (start_iso, end_iso),
+        ).fetchall()
+    )
+
+
+def _best_pick_result_label(
+    pred: Dict[str, Any],
+    *,
+    outcome: Optional[str],
+    status: Optional[str],
+) -> str:
+    pick = (pred.get("predicted_outcome") or "").lower()
+    if pick not in ("home", "draw", "away"):
+        return "pending"
+    oc = (outcome or "").lower()
+    if not oc or (status and str(status).upper() != "FT"):
+        return "pending"
+    return "W" if pick == oc else "L"
+
+
+def _model_pct_for_pick(pred: Dict[str, Any]) -> Optional[float]:
+    pick = (pred.get("predicted_outcome") or "").lower()
+    probs = pred.get("probabilities") or {}
+    if pick not in ("home", "draw", "away"):
+        return None
+    return round(_safe_prob(probs.get(pick)) * 100.0, 1)
+
+
+def _format_score(home: Any, away: Any) -> Optional[str]:
+    if home is None or away is None:
+        return None
+    try:
+        return f"{int(home)}-{int(away)}"
+    except (TypeError, ValueError):
+        return None
+
+
+def _clv_pp_from_enrich(enrich_raw: Any) -> Optional[float]:
+    try:
+        enrich = json.loads(enrich_raw or "")
+    except Exception:
+        return None
+    if not isinstance(enrich, dict):
+        return None
+    clv = enrich.get("clv")
+    if not isinstance(clv, dict) or clv.get("clv_pp") is None:
+        return None
+    try:
+        return round(float(clv["clv_pp"]), 2)
+    except (TypeError, ValueError):
+        return None
+
+
+def monitor_today_dict() -> Dict[str, Any]:
+    """Calendar-today slice in display timezone (HIBS_DISPLAY_TIMEZONE, default Europe/London)."""
+    start_iso, end_iso, date_local, tz_label = _today_bounds_utc()
+    from hibs_predictor.display_tz import display_timezone
+
+    tz_key = getattr(display_timezone(), "key", "UTC")
+    out: Dict[str, Any] = {
+        "ok": True,
+        "date_local": date_local,
+        "display_tz": tz_key,
+        "display_tz_label": tz_label,
+        "window_start_utc": start_iso[:19],
+        "window_end_utc": end_iso[:19],
+        "n_logged": 0,
+        "n_scored_ft": 0,
+        "best_pick": {"wins": 0, "losses": 0, "pending": 0},
+        "rows": [],
+    }
+    if not os.path.isfile(_db_path()):
+        out["message"] = "No audit database yet — enable HIBS_PREDICTION_LOG_ENABLED=1."
+        return out
+
+    init_db()
+    conn = sqlite3.connect(_db_path(), timeout=20)
+    try:
+        captured = _rows_captured_today(conn, start_iso=start_iso, end_iso=end_iso)
+        scored_ft = _rows_scored_ft_today(conn, start_iso=start_iso, end_iso=end_iso)
+    finally:
+        conn.close()
+
+    out["n_logged"] = len(captured)
+    out["n_scored_ft"] = len(scored_ft)
+
+    wins = losses = pending = 0
+    seen_fixtures: set[int] = set()
+    table_rows: List[Dict[str, Any]] = []
+
+    for r in captured:
+        fid = int(r["fixture_id"])
+        if fid in seen_fixtures:
+            continue
+        seen_fixtures.add(fid)
+        try:
+            pred = json.loads(r["prediction_json"])
+        except Exception:
+            pred = {}
+        if not isinstance(pred, dict):
+            pred = {}
+        pick = (pred.get("predicted_outcome") or "").lower()
+        label = _best_pick_result_label(
+            pred,
+            outcome=r["result_outcome"],
+            status=r["result_status"],
+        )
+        if pick in ("home", "draw", "away"):
+            if label == "W":
+                wins += 1
+            elif label == "L":
+                losses += 1
+            else:
+                pending += 1
+        home_nm = str(r["home_name"] or pred.get("home") or "?")
+        away_nm = str(r["away_name"] or pred.get("away") or "?")
+        table_rows.append(
+            {
+                "fixture_id": fid,
+                "match": f"{home_nm} v {away_nm}",
+                "league": str(r["league_code"] or ""),
+                "kickoff_iso": r["kickoff_iso"] or "",
+                "pick": pick if pick in ("home", "draw", "away") else None,
+                "model_pct": _model_pct_for_pick(pred),
+                "result": label,
+                "score": _format_score(r["result_home"], r["result_away"]),
+                "clv_pp": _clv_pp_from_enrich(r["enrich_summary_json"]),
+            }
+        )
+
+    out["best_pick"] = {"wins": wins, "losses": losses, "pending": pending}
+    out["rows"] = table_rows
+    if not captured:
+        out["message"] = "No predictions logged yet today."
+    return out
+
+
 def _rows_in_monitor_window(
     conn: sqlite3.Connection,
     *,
@@ -645,6 +838,7 @@ def monitor_summary_dict(*, days: Optional[int] = None) -> Dict[str, Any]:
     window_days = days if days is not None else _monitor_days()
     cutoff = _monitor_cutoff_iso(days=window_days)
     enabled = prediction_log_enabled()
+    today = monitor_today_dict()
     base: Dict[str, Any] = {
         "ok": True,
         "enabled": enabled,
@@ -654,6 +848,7 @@ def monitor_summary_dict(*, days: Optional[int] = None) -> Dict[str, Any]:
         "prediction_log_enabled": enabled,
         "clv_log_enabled": _clv_enabled(),
         "pred_log_sync_cron": pred_log_sync_cron_status(),
+        "today": today,
     }
     if not os.path.isfile(_db_path()):
         base.update(
