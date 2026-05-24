@@ -397,12 +397,25 @@ class TeamStrengthCalculator:
         return max(0.5, min(1.5, 1.0 + (win_rate - 0.33)))
 
     @staticmethod
-    def parse_last_10_results(matches: List[Dict[str, Any]], team_id: Optional[int]) -> List[Dict[str, Any]]:
+    def parse_last_10_results(
+        matches: List[Dict[str, Any]],
+        team_id: Optional[int],
+        *,
+        team_name: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """Parse last 10 matches into readable result rows for the UI."""
         from hibs_predictor.fixture_utils import coerce_team_id
 
         tid = coerce_team_id(team_id)
-        if not tid:
+        name_key = ""
+        if team_name:
+            import re
+            import unicodedata
+
+            text = unicodedata.normalize("NFKD", str(team_name))
+            text = "".join(c for c in text if not unicodedata.combining(c)).lower()
+            name_key = re.sub(r"[^a-z0-9]+", " ", text).strip()
+        if not tid and not name_key:
             return []
         results = []
         for match in matches[:10]:
@@ -420,19 +433,40 @@ class TeamStrengthCalculator:
                 continue
             home_goals = float(gh)
             away_goals = float(ga)
-            if home_id == tid:
+            matched_side = None
+            if tid and home_id == tid:
+                matched_side = "home"
+            elif tid and away_id == tid:
+                matched_side = "away"
+            elif name_key:
+                import re
+                import unicodedata
+
+                def _nk(n: str) -> str:
+                    t = unicodedata.normalize("NFKD", str(n))
+                    t = "".join(c for c in t if not unicodedata.combining(c)).lower()
+                    return re.sub(r"[^a-z0-9]+", " ", t).strip()
+
+                hk, ak = _nk(home_name), _nk(away_name)
+                if name_key == hk or name_key in hk or hk in name_key:
+                    matched_side = "home"
+                elif name_key == ak or name_key in ak or ak in name_key:
+                    matched_side = "away"
+            if matched_side == "home":
                 is_home = True
                 gf, ga = home_goals, away_goals
-            elif away_id == tid:
+                match_tid = home_id or tid
+            elif matched_side == "away":
                 is_home = False
                 gf, ga = away_goals, home_goals
+                match_tid = away_id or tid
             else:
                 continue
             opponent = away_name if is_home else home_name
             result = "W" if gf > ga else ("L" if gf < ga else "D")
             fixture_date = match.get("fixture", {}).get("date", "") or ""
             tot = int(gf + ga)
-            xgf = TeamStrengthCalculator._team_xg_from_fixture_statistics(match, tid)
+            xgf = TeamStrengthCalculator._team_xg_from_fixture_statistics(match, match_tid)
             results.append({
                 "result": result,
                 "score": f"{int(gf)}-{int(ga)}",

@@ -12,6 +12,7 @@ Items completed in the latest backlog pass are listed under **Done**; remaining 
 - **League table UX** — `[H]` / `[A]` markers in compact dropdown; collapsible highlighted full table in expand panel (dropdown retained).
 - **VPS deploy** — `HIBS_PREDICTION_LOG_ENABLED=1` in `apply-vps-safe-production.sh`.
 - **API squad depth (Transfermarkt alternative)** — API-Football `players/squads` → `home_squad_depth` / `away_squad_depth`, absence % in `team_news_meta`, supplemental `api_squad_depth` mirror, DQ high-value tag. Default on; VPS safe profile sets `HIBS_SKIP_API_SQUAD_DEPTH=1` (extra API calls per fixture).
+- **Stat acca recommender** — `acca_recommender.py` on `/insights` + `GET /api/acca/recommendations`; 2/3-fold and acca-of-the-day from enriched packets only (`HIBS_ACCA_RECOMMENDER`, `HIBS_ACCA_MAX_LEGS`).
 
 ## Modeling
 - **Confirmed lineups (Phase 2)** — **Done.** API-Football `fixtures/lineups` pre-KO only; display + optional confidence penalty when XI unknown near kickoff (see `docs/PLAYER_LINEUP_INTEGRATION.md`).

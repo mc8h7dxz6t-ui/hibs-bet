@@ -124,6 +124,8 @@ def test_flask_routes():
             "/guide",
             "/status",
             "/settings",
+            "/login",
+            "/logout",
         }
         missing = sorted(required - routes)
         if missing:

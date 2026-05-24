@@ -217,11 +217,14 @@ def find_team_row(rows: List[Dict[str, Any]], team_name: str) -> Optional[Dict[s
 
 
 def row_to_position_shape(row: Dict[str, Any]) -> Dict[str, Any]:
+    gf = int(row.get("goals_for") or 0)
+    ga = int(row.get("goals_against") or 0)
     return {
         "position": row.get("position"),
         "played": row.get("played") or 0,
         "points": row.get("points") or 0,
-        "goals_for": row.get("goals_for") or 0,
-        "goals_against": row.get("goals_against") or 0,
+        "goals_for": gf,
+        "goals_against": ga,
+        "goal_diff": gf - ga,
         "source": "soccerstats",
     }

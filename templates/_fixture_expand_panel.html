@@ -1,4 +1,7 @@
 {% from '_dq_badge.html' import dq_badge %}
+{% macro table_team_label(t) -%}
+{%- if t is mapping -%}{{ t.get('name') or t.get('shortName') or '—' }}{%- else -%}{{ t }}{%- endif -%}
+{%- endmacro %}
     <div class="expand-panel" data-fixture-id="{{ fixture.id }}">
         {% set p = fixture.prediction %}
         {% set hl10 = fixture.home_last10 %}
@@ -288,7 +291,7 @@
                 {% for row in table_rows %}
                 <tr class="{% if row.is_home_team %}home-row{% elif row.is_away_team %}away-row{% endif %}">
                     <td>{{ row.position }}</td>
-                    <td>{% if row.is_home_team or row.is_away_team %}★ {% endif %}{{ row.team }}</td>
+                    <td>{% if row.is_home_team or row.is_away_team %}★ {% endif %}{{ table_team_label(row.team) }}</td>
                     <td>{{ row.played }}</td>
                     <td>{{ row.goals_for }}</td>
                     <td>{{ row.goals_against }}</td>

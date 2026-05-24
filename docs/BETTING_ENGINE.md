@@ -92,6 +92,8 @@ Existing (already in tree):
 | `HIBS_CALIB_FIT_DAYS` | `90` | Window label for calibration-fit (audit rows) |
 | `HIBS_CALIB_FIT_MIN_ROWS` | `20` | Min scored rows per league before shrink is written |
 | `HIBS_USE_INJURY_LAMBDA_ADJUST` | off | Attack availability → λ cut |
+| `HIBS_ACCA_RECOMMENDER` | `1` | Insights/API stat acca suggestions (`0` disables) |
+| `HIBS_ACCA_MAX_LEGS` | `5` | Max legs for “Acca of the day” on `/insights` |
 
 See also `docs/ROADMAP.md` and `/insights` on the live dashboard.
 

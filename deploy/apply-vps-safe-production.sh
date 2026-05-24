@@ -13,7 +13,7 @@ ENV_FILE="${APP_ROOT}/.env"
 SERVICE_DST="/etc/systemd/system/hibs-bet.service"
 NGINX_SITE="/etc/nginx/sites-available/hibs-bet"
 LITE_MARKER="# --- VPS 1GB production tuning (hibs-bet deploy) ---"
-SAFE_MARKER="# --- VPS 2GB safer full data (hibs-bet deploy) ---"
+SAFE_MARKER="# --- VPS 2GB reliability baseline (hibs-bet deploy) ---"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "Run as root: sudo bash $0" >&2
@@ -107,6 +107,7 @@ upsert_safe_env() {
   cat >>"$f" <<EOF
 
 ${SAFE_MARKER}
+# Scope A end-of-season: player/injury/lineup on; squad depth off (429 budget).
 HIBS_FETCH_DAYS=7
 HIBS_MAX_DATA=1
 HIBS_DASHBOARD_LITE=0
@@ -114,15 +115,19 @@ HIBS_ALWAYS_DEEP_SCRAPE=0
 HIBS_SKIP_HEAVY_WHEN_API_STRONG=1
 HIBS_FIXTURE_FETCH_WORKERS=2
 HIBS_ENRICH_API_SEM=1
+HIBS_API_SPORTS_HOURLY_LIMIT=400
 HIBS_WARM_FIXTURE_CACHE=1
 HIBS_ENABLE_PLAYER_INSIGHT=1
 HIBS_ENABLE_LINEUP_FETCH=1
 HIBS_LINEUP_FETCH_MAX_HOURS=6
 HIBS_SKIP_API_SQUAD_DEPTH=1
 HIBS_USE_INJURY_LAMBDA_ADJUST=1
+HIBS_INJURY_LAMBDA_MAX_CUT=0.08
+HIBS_TOURNAMENT_FOCUS=0
 HIBS_FBREF_BLOCKED=1
 HIBS_PREDICTION_LOG_ENABLED=1
 HIBS_CLV_LOG_ENABLED=1
+HIBS_AUTH_ENABLED=1
 EOF
   dedupe_hibs_env "$f"
   chown www-data:www-data "$f"
@@ -164,9 +169,15 @@ sleep 2
 systemctl status hibs-bet --no-pager || true
 
 echo ""
-echo "Done. Safer profile: 7-day window, MAX_DATA=1, live dashboard, skip heavy when APIs strong."
-echo "Tournament focus: auto window 2026-06-11 → 2026-07-18 (internationals only by default)."
-echo "  Disable on VPS now: echo 'HIBS_TOURNAMENT_FOCUS=0' >> ${ENV_FILE} && systemctl restart hibs-bet"
+echo "Done. Reliability baseline applied (see docs/RELIABILITY_BASELINE.md)."
+echo "  Player/injury/lineup ON · squad depth OFF · tournament focus OFF · API limit 400/h"
+echo "Auth: HIBS_AUTH_ENABLED=1 is set. Add to ${ENV_FILE} (do not commit):"
+echo "  HIBS_SECRET_KEY=<run: python3 -c \"import secrets; print(secrets.token_hex(32))\">"
+echo "  HIBS_AUTH_PASSWORD=<choose a strong password>"
+echo "  # optional: HIBS_AUTH_USERNAME=admin  HIBS_AUTH_PUBLIC_HEALTH=1"
+echo "Then: systemctl restart hibs-bet"
+echo "After deploy or key change, clear fixture cache once:"
+echo "  sudo -u www-data rm -rf ${APP_ROOT}/.cache/all_fixtures* ${APP_ROOT}/.cache/league_*"
 echo "Test:"
 echo "  curl -sS --max-time 30 -o /dev/null -w 'health %{http_code}\n' http://127.0.0.1:8000/api/health"
 echo "  curl -sS --max-time 200 -o /dev/null -w 'home %{http_code}\n' http://127.0.0.1:8000/"

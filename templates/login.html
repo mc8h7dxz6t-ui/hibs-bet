@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>hibs-bet — Sign in</title>
+    <link rel="icon" href="/static/badge_harp_shield.png" type="image/png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --hibs-green: #007A33;
+            --hibs-navy-deep: #060e18;
+            --hibs-neon: #b7f7c8;
+            --border: rgba(190, 220, 205, 0.16);
+            --text: #f8fafc;
+            --muted: #94a3b8;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            color: var(--text);
+            background: var(--hibs-navy-deep);
+            background-image:
+                radial-gradient(ellipse at 12% 40%, rgba(0, 122, 51, 0.14) 0%, transparent 48%),
+                radial-gradient(ellipse at 88% 12%, rgba(183, 247, 200, 0.06) 0%, transparent 44%);
+        }
+        .login-card {
+            width: 100%;
+            max-width: 420px;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 32px 28px;
+            background: linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(2, 6, 23, 0.92));
+            box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+        }
+        .login-badge {
+            display: block;
+            width: 72px;
+            height: 72px;
+            margin: 0 auto 16px;
+        }
+        .login-title {
+            font-family: 'Orbitron', monospace;
+            font-size: 1.35em;
+            text-align: center;
+            color: var(--hibs-neon);
+            letter-spacing: 0.06em;
+            margin-bottom: 6px;
+        }
+        .login-sub {
+            text-align: center;
+            font-size: 0.82em;
+            color: var(--muted);
+            margin-bottom: 24px;
+            line-height: 1.5;
+        }
+        .login-error {
+            background: rgba(252, 165, 165, 0.12);
+            border: 1px solid rgba(252, 165, 165, 0.35);
+            color: #fca5a5;
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 0.82em;
+            margin-bottom: 16px;
+        }
+        label {
+            display: block;
+            font-size: 0.75em;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: 6px;
+        }
+        .field { margin-bottom: 16px; }
+        input[type="text"],
+        input[type="password"] {
+            width: 100%;
+            padding: 12px 14px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: rgba(6, 14, 24, 0.85);
+            color: var(--text);
+            font-size: 1em;
+        }
+        input:focus {
+            outline: none;
+            border-color: rgba(0, 122, 51, 0.55);
+            box-shadow: 0 0 0 3px rgba(0, 122, 51, 0.18);
+        }
+        .login-btn {
+            width: 100%;
+            margin-top: 8px;
+            padding: 13px 16px;
+            border: none;
+            border-radius: 10px;
+            font-size: 0.95em;
+            font-weight: 800;
+            cursor: pointer;
+            color: #041008;
+            background: linear-gradient(135deg, var(--hibs-neon), #6ee7a8);
+            font-family: 'Orbitron', monospace;
+            letter-spacing: 0.04em;
+        }
+        .login-btn:hover { filter: brightness(1.06); }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <img src="/static/badge_harp_shield.png" alt="Hibs harp badge" class="login-badge">
+        <h1 class="login-title">hibs-bet</h1>
+        <p class="login-sub">Sign in to access the dashboard and APIs.</p>
+        {% if error %}
+        <div class="login-error" role="alert">{{ error }}</div>
+        {% endif %}
+        <form method="post" action="{{ url_for('login') }}">
+            <input type="hidden" name="next" value="{{ next_url }}">
+            <div class="field">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" autocomplete="username" required autofocus>
+            </div>
+            <div class="field">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" autocomplete="current-password" required>
+            </div>
+            <button type="submit" class="login-btn">Sign in</button>
+        </form>
+    </div>
+</body>
+</html>

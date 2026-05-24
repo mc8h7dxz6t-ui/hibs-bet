@@ -1,4 +1,7 @@
 {% set p = fixture.prediction %}
+{% macro table_team_label(t) -%}
+{%- if t is mapping -%}{{ t.get('name') or t.get('shortName') or '—' }}{%- else -%}{{ t }}{%- endif -%}
+{%- endmacro %}
 {% set model_ok = p and not (p.prediction_unavailable | default(false)) %}
 {% set show_pred = model_ok and p.probabilities_pct is defined %}
 {% set vb = p.value_bets if p and p.value_bets is defined else {} %}
@@ -109,7 +112,7 @@
                 {% if table_rows %}
                 <optgroup label="{{ table_label }}">
                     {% for row in table_rows %}
-                    <option {% if row.is_focus %}selected{% endif %} class="{% if row.is_home_team %}fr-tbl-home{% elif row.is_away_team %}fr-tbl-away{% endif %}">{% if row.is_focus %}* {% endif %}{% if row.is_home_team %}[H] {% elif row.is_away_team %}[A] {% endif %}{{ row.position }}. {{ row.team }} · P {{ row.played }} · GF {{ row.goals_for }} GA {{ row.goals_against }} · GD {% if row.goal_diff > 0 %}+{% endif %}{{ row.goal_diff }} · {{ row.points }} pts{% if row.form %} · {{ row.form[-5:] }}{% endif %}</option>
+                    <option {% if row.is_focus %}selected{% endif %} class="{% if row.is_home_team %}fr-tbl-home{% elif row.is_away_team %}fr-tbl-away{% endif %}">{% if row.is_focus %}* {% endif %}{% if row.is_home_team %}[H] {% elif row.is_away_team %}[A] {% endif %}{{ row.position }}. {{ table_team_label(row.team) }} · P {{ row.played }} · GF {{ row.goals_for }} GA {{ row.goals_against }} · GD {% if row.goal_diff > 0 %}+{% endif %}{{ row.goal_diff }} · {{ row.points }} pts{% if row.form %} · {{ row.form[-5:] }}{% endif %}</option>
                     {% endfor %}
                 </optgroup>
                 {% elif fixture.home_table_snapshot or fixture.away_table_snapshot %}
@@ -117,7 +120,7 @@
                 {% set away_snap = fixture.away_table_snapshot if fixture.away_table_snapshot is defined else [] %}
                 <optgroup label="{{ table_label }}">
                     {% for row in home_snap + away_snap %}
-                    <option {% if row.is_focus %}selected{% endif %}>{% if row.is_focus %}* {% endif %}{{ row.position }}. {{ row.team }} · GF {{ row.goals_for }} GA {{ row.goals_against }} · {{ row.points }} pts</option>
+                    <option {% if row.is_focus %}selected{% endif %}>{% if row.is_focus %}* {% endif %}{{ row.position }}. {{ table_team_label(row.team) }} · GF {{ row.goals_for }} GA {{ row.goals_against }} · {{ row.points }} pts</option>
                     {% endfor %}
                 </optgroup>
                 {% else %}

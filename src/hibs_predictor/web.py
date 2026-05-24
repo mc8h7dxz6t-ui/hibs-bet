@@ -25,7 +25,17 @@ try:
 except Exception as exc:
     print(f"M5 optimizations skipped: {exc}")
 
-from flask import Flask, render_template, jsonify, request, abort, g, has_request_context, make_response
+from flask import Flask, render_template, jsonify, request, abort, g, has_request_context, make_response, redirect, url_for
+from hibs_predictor.auth import (
+    auth_enabled,
+    check_credentials,
+    init_app as init_auth,
+    is_logged_in,
+    login_required,
+    login_user,
+    logout_user,
+    safe_next_url,
+)
 from hibs_predictor.config import (
     LEAGUES,
     LEAGUE_REGIONS,
@@ -57,6 +67,7 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 
 app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
 app.config["JSON_SORT_KEYS"] = False
+init_auth(app)
 
 
 @app.after_request
@@ -82,14 +93,16 @@ _BUNDLE_DISK_KEYS = frozenset(
 
 
 def _api_football_season_year(now: datetime) -> int:
-    """API-Football season id is the year the competition season starts (e.g. 2025 for 2025–26)."""
-    return now.year if now.month >= 7 else now.year - 1
+    """API-Football season id (Jul-based default; respects HIBS_CURRENT_SEASON)."""
+    from hibs_predictor.season import api_football_season_year
+
+    return api_football_season_year(now)
 
 
 _FDO_CALENDAR_COMPS = frozenset({"WC", "EC", "UNL", "CL", "EL", "UECL"})
 # UEFA club cups: API-Football season id is Jul-based; FDO often 403/429 on finals week.
 _API_FIRST_FIXTURE_LEAGUES = frozenset({"UCL", "EUROPA_LEAGUE", "UECL"})
-_FIXTURE_CACHE_VERSION = "v23"
+_FIXTURE_CACHE_VERSION = "v24"
 _EMPTY_FIXTURE_CACHE_TTL_HOURS = 0.2  # short negative cache — avoid hour-long empty poison
 
 
@@ -202,6 +215,8 @@ def _sky_dock_context() -> Dict[str, Any]:
 def inject_sky_dock():
     ctx = _sky_dock_context()
     ctx["launch_media_enabled"] = _launch_media_enabled()
+    ctx["hibs_auth_enabled"] = auth_enabled()
+    ctx["hibs_logged_in"] = is_logged_in()
     return ctx
 
 
@@ -859,21 +874,31 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
             print(f"[Prediction] {league_code} {_fixture_key(fixture)}: {e!r}")
             prediction = prediction_unavailable_payload(enriched, "model_error")
 
-        from hibs_predictor.fixture_utils import fixture_team_id
+        from hibs_predictor.fixture_utils import fixture_team_id, fixture_team_name
 
-        home_id = fixture_team_id(fixture, "home") or fixture_team_id(enriched, "home")
-        away_id = fixture_team_id(fixture, "away") or fixture_team_id(enriched, "away")
+        home_id = (
+            fixture_team_id(enriched, "home")
+            or fixture.get("home_id")
+            or fixture_team_id(fixture, "home")
+        )
+        away_id = (
+            fixture_team_id(enriched, "away")
+            or fixture.get("away_id")
+            or fixture_team_id(fixture, "away")
+        )
+        home_nm = fixture_team_name(enriched, "home") or str(fixture.get("home") or "")
+        away_nm = fixture_team_name(enriched, "away") or str(fixture.get("away") or "")
         home_last10: List[Dict[str, Any]] = []
         away_last10: List[Dict[str, Any]] = []
         try:
             home_last10 = TeamStrengthCalculator.parse_last_10_results(
-                enriched.get("home_recent", []), home_id
+                enriched.get("home_recent", []), home_id, team_name=home_nm
             )
         except Exception as e:
             print(f"[Fixture last10 home] {league_code} {_fixture_key(fixture)}: {e!r}")
         try:
             away_last10 = TeamStrengthCalculator.parse_last_10_results(
-                enriched.get("away_recent", []), away_id
+                enriched.get("away_recent", []), away_id, team_name=away_nm
             )
         except Exception as e:
             print(f"[Fixture last10 away] {league_code} {_fixture_key(fixture)}: {e!r}")
@@ -1011,11 +1036,59 @@ def _safe_int_value(value: Any, default: int = 0) -> int:
         return default
 
 
+def _table_team_display(value: Any) -> str:
+    """Render-safe team label from API dict or plain string."""
+    if isinstance(value, dict):
+        return str(
+            value.get("name")
+            or value.get("shortName")
+            or value.get("teamName")
+            or value.get("tla")
+            or ""
+        ).strip()
+    return str(value or "").strip()
+
+
+def _table_team_id(value: Any) -> Optional[int]:
+    from hibs_predictor.fixture_utils import coerce_team_id
+
+    if isinstance(value, dict):
+        return coerce_team_id(value.get("id"))
+    return None
+
+
+def _normalize_position_rank(value: Any) -> Optional[int]:
+    """Integer table rank; never pass through nested team dicts."""
+    if isinstance(value, dict):
+        if value.get("rank") is not None:
+            n = _safe_int_value(value.get("rank"), 0)
+            return n if 0 < n < 500 else None
+        inner = value.get("position")
+        if inner is not None and not isinstance(inner, dict):
+            n = _safe_int_value(inner, 0)
+            return n if 0 < n < 500 else None
+        return None
+    if value in (None, "", "?"):
+        return None
+    n = _safe_int_value(value, 0)
+    return n if 0 < n < 500 else None
+
+
+_TEAM_CANONICAL_ALIASES = {
+    "hibs": "hibernian",
+    "man utd": "manchester united",
+    "man city": "manchester city",
+    "spurs": "tottenham",
+    "wolves": "wolverhampton",
+    "nottm forest": "nottingham forest",
+}
+
+
 def _team_key(name: Any) -> str:
     import re
     import unicodedata
 
-    text = unicodedata.normalize("NFKD", str(name or ""))
+    text = unicodedata.normalize("NFKD", _table_team_display(name))
     text = "".join(c for c in text if not unicodedata.combining(c)).lower()
     text = re.sub(r"[^a-z0-9]+", " ", text).strip()
     for suffix in (" fc", " afc", " cf", " sc", " united", " city"):
@@ -1024,28 +1097,105 @@ def _team_key(name: Any) -> str:
     return text
 
 
+def _canonical_team_key(name: Any) -> str:
+    key = _team_key(name)
+    return _TEAM_CANONICAL_ALIASES.get(key, key)
+
+
 def _team_names_match(a: str, b: str) -> bool:
     """Loose match for fixture display names vs standings (e.g. Hibs vs Hibernian)."""
     if not a or not b:
         return False
-    if a == b:
+    ca, cb = _canonical_team_key(a), _canonical_team_key(b)
+    if ca == cb:
         return True
-    if a in b or b in a:
+    if ca in cb or cb in ca:
         return True
-    ap = a.split()
-    bp = b.split()
+    ap = ca.split()
+    bp = cb.split()
     if ap and bp and ap[0] == bp[0] and len(ap[0]) > 3:
         return True
     for prefix in ("sc ", "fc ", "ac ", "as ", "sv ", "sk ", "rc ", "cd ", "cf "):
-        if a.startswith(prefix):
-            core = a[len(prefix) :].strip()
-            if core and (core == b or core in b or b in core):
+        if ca.startswith(prefix):
+            core = ca[len(prefix) :].strip()
+            if core and (core == cb or core in cb or cb in core):
                 return True
-        if b.startswith(prefix):
-            core = b[len(prefix) :].strip()
-            if core and (core == a or core in a or a in core):
+        if cb.startswith(prefix):
+            core = cb[len(prefix) :].strip()
+            if core and (core == ca or core in ca or ca in core):
                 return True
     return False
+
+
+def _normalize_table_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure table rows use string team names and integer ranks for templates."""
+    out = dict(row)
+    team_raw = out.get("team")
+    tid = out.get("team_id") or _table_team_id(team_raw)
+    if tid is not None:
+        out["team_id"] = tid
+    name = _table_team_display(team_raw) or _table_team_display(out.get("team_name"))
+    if name:
+        out["team"] = name
+    rank = _normalize_position_rank(out.get("position"))
+    if rank is not None:
+        out["position"] = rank
+    elif out.get("position") is not None:
+        out.pop("position", None)
+    for key in ("played", "won", "drawn", "lost", "goals_for", "goals_against", "goal_diff", "points"):
+        if key in out:
+            out[key] = _safe_int_value(out.get(key))
+    form = out.get("form")
+    if form is not None and not isinstance(form, str):
+        out["form"] = str(form)
+    return out
+
+
+def _normalize_position_dict(pos: Any) -> Dict[str, Any]:
+    """Sanitize home/away position blobs attached to fixtures."""
+    if not isinstance(pos, dict):
+        return {}
+    out = dict(pos)
+    rank = _normalize_position_rank(out.get("position", out.get("rank")))
+    if rank is not None:
+        out["position"] = rank
+    elif "position" in out:
+        out.pop("position", None)
+    team_name = _table_team_display(out.get("team"))
+    if team_name:
+        out["team"] = team_name
+    tid = _table_team_id(out.get("team"))
+    if tid is not None:
+        out["team_id"] = tid
+    for key in ("played", "won", "drawn", "lost", "goals_for", "goals_against", "goal_diff", "points"):
+        if key in out:
+            out[key] = _safe_int_value(out.get(key))
+    return out
+
+
+def _table_row_dedupe_key(row: Dict[str, Any]) -> str:
+    tid = row.get("team_id")
+    if tid:
+        return f"id:{tid}"
+    key = _canonical_team_key(row.get("team"))
+    return f"n:{key}" if key else ""
+
+
+def _pick_largest_standings_group(groups: Any) -> List[Any]:
+    """Use the fullest standings group (avoids duplicate home/away split tables)."""
+    best: List[Any] = []
+    for group in groups or []:
+        if isinstance(group, dict):
+            if str(group.get("type") or "").upper() not in ("TOTAL", ""):
+                continue
+            entries = group.get("table") or []
+        elif isinstance(group, list):
+            entries = group
+        else:
+            continue
+        if len(entries) > len(best):
+            best = list(entries)
+    return best
 
 
 def _find_table_row_index(
@@ -1053,19 +1203,19 @@ def _find_table_row_index(
     team: str,
     position_hint: Optional[Dict[str, Any]] = None,
 ) -> Optional[int]:
-    key = _team_key(team)
+    key = _canonical_team_key(team)
     if key:
         for i, row in enumerate(rows):
-            if _team_key(row.get("team")) == key:
+            if _canonical_team_key(row.get("team")) == key:
                 return i
         for i, row in enumerate(rows):
             if _team_names_match(key, _team_key(row.get("team"))):
                 return i
     if position_hint and position_hint.get("position") not in (None, "", "?"):
-        pos = _safe_int_value(position_hint.get("position"), 999)
+        pos = _normalize_position_rank(position_hint.get("position")) or 999
         if pos != 999:
             for i, row in enumerate(rows):
-                if _safe_int_value(row.get("position"), 999) == pos:
+                if _normalize_position_rank(row.get("position")) == pos:
                     return i
     return None
 
@@ -1073,12 +1223,13 @@ def _find_table_row_index(
 def _table_row_from_position(team: str, position: Dict[str, Any], source: str = "fixture") -> Optional[Dict[str, Any]]:
     if not isinstance(position, dict):
         return None
-    rank = position.get("position", position.get("rank"))
-    if rank in (None, "", "?"):
+    rank = _normalize_position_rank(position.get("position", position.get("rank")))
+    if rank is None:
         return None
+    team_name = _table_team_display(team) or _table_team_display(position.get("team")) or "Unknown"
     row = {
-        "position": _safe_int_value(rank, 999),
-        "team": team or position.get("team") or "Unknown",
+        "position": rank,
+        "team": team_name,
         "played": _safe_int_value(position.get("played")),
         "won": _safe_int_value(position.get("won")),
         "drawn": _safe_int_value(position.get("drawn")),
@@ -1090,17 +1241,19 @@ def _table_row_from_position(team: str, position: Dict[str, Any], source: str = 
         "form": position.get("form") or "",
         "source": position.get("source") or source,
     }
-    if row["position"] == 999:
-        return None
-    return row
+    tid = _table_team_id(position.get("team"))
+    if tid is not None:
+        row["team_id"] = tid
+    return _normalize_table_row(row)
 
 
 def _table_row_from_api_entry(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    team = ((entry.get("team") or {}).get("name")) or entry.get("team_name") or entry.get("team")
+    team_obj = entry.get("team") if isinstance(entry.get("team"), dict) else {}
+    team = _table_team_display(team_obj) or _table_team_display(entry.get("team_name")) or _table_team_display(entry.get("team"))
     all_stats = entry.get("all") or {}
     goals = all_stats.get("goals") or {}
-    return _table_row_from_position(
-        str(team or ""),
+    row = _table_row_from_position(
+        team,
         {
             "position": entry.get("rank"),
             "played": all_stats.get("played"),
@@ -1113,14 +1266,21 @@ def _table_row_from_api_entry(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]
             "points": entry.get("points"),
             "form": entry.get("form"),
             "source": "api_sports",
+            "team": team_obj or None,
         },
     )
+    if row and team_obj:
+        tid = _table_team_id(team_obj)
+        if tid is not None:
+            row["team_id"] = tid
+    return row
 
 
 def _table_row_from_fdo_entry(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    team = ((entry.get("team") or {}).get("name")) or entry.get("team_name") or entry.get("team")
-    return _table_row_from_position(
-        str(team or ""),
+    team_obj = entry.get("team") if isinstance(entry.get("team"), dict) else {}
+    team = _table_team_display(team_obj) or _table_team_display(entry.get("team_name")) or _table_team_display(entry.get("team"))
+    row = _table_row_from_position(
+        team,
         {
             "position": entry.get("position"),
             "played": entry.get("playedGames"),
@@ -1133,8 +1293,14 @@ def _table_row_from_fdo_entry(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]
             "points": entry.get("points"),
             "form": entry.get("form"),
             "source": "football_data_org",
+            "team": team_obj or None,
         },
     )
+    if row and team_obj:
+        tid = _table_team_id(team_obj)
+        if tid is not None:
+            row["team_id"] = tid
+    return row
 
 
 def _season_status_for_rows(rows: List[Dict[str, Any]], season: int, primary_season: int) -> List[Dict[str, Any]]:
@@ -1155,18 +1321,22 @@ def _fetch_full_table_rows(league_code: str, *, live_fetch: Optional[bool] = Non
     configured documented API clients and falls back to previous season rows
     when the current/ended competition has no table in the active season id.
     """
+    from hibs_predictor.season import season_candidates
+
     league = LEAGUES.get(league_code) or {}
     league_api_id = league.get("api_sports_id")
     fdo_comp = league.get("football_data_org_id")
     now = datetime.now(timezone.utc)
-    primary_season = _api_football_season_year(now)
+    seasons = season_candidates(now, league_code=league_code)
+    primary_season = seasons[0] if seasons else _api_football_season_year(now)
     allow_live = _env_truthy("HIBS_TABLES_LIVE_FETCH") if live_fetch is None else (bool(live_fetch) or _env_truthy("HIBS_TABLES_LIVE_FETCH"))
+    standings_cache_ttl = 24 if allow_live else 48
     if league_api_id and "api_sports" in aggregator.clients and not _env_truthy("HIBS_SKIP_API_STANDINGS"):
-        for season in (primary_season, primary_season - 1):
+        for season in seasons:
             try:
                 params = {"league": int(league_api_id), "season": int(season)}
                 groups_payload = aggregator.clients["api_sports"].cache.get(
-                    f"api_sports_standings_{str(params)}", ttl_hours=24
+                    f"api_sports_standings_{str(params)}", ttl_hours=standings_cache_ttl
                 )
                 if groups_payload:
                     response = groups_payload.get("response", []) if isinstance(groups_payload, dict) else []
@@ -1175,10 +1345,10 @@ def _fetch_full_table_rows(league_code: str, *, live_fetch: Optional[bool] = Non
                     groups = aggregator.clients["api_sports"].fetch_standings(int(league_api_id), int(season))
                 else:
                     groups = []
+                entries = _pick_largest_standings_group(groups)
                 rows = [
                     row
-                    for group in (groups or [])
-                    for entry in (group or [])
+                    for entry in entries
                     for row in [_table_row_from_api_entry(entry)]
                     if row
                 ]
@@ -1188,11 +1358,11 @@ def _fetch_full_table_rows(league_code: str, *, live_fetch: Optional[bool] = Non
                 print(f"[Tables api_sports] {league_code}: {exc!r}")
                 continue
     if fdo_comp and "football_data_org" in aggregator.clients:
-        for season in (primary_season, primary_season - 1):
+        for season in seasons:
             try:
                 params = {"season": int(season)}
                 payload = aggregator.clients["football_data_org"].cache.get(
-                    f"football_data_org_competitions/{fdo_comp}/standings_{str(params)}", ttl_hours=24
+                    f"football_data_org_competitions/{fdo_comp}/standings_{str(params)}", ttl_hours=standings_cache_ttl
                 )
                 if isinstance(payload, dict):
                     groups = payload.get("standings", []) or []
@@ -1200,11 +1370,10 @@ def _fetch_full_table_rows(league_code: str, *, live_fetch: Optional[bool] = Non
                     groups = aggregator.clients["football_data_org"].fetch_standings(str(fdo_comp), int(season))
                 else:
                     groups = []
+                entries = _pick_largest_standings_group(groups)
                 rows = [
                     row
-                    for group in (groups or [])
-                    if str(group.get("type") or "").upper() in ("TOTAL", "")
-                    for entry in (group.get("table") or [])
+                    for entry in entries
                     for row in [_table_row_from_fdo_entry(entry)]
                     if row
                 ]
@@ -1245,17 +1414,41 @@ def _fixture_position_rows(fixtures: List[Dict[str, Any]]) -> Dict[str, List[Dic
 
 
 def _dedupe_table_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    by_team: Dict[str, Dict[str, Any]] = {}
-    for row in rows:
-        key = _team_key(row.get("team"))
-        if not key:
-            continue
-        existing = by_team.get(key)
-        if existing is None or (
-            existing.get("source") == "fixture" and row.get("source") != "fixture"
-        ):
-            by_team[key] = row
-    return sorted(by_team.values(), key=lambda r: (_safe_int_value(r.get("position"), 999), str(r.get("team") or "")))
+    normalized = [_normalize_table_row(r) for r in rows]
+    by_key: Dict[str, Dict[str, Any]] = {}
+    name_to_key: Dict[str, str] = {}
+
+    def _prefer(existing: Dict[str, Any], candidate: Dict[str, Any]) -> bool:
+        if existing.get("source") == "fixture" and candidate.get("source") != "fixture":
+            return True
+        if candidate.get("team_id") and not existing.get("team_id"):
+            return True
+        return False
+
+    for row in normalized:
+        name_key = _canonical_team_key(row.get("team"))
+        key = _table_row_dedupe_key(row)
+        if name_key and name_key in name_to_key:
+            key = name_to_key[name_key]
+        elif not key or key == "n:":
+            if not name_key:
+                continue
+            key = f"n:{name_key}"
+        existing = by_key.get(key)
+        if existing is None or _prefer(existing, row):
+            by_key[key] = row
+            if name_key:
+                name_to_key[name_key] = key
+    seen_ids: set[int] = set()
+    unique: List[Dict[str, Any]] = []
+    for row in by_key.values():
+        tid = row.get("team_id")
+        if tid:
+            if tid in seen_ids:
+                continue
+            seen_ids.add(int(tid))
+        unique.append(row)
+    return sorted(unique, key=lambda r: (_safe_int_value(r.get("position"), 999), str(r.get("team") or "")))
 
 
 def _build_league_tables(
@@ -1323,19 +1516,24 @@ def _snapshot_for_team(
 def _attach_table_snapshots(fixtures: List[Dict[str, Any]], tables: List[Dict[str, Any]]) -> None:
     by_code = {t["code"]: t for t in tables}
     for fixture in fixtures:
+        fixture["home_position"] = _normalize_position_dict(fixture.get("home_position"))
+        fixture["away_position"] = _normalize_position_dict(fixture.get("away_position"))
         league_code = fixture.get("league") or ""
         tbl = by_code.get(league_code) or {}
-        rows = tbl.get("rows") or []
+        rows = [_normalize_table_row(r) for r in (tbl.get("rows") or [])]
         home = str(fixture.get("home") or "")
         away = str(fixture.get("away") or "")
-        home_key = _team_key(home)
-        away_key = _team_key(away)
+        home_key = _canonical_team_key(home)
+        away_key = _canonical_team_key(away)
         full_rows: List[Dict[str, Any]] = []
         for row in rows:
             out = dict(row)
-            tk = _team_key(row.get("team"))
+            tk = _canonical_team_key(row.get("team"))
             out["is_home_team"] = bool(home_key and tk == home_key)
             out["is_away_team"] = bool(away_key and tk == away_key)
+            if not out["is_home_team"] and not out["is_away_team"]:
+                out["is_home_team"] = _team_names_match(home_key, tk)
+                out["is_away_team"] = _team_names_match(away_key, tk)
             out["is_focus"] = out["is_home_team"] or out["is_away_team"]
             full_rows.append(out)
         fixture["league_table_rows"] = full_rows
@@ -1688,7 +1886,32 @@ def _assistant_bundle(fixtures: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if not auth_enabled():
+        return redirect(url_for("index"))
+    if is_logged_in():
+        return redirect(safe_next_url(request.args.get("next")))
+    next_url = safe_next_url(request.form.get("next") or request.args.get("next"))
+    error = None
+    if request.method == "POST":
+        if check_credentials(request.form.get("username", ""), request.form.get("password", "")):
+            login_user()
+            return redirect(next_url)
+        error = "Invalid username or password."
+    return render_template("login.html", error=error, next_url=next_url)
+
+
+@app.route("/logout", methods=["GET", "POST"])
+def logout():
+    logout_user()
+    if auth_enabled():
+        return redirect(url_for("login"))
+    return redirect(url_for("index"))
+
+
 @app.route("/")
+@login_required
 def index():
     include_domestic = request.args.get("domestic") == "1"
     if request.args.get("refresh") == "1":
@@ -1763,6 +1986,7 @@ def index():
 
 
 @app.route("/api/assistant/snapshot")
+@login_required
 def api_assistant_snapshot():
     """Structured insight packets + acca/market recommendations for the Betting Assistant."""
     data = fetch_all_fixtures(attach_live=True)
@@ -1771,6 +1995,7 @@ def api_assistant_snapshot():
 
 
 @app.route("/api/assistant/recommendations")
+@login_required
 def api_assistant_recommendations():
     """Acca and market recommendations only (packets omitted for lighter payload)."""
     data = fetch_all_fixtures()
@@ -1784,6 +2009,7 @@ def api_assistant_recommendations():
 
 
 @app.route("/api/assistant/chat", methods=["POST"])
+@login_required
 def api_assistant_chat():
     """Natural-language assistant: stats, accas, best bets (data-gated)."""
     from hibs_predictor.assistant_chat import handle_chat
@@ -1809,6 +2035,7 @@ def api_assistant_chat():
 
 
 @app.route("/api/assistant/acca-review", methods=["POST"])
+@login_required
 def api_assistant_acca_review():
     """Structured leg-by-leg review for acca / betslip selections."""
     from hibs_predictor.acca_review import review_acca_legs
@@ -1823,6 +2050,7 @@ def api_assistant_acca_review():
 
 
 @app.route("/api/audit/summary")
+@login_required
 def api_audit_summary():
     """Calibration / audit metrics from the prediction log SQLite (optional)."""
     tok = (os.getenv("HIBS_AUDIT_API_TOKEN") or "").strip()
@@ -1834,6 +2062,7 @@ def api_audit_summary():
 
 
 @app.route("/api/cache/clear", methods=["POST", "GET"])
+@login_required
 def api_cache_clear():
     """Clear fixture disk cache and in-memory /api/health cache. GET is for local dev only."""
     all_disk = request.args.get("all") == "1"
@@ -1846,6 +2075,7 @@ def api_cache_clear():
 
 
 @app.route("/api/health")
+@login_required(allow_public_health=True)
 def api_health():
     """API + scraper probes for dashboard status panel (short TTL cache)."""
     import time as _time
@@ -1862,6 +2092,7 @@ def api_health():
 
 
 @app.route("/api/fixtures/live")
+@login_required
 def api_fixtures_live():
     """Lightweight in-play score poll for dashboard rows (cached live=all + optional events)."""
     from hibs_predictor.live_scores import live_payload_for_ids
@@ -1893,6 +2124,7 @@ def api_fixtures_live():
 
 
 @app.route("/api/fixtures")
+@login_required
 def api_fixtures():
     league_code = request.args.get("league", "EPL")
     fixtures = fetch_next_48h_fixtures(league_code)
@@ -1900,12 +2132,14 @@ def api_fixtures():
 
 
 @app.route("/api/value-bets")
+@login_required
 def api_value_bets():
     data = fetch_all_fixtures()
     return jsonify({"value_bets": data["value_bets"], "count": data["value_bet_count"]})
 
 
 @app.route("/api/insights")
+@login_required
 def api_insights():
     """Handicapper-style insight digest for the current fixture window."""
     from hibs_predictor.insights import build_insights
@@ -1914,7 +2148,20 @@ def api_insights():
     return jsonify(build_insights(data["all"]))
 
 
+@app.route("/api/acca/recommendations")
+@login_required
+def api_acca_recommendations():
+    """Stat-based acca recommendations from the current enriched fixture window."""
+    from hibs_predictor.acca_recommender import build_acca_recommendations
+    from hibs_predictor.match_insight import build_assistant_packet
+
+    data = fetch_all_fixtures()
+    packets = [build_assistant_packet(f) for f in data["all"]]
+    return jsonify(build_acca_recommendations(packets))
+
+
 @app.route("/insights")
+@login_required
 def insights_page():
     """Actionable model/data/market insights built from the current fixture packets."""
     from hibs_predictor.insights import build_insights
@@ -1939,6 +2186,7 @@ def insights_page():
 
 
 @app.route("/tables")
+@login_required
 def tables_page():
     """League tables from available standings feeds, with fixture-row fallback."""
     data = fetch_all_fixtures()
@@ -1953,12 +2201,14 @@ def tables_page():
 
 
 @app.route("/guide")
+@login_required
 def guide_page():
     """Standalone betting guide so the nav has no dead Guide item."""
     return render_template("guide.html")
 
 
 @app.route("/settings")
+@login_required
 def settings_page():
     """Front-end preferences persisted in localStorage by the settings template."""
     return render_template(
@@ -1970,12 +2220,14 @@ def settings_page():
 
 
 @app.route("/acca")
+@login_required
 def acca_builder():
     data = fetch_all_fixtures()
     return render_template("acca_builder.html", fixtures=data["all"])
 
 
 @app.route("/status")
+@login_required
 def api_status_page():
     """Dedicated API + scraper status (same probes as /api/health)."""
     return render_template("api_status.html")

@@ -38,6 +38,33 @@
     renderDrawer();
   }
 
+  function mapMarketToOutcome(marketKey) {
+    const m = { home_win: "home", away_win: "away", draw: "draw" };
+    return m[marketKey] || marketKey;
+  }
+
+  function addMultipleSelections(legs, shouldOpen) {
+    let added = 0;
+    (legs || []).forEach(function (leg) {
+      const slipLeg = leg.slip || leg;
+      const fid = slipLeg.fixture_id || leg.fixture_id;
+      const odds = parseFloat(slipLeg.odds != null ? slipLeg.odds : leg.odds);
+      if (!fid || !odds || odds <= 1) return;
+      addSelection({
+        fid: String(fid),
+        home: slipLeg.home || leg.home,
+        away: slipLeg.away || leg.away,
+        league: slipLeg.league || leg.league_name || leg.league || "",
+        outcome: mapMarketToOutcome(slipLeg.market_key || leg.market_key),
+        odds: odds,
+        label: slipLeg.market_label || leg.market_label || slipLeg.market_key || leg.market_key,
+      });
+      added += 1;
+    });
+    if (added && shouldOpen !== false) openDrawer();
+    return added;
+  }
+
   function removeSelection(fid) {
     const slip = loadSlip();
     delete slip[String(fid)];
@@ -179,6 +206,7 @@
     loadSlip,
     saveSlip,
     addSelection,
+    addMultipleSelections,
     removeSelection,
     clearSlip,
     countSelections,

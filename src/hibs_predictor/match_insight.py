@@ -425,11 +425,13 @@ def _build_rationale_metrics(
             )
     hp = fixture.get("home_position") or {}
     ap = fixture.get("away_position") or {}
-    if hp.get("position") and ap.get("position"):
+    hp_rank = hp.get("position") if isinstance(hp.get("position"), int) else None
+    ap_rank = ap.get("position") if isinstance(ap.get("position"), int) else None
+    if hp_rank and ap_rank:
         optional.append(
             {
                 "label": "Table",
-                "value": f"{fixture.get('home', 'Home')} {hp['position']} · {fixture.get('away', 'Away')} {ap['position']}",
+                "value": f"{fixture.get('home', 'Home')} {hp_rank} · {fixture.get('away', 'Away')} {ap_rank}",
                 "note": f"{hp.get('points', '—')} vs {ap.get('points', '—')} pts.",
             }
         )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from hibs_predictor.acca_recommender import build_acca_recommendations
 from hibs_predictor.assistant_recommendations import (
     build_assistant_recommendations,
     build_bet_builder_suggestions,
@@ -215,6 +216,7 @@ def build_insights(fixtures: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "packets": packets,
         "recommendations": recommendations,
+        "acca_recommendations": build_acca_recommendations(packets),
         "summary": recommendations.get("deep_dive_summary") or {},
         "top_probabilities": _top_probability_rows(packets),
         "value_opportunities": _value_opportunities(packets),
