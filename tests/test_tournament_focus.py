@@ -43,10 +43,20 @@ def test_focus_off_before_world_cup_starts(monkeypatch):
     """Pre-tournament (e.g. May 2026): domestic leagues fetch normally."""
     monkeypatch.setattr(
         "hibs_predictor.tournament_focus._today_utc",
-        lambda: date(2026, 5, 20),
+        lambda: date(2026, 5, 31),
     )
     assert tournament_focus_active() is False
     assert league_codes_for_fetch() == ALL_LEAGUE_CODES
+
+
+def test_focus_auto_on_early_june(monkeypatch):
+    """From 1 Jun: upcoming WC fixtures visible before opening match day."""
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 6, 5),
+    )
+    assert tournament_focus_mode() == "worldcup"
+    assert tournament_focus_active() is True
 
 
 def test_focus_off_after_world_cup_ends(monkeypatch):
@@ -61,7 +71,7 @@ def test_focus_off_after_world_cup_ends(monkeypatch):
 def test_focus_auto_on_at_window_start(monkeypatch):
     monkeypatch.setattr(
         "hibs_predictor.tournament_focus._today_utc",
-        lambda: date(2026, 6, 11),
+        lambda: date(2026, 6, 1),
     )
     assert tournament_focus_mode() == "worldcup"
     assert tournament_focus_active() is True

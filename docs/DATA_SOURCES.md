@@ -54,7 +54,7 @@ Coverage scoring: `src/hibs_predictor/data_quality.py` (`full_scope` ≥ **85%**
 
 ## Tournament focus (World Cup / internationals)
 
-When active (env or auto window **2026-06-11 → 2026-07-18**), fixture fetch defaults to `WORLD_CUP`, `INTL_FRIENDLIES`, `NATIONS_LEAGUE`, and `EUROS` — reducing domestic league API load on VPS. Dashboard defaults to **International** region (chip shows all four); **All / UK / European** region chips trigger a full domestic fetch (`?domestic=1`).
+When active (env or auto window **2026-06-01 → 2026-07-18**), fixture fetch defaults to `WORLD_CUP`, `INTL_FRIENDLIES`, `NATIONS_LEAGUE`, and `EUROS` — reducing domestic league API load on VPS. Dashboard defaults to **International** region (chip shows all four); **All / UK / European** region chips trigger a full domestic fetch (`?domestic=1`).
 
 | Variable | Purpose |
 |----------|---------|

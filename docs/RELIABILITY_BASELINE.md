@@ -89,16 +89,16 @@ Check `/api/health` for API quota and enrichment errors.
 
 ## World Cup / international period
 
-**Before 11 Jun 2026 (now):** keep `HIBS_TOURNAMENT_FOCUS=0` on the VPS so domestic leagues stay in the default fetch set through season end. No cache bump needed solely for the switch — only when deploying code that changes enrich fields (fixture cache **v25**).
+**Before 1 Jun 2026 (now):** keep `HIBS_TOURNAMENT_FOCUS=0` on the VPS so domestic leagues stay in the default fetch set through season end. No cache bump needed solely for the switch — only when deploying code that changes enrich fields (fixture cache **v25**).
 
-**Switch date:** remove or comment out `HIBS_TOURNAMENT_FOCUS=0` on **2026-06-11** (or set `HIBS_TOURNAMENT_FOCUS=worldcup`); auto window ends **2026-07-18**. Users can still load all leagues with dashboard `?domestic=1` or region **All**.
+**From 1 Jun 2026:** auto focus applies when the calendar is inside **2026-06-01 → 2026-07-18** and focus is not forced off. On the VPS, remove or comment out `HIBS_TOURNAMENT_FOCUS=0` (or set `HIBS_TOURNAMENT_FOCUS=worldcup`) to enable international-default fetch; while `=0` remains, domestic leagues stay default even inside the window. Users can still load all leagues with dashboard `?domestic=1` or region **All**.
 
-Auto focus window: **2026-06-11 → 2026-07-18** (override with `HIBS_TOURNAMENT_FOCUS_START` / `HIBS_TOURNAMENT_FOCUS_END`). Friendlies from ~11 June are covered when focus is on (includes `INTL_FRIENDLIES` via API-Football league 10).
+Auto focus window: **2026-06-01 → 2026-07-18** (override with `HIBS_TOURNAMENT_FOCUS_START` / `HIBS_TOURNAMENT_FOCUS_END`). Friendlies are included when focus is on (includes `INTL_FRIENDLIES` via API-Football league 10).
 
 | When | `HIBS_TOURNAMENT_FOCUS` | Fetch behaviour | Dashboard default |
 |------|-------------------------|-----------------|-------------------|
-| Before 11 Jun 2026 | `0` (VPS baseline) | All domestic + international leagues | All regions |
-| 11 Jun – 18 Jul 2026 | unset (auto) or `worldcup` | International codes only (`WORLD_CUP`, `NATIONS_LEAGUE`, `EUROS`, friendlies) | International region |
+| Before 1 Jun 2026 | `0` (VPS baseline) | All domestic + international leagues | All regions |
+| 1 Jun – 18 Jul 2026 | unset (auto) or `worldcup` | International codes only (`WORLD_CUP`, `NATIONS_LEAGUE`, `EUROS`, friendlies) | International region |
 | User picks All / UK / European | any | Full domestic via `?domestic=1` | Selected region |
 
 **Do not** disable prediction logging, CLV, lineup/injury features, or lower DQ thresholds during the tournament — only the default league fetch set narrows when focus is active without `?domestic=1`.

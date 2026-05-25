@@ -19,7 +19,7 @@ Items completed in the latest backlog pass are listed under **Done**; remaining 
 - Historic xG backfill from Understat/FotMob league tables for cups without API xG (needs live cup window to validate).
 
 ## Coverage
-- **World Cup focus window** — auto-limits fetch to internationals **2026-06-11 → 2026-07-18** only; domestic leagues normal outside that window. `HIBS_TOURNAMENT_FOCUS=0` disables on VPS; region chips load domestic via `?domestic=1`.
+- **World Cup focus window** — auto-limits fetch to internationals **2026-06-01 → 2026-07-18** only; domestic leagues normal outside that window. `HIBS_TOURNAMENT_FOCUS=0` disables on VPS; region chips load domestic via `?domestic=1`.
 - Conference League final / Primera play-off at kickoff: FotMob primary ids documented; verify API round labels when finals are live (no fake fixtures in tests).
 
 ## UI

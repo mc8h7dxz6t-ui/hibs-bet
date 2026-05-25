@@ -24,7 +24,7 @@ INTERNATIONAL_FOCUS_LEAGUE_CODES = [
 # Optional during World Cup window (API-Football league 10); not in base list until enabled.
 INTL_FRIENDLIES_CODE = "INTL_FRIENDLIES"
 
-_DEFAULT_AUTO_START = date(2026, 6, 11)
+_DEFAULT_AUTO_START = date(2026, 6, 1)
 _DEFAULT_AUTO_END = date(2026, 7, 18)
 
 

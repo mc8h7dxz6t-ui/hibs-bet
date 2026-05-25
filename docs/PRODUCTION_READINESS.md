@@ -19,7 +19,7 @@ Legend: **GREEN** = OK for next few weeks · **AMBER** = works but needs attenti
 | VPS cron (`pred-log-sync`) | **GREEN** | `www-data` crontab: daily 06:30 UTC + Sun calibration-fit |
 | Prediction audit DB | **AMBER** | `prediction_audit.sqlite` exists; **0** snapshots — load dashboard while logged in to seed |
 | `/api/health` unauthenticated | **AMBER** | Returns `login_required` (auth on); use session or `HIBS_AUTH_PUBLIC_HEALTH=1` if needed |
-| International / WC window | **GREEN** | Auto 2026-06-11 → 2026-07-18; `HIBS_TOURNAMENT_FOCUS=0` until switch; `?domestic=1` escape |
+| International / WC window | **GREEN** | Auto 2026-06-01 → 2026-07-18; `HIBS_TOURNAMENT_FOCUS=0` until switch; `?domestic=1` escape |
 | Season codes (May 2026) | **GREEN** | Jul-based `2025` + Nordic calendar-year `2026` candidates in `season.py` |
 | Fixture cache version | **GREEN** | `v25` in `web.py`; clear after deploy if enrich fields stale |
 | Partial enrich cache bust | **GREEN** | Thin rows (missing recent/stats) bypass stale enriched cache |
@@ -58,14 +58,14 @@ Focused suites also green: `test_tournament_focus`, `test_prediction_log_monitor
 
 | Check | Status |
 |-------|--------|
-| `tournament_focus.py` auto window 11 Jun – 18 Jul 2026 | **GREEN** |
+| `tournament_focus.py` auto window 1 Jun – 18 Jul 2026 | **GREEN** |
 | `INTL_FRIENDLIES` in focus when WC mode | **GREEN** |
 | `HIBS_TOURNAMENT_FOCUS=0` on VPS (domestic through season end) | **GREEN** |
 | Domestic escape: `?domestic=1` / region All | **GREEN** |
 | FotMob ids documented for WC / Euros / Nations | **GREEN** |
 | `docs/RELIABILITY_BASELINE.md` switch-date note | **GREEN** |
 
-**User action (11 Jun 2026):** Remove or comment `HIBS_TOURNAMENT_FOCUS=0` in VPS `.env` (or set `worldcup`). Re-run `apply-vps-safe-production.sh` only if merging env blocks; do not disable pred log / CLV / injury / lineup.
+**User action (1 Jun 2026):** Remove or comment `HIBS_TOURNAMENT_FOCUS=0` in VPS `.env` (or set `worldcup`). While `=0` remains, domestic fetch stays default even inside the auto window. Re-run `apply-vps-safe-production.sh` only if merging env blocks; do not disable pred log / CLV / injury / lineup.
 
 ---
 
@@ -142,8 +142,8 @@ No features removed for speed; `HIBS_SKIP_API_SQUAD_DEPTH=1` is quota protection
 
 1. **Seed audit DB:** Log in to https://hibs-bet.co.uk/ and let the dashboard finish one full load on days with fixtures (creates `prediction_snapshots`).  
 2. **After matches:** Cron runs `pred-log-sync` at 06:30 UTC; confirm `/var/log/hibs-bet/pred-log-sync.log` if monitor stays empty.  
-3. **Before 11 Jun 2026:** Keep `HIBS_TOURNAMENT_FOCUS=0`.  
-4. **On 11 Jun 2026:** Remove `HIBS_TOURNAMENT_FOCUS=0` (or set `worldcup`); optional cache clear if DQ looks stale.  
+3. **Before 1 Jun 2026:** Keep `HIBS_TOURNAMENT_FOCUS=0`.  
+4. **From 1 Jun 2026:** Remove `HIBS_TOURNAMENT_FOCUS=0` (or set `worldcup`) for auto international focus; optional cache clear if DQ looks stale.  
 5. **After code deploy:** If xG/DQ columns look wrong, clear fixture cache once (Settings or `rm .cache/all_fixtures*`).  
 6. **Deploy from Mac:** `DEPLOY_HOST=77.68.89.73 ./scripts/deploy_to_vps.sh` (script default `.75` is not production).
 
