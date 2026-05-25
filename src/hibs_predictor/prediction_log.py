@@ -620,18 +620,30 @@ def pred_log_sync_cron_status() -> Dict[str, Any]:
     }
 
 
-def _today_bounds_datetimes() -> Tuple[datetime, datetime, str, str]:
-    """Start/end UTC for the display-TZ calendar day, plus local date and label."""
-    from hibs_predictor.display_tz import (
-        display_tz_label,
-        fixture_window_end_utc,
-        fixture_window_start_utc,
-        local_today,
+def _day_bounds_datetimes(day_offset: int = 0) -> Tuple[datetime, datetime, str, str]:
+    """Start/end UTC for a display-TZ calendar day (0=today, -1=yesterday), plus local date and label."""
+    from hibs_predictor.display_tz import display_timezone, display_tz_label, local_today
+
+    target = local_today() + timedelta(days=int(day_offset))
+    tz = display_timezone()
+    start_local = datetime(target.year, target.month, target.day, 0, 0, 0, tzinfo=tz)
+    end_local = datetime(target.year, target.month, target.day, 23, 59, 59, tzinfo=tz)
+    return (
+        start_local.astimezone(timezone.utc),
+        end_local.astimezone(timezone.utc),
+        target.isoformat(),
+        display_tz_label(),
     )
 
-    start = fixture_window_start_utc()
-    end = fixture_window_end_utc(days=0)
-    return start, end, local_today().isoformat(), display_tz_label()
+
+def _today_bounds_datetimes() -> Tuple[datetime, datetime, str, str]:
+    """Start/end UTC for the display-TZ calendar day, plus local date and label."""
+    return _day_bounds_datetimes(0)
+
+
+def _yesterday_bounds_datetimes() -> Tuple[datetime, datetime, str, str]:
+    """Start/end UTC for yesterday in the display timezone."""
+    return _day_bounds_datetimes(-1)
 
 
 def _today_bounds_utc() -> Tuple[str, str, str, str]:
@@ -749,9 +761,9 @@ def _clv_pp_from_enrich(enrich_raw: Any) -> Optional[float]:
         return None
 
 
-def monitor_today_dict() -> Dict[str, Any]:
-    """Fixtures kicking off today in display timezone (HIBS_DISPLAY_TIMEZONE, default Europe/London)."""
-    start_dt, end_dt, date_local, tz_label = _today_bounds_datetimes()
+def _monitor_day_dict(*, day_offset: int, empty_label: str) -> Dict[str, Any]:
+    """Fixtures kicking off on a display-TZ calendar day (kick-off window, not capture time)."""
+    start_dt, end_dt, date_local, tz_label = _day_bounds_datetimes(day_offset)
     start_iso, end_iso = start_dt.isoformat(), end_dt.isoformat()
     from hibs_predictor.display_tz import display_timezone
 
@@ -770,10 +782,14 @@ def monitor_today_dict() -> Dict[str, Any]:
         "rows": [],
     }
     if not prediction_log_enabled():
-        out["message"] = "Prediction log disabled — set HIBS_PREDICTION_LOG_ENABLED=1."
+        out["message"] = (
+            "Model monitor off — prediction log disabled. Set HIBS_PREDICTION_LOG_ENABLED=1."
+        )
         return out
     if not os.path.isfile(_db_path()):
-        out["message"] = "No audit database yet — enable HIBS_PREDICTION_LOG_ENABLED=1."
+        out["message"] = (
+            "Model monitor waiting for audit DB — set HIBS_PREDICTION_LOG_ENABLED=1 and use the dashboard."
+        )
         return out
 
     init_db()
@@ -830,8 +846,18 @@ def monitor_today_dict() -> Dict[str, Any]:
     out["best_pick"] = {"wins": wins, "losses": losses, "pending": pending}
     out["rows"] = table_rows
     if not kickoff_rows:
-        out["message"] = f"No fixtures kicking off today ({date_local})."
+        out["message"] = f"No fixtures kicking off {empty_label} ({date_local})."
     return out
+
+
+def monitor_today_dict() -> Dict[str, Any]:
+    """Fixtures kicking off today in display timezone (HIBS_DISPLAY_TIMEZONE, default Europe/London)."""
+    return _monitor_day_dict(day_offset=0, empty_label="today")
+
+
+def monitor_yesterday_dict() -> Dict[str, Any]:
+    """Fixtures that kicked off yesterday in display timezone."""
+    return _monitor_day_dict(day_offset=-1, empty_label="yesterday")
 
 
 def _rows_in_monitor_window(
@@ -859,6 +885,7 @@ def monitor_summary_dict(*, days: Optional[int] = None) -> Dict[str, Any]:
     window_days = days if days is not None else _monitor_days()
     cutoff = _monitor_cutoff_iso(days=window_days)
     enabled = prediction_log_enabled()
+    yesterday = monitor_yesterday_dict()
     today = monitor_today_dict()
     base: Dict[str, Any] = {
         "ok": True,
@@ -869,8 +896,23 @@ def monitor_summary_dict(*, days: Optional[int] = None) -> Dict[str, Any]:
         "prediction_log_enabled": enabled,
         "clv_log_enabled": _clv_enabled(),
         "pred_log_sync_cron": pred_log_sync_cron_status(),
+        "yesterday": yesterday,
         "today": today,
     }
+    if not enabled:
+        base.update(
+            {
+                "ok": False,
+                "n_logged": 0,
+                "n_scored": 0,
+                "message": (
+                    "Model monitor off — set HIBS_PREDICTION_LOG_ENABLED=1 "
+                    "(monitor follows the prediction log)."
+                ),
+                "by_league": [],
+            }
+        )
+        return base
     if not os.path.isfile(_db_path()):
         base.update(
             {

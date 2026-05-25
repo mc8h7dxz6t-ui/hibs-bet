@@ -306,10 +306,42 @@
             <h2>Model monitor</h2>
             <p class="monitor-glossary"><strong>Brier</strong> — lower is better; measures how close predicted probabilities were to actual results. <strong>CLV</strong> (closing line value) — positive means you beat the price the market settled on before kick-off (in percentage points).</p>
             {% set m = insights.monitor %}
+            {% set y = m.yesterday or {} %}
             {% set t = m.today or {} %}
-            <h3 style="font-size:0.95em;margin:12px 0 6px;">Today ({{ t.display_tz_label or display_tz_label }})</h3>
+            <h3 style="font-size:0.95em;margin:12px 0 6px;">Yesterday ({{ y.display_tz_label or display_tz_label }})</h3>
+            {% if m.get('enabled') is sameas false or y.get('enabled') is sameas false %}
+            <div class="empty-mini">Model monitor off — set HIBS_PREDICTION_LOG_ENABLED=1.</div>
+            {% elif y.n_logged %}
+            <div class="insight-row">
+                <div class="ir-main">{{ y.n_logged }} fixtures · {{ y.n_scored_ft }} FT synced</div>
+                {% set ybp = y.best_pick or {} %}
+                <span class="ir-pill ir-gold">W {{ ybp.wins or 0 }}</span>
+                <span class="ir-pill">L {{ ybp.losses or 0 }}</span>
+                <span class="ir-pill ir-warn">Pending {{ ybp.pending or 0 }}</span>
+            </div>
+            {% if y.rows %}
+            <table class="data-table" style="margin-top:10px;font-size:0.78em;width:100%;">
+                <thead><tr><th>Match</th><th>Pick</th><th>Model %</th><th>Result</th><th>Score</th><th>CLV</th></tr></thead>
+                <tbody>
+                {% for row in y.rows %}
+                <tr>
+                    <td>{{ row.match }}</td>
+                    <td>{{ row.pick or '—' }}</td>
+                    <td>{% if row.model_pct is not none %}{{ row.model_pct }}%{% else %}—{% endif %}</td>
+                    <td>{% if row.result == 'W' %}<span class="ir-pill ir-gold">W</span>{% elif row.result == 'L' %}<span class="ir-pill">L</span>{% else %}<span class="ir-pill ir-warn">pending</span>{% endif %}</td>
+                    <td>{{ row.score or '—' }}</td>
+                    <td>{% if row.clv_pp is not none %}{{ row.clv_pp }} pp{% else %}—{% endif %}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% else %}
+            <div class="empty-mini">{{ y.message or 'No fixtures kicking off yesterday.' }}</div>
+            {% endif %}
+            <h3 style="font-size:0.95em;margin:16px 0 6px;">Today ({{ t.display_tz_label or display_tz_label }})</h3>
             {% if m.get('enabled') is sameas false or t.get('enabled') is sameas false %}
-            <div class="empty-mini">Prediction log disabled — set HIBS_PREDICTION_LOG_ENABLED=1.</div>
+            <div class="empty-mini">Model monitor off — set HIBS_PREDICTION_LOG_ENABLED=1.</div>
             {% elif t.n_logged %}
             <div class="insight-row">
                 <div class="ir-main">{{ t.n_logged }} fixtures · {{ t.n_scored_ft }} FT synced today</div>

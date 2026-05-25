@@ -13,6 +13,7 @@ from hibs_predictor.prediction_log import (
     init_db,
     monitor_summary_dict,
     monitor_today_dict,
+    monitor_yesterday_dict,
 )
 
 
@@ -180,15 +181,19 @@ def test_monitor_respects_custom_days(audit_db, monkeypatch):
 @pytest.fixture
 def today_window(monkeypatch):
     """Fixed calendar-day bounds so tests are stable regardless of run time."""
-    start = datetime(2026, 5, 24, 0, 0, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 5, 24, 23, 59, 59, tzinfo=timezone.utc)
+    today_start = datetime(2026, 5, 24, 0, 0, 0, tzinfo=timezone.utc)
+    today_end = datetime(2026, 5, 24, 23, 59, 59, tzinfo=timezone.utc)
     noon = datetime(2026, 5, 24, 12, 0, 0, tzinfo=timezone.utc)
+    yest_start = datetime(2026, 5, 23, 0, 0, 0, tzinfo=timezone.utc)
+    yest_end = datetime(2026, 5, 23, 23, 59, 59, tzinfo=timezone.utc)
 
-    def _bounds():
-        return (start, end, "2026-05-24", "UK")
+    def _day_bounds(day_offset: int = 0):
+        if day_offset == -1:
+            return (yest_start, yest_end, "2026-05-23", "UK")
+        return (today_start, today_end, "2026-05-24", "UK")
 
-    monkeypatch.setattr("hibs_predictor.prediction_log._today_bounds_datetimes", _bounds)
-    return start, end, noon
+    monkeypatch.setattr("hibs_predictor.prediction_log._day_bounds_datetimes", _day_bounds)
+    return today_start, today_end, noon
 
 
 def test_monitor_today_empty(audit_db, today_window):
@@ -270,6 +275,7 @@ def test_monitor_today_rows_wlp_and_api(audit_db, today_window):
 
     summary = monitor_summary_dict()
     assert "today" in summary
+    assert "yesterday" in summary
     assert summary["today"]["n_logged"] == 3
     assert summary["today"]["best_pick"]["wins"] == 1
 
@@ -317,3 +323,95 @@ def test_monitor_today_disabled(monkeypatch, audit_db, today_window):
     assert rep["enabled"] is False
     assert rep["n_logged"] == 0
     assert "disabled" in (rep.get("message") or "").lower()
+    summary = monitor_summary_dict()
+    assert summary["enabled"] is False
+    assert "yesterday" in summary
+    assert "HIBS_PREDICTION_LOG_ENABLED" in (summary.get("message") or "")
+
+
+def test_monitor_yesterday_rows_wlp(audit_db, today_window):
+    _start, _end, noon = today_window
+    yesterday_noon = datetime(2026, 5, 23, 15, 0, 0, tzinfo=timezone.utc)
+    today_ko = noon.isoformat()
+
+    conn = sqlite3.connect(str(audit_db))
+    try:
+        _insert_row(
+            conn,
+            captured_at=yesterday_noon.isoformat(),
+            kickoff_iso=yesterday_noon.isoformat(),
+            league="EPL",
+            outcome="draw",
+            predicted="draw",
+            probs={"home": 0.25, "draw": 0.5, "away": 0.25},
+            result_home=1,
+            result_away=1,
+            result_status="FT",
+            result_recorded_at=yesterday_noon.isoformat(),
+            fixture_id=701,
+        )
+        _insert_row(
+            conn,
+            captured_at=yesterday_noon.isoformat(),
+            kickoff_iso=yesterday_noon.isoformat(),
+            league="EPL",
+            outcome="home",
+            predicted="away",
+            probs={"home": 0.2, "draw": 0.25, "away": 0.55},
+            result_home=2,
+            result_away=0,
+            result_status="FT",
+            fixture_id=702,
+        )
+        _insert_row(
+            conn,
+            captured_at=noon.isoformat(),
+            kickoff_iso=today_ko,
+            league="EPL",
+            outcome="home",
+            predicted="home",
+            probs={"home": 0.6, "draw": 0.2, "away": 0.2},
+            fixture_id=703,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    yest = monitor_yesterday_dict()
+    assert yest["date_local"] == "2026-05-23"
+    assert yest["n_logged"] == 2
+    assert yest["best_pick"] == {"wins": 1, "losses": 1, "pending": 0}
+    by_fid = {r["fixture_id"]: r for r in yest["rows"]}
+    assert by_fid[701]["result"] == "W"
+    assert by_fid[702]["result"] == "L"
+
+    today = monitor_today_dict()
+    assert today["n_logged"] == 1
+    assert today["rows"][0]["fixture_id"] == 703
+
+
+def test_monitor_yesterday_uses_kickoff_not_captured_at(audit_db, today_window):
+    """Captured today for yesterday's KO must appear in Yesterday, not Today."""
+    _start, _end, noon = today_window
+    yesterday_ko = datetime(2026, 5, 23, 18, 0, 0, tzinfo=timezone.utc).isoformat()
+
+    conn = sqlite3.connect(str(audit_db))
+    try:
+        _insert_row(
+            conn,
+            captured_at=noon.isoformat(),
+            kickoff_iso=yesterday_ko,
+            league="EPL",
+            outcome="away",
+            predicted="away",
+            probs={"home": 0.2, "draw": 0.25, "away": 0.55},
+            fixture_id=801,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    yest = monitor_yesterday_dict()
+    assert yest["n_logged"] == 1
+    assert yest["rows"][0]["fixture_id"] == 801
+    assert monitor_today_dict()["n_logged"] == 0

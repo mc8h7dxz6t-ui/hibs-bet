@@ -44,6 +44,28 @@ def _pred_audit_line() -> Dict[str, Any]:
     }
 
 
+def _model_monitor_line() -> Dict[str, Any]:
+    load_dotenv()
+    try:
+        from hibs_predictor.prediction_log import prediction_log_enabled
+
+        on = prediction_log_enabled()
+    except Exception:
+        on = False
+    return {
+        "id": "model_monitor",
+        "label": "Model monitor (Today / Yesterday / 28d)",
+        "ok": on,
+        "ms": None,
+        "prediction_effect": (
+            "On when HIBS_PREDICTION_LOG_ENABLED=1 — kick-off slices in display timezone plus rolling Brier/CLV. "
+            "Insights, /status, and /api/monitor/summary."
+            if on
+            else "Off until prediction log is enabled — set HIBS_PREDICTION_LOG_ENABLED=1 on the VPS .env."
+        ),
+    }
+
+
 def _clv_log_line() -> Dict[str, Any]:
     load_dotenv()
     try:
@@ -177,6 +199,7 @@ def augment_health_for_ui(health: Dict[str, Any]) -> Dict[str, Any]:
 
     features: List[Dict[str, Any]] = [
         _pred_audit_line(),
+        _model_monitor_line(),
         _clv_log_line(),
         _calibration_cache_line(),
         {
