@@ -79,7 +79,6 @@
             margin-bottom: 6px;
         }
         .field { margin-bottom: 16px; }
-        input[type="text"],
         input[type="password"] {
             width: 100%;
             padding: 12px 14px;
@@ -109,25 +108,26 @@
             letter-spacing: 0.04em;
         }
         .login-btn:hover { filter: brightness(1.06); }
+        .login-btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            filter: none;
+        }
     </style>
 </head>
 <body>
     <div class="login-card">
         <img src="/static/badge_harp_shield.png" alt="Hibs harp badge" class="login-badge">
         <h1 class="login-title">hibs-bet</h1>
-        <p class="login-sub">Welcome — sign in for live fixtures, model picks, and acca tools.</p>
+        <p class="login-sub">Enter the shared site password for live fixtures, model picks, and acca tools.</p>
         {% if error %}
         <div class="login-error" role="alert">{{ error }}</div>
         {% endif %}
         <form method="post" action="{{ url_for('login') }}">
             <input type="hidden" name="next" value="{{ next_url }}">
             <div class="field">
-                <label for="username">Username</label>
-                <input type="text" id="username" name="username" autocomplete="username" required autofocus>
-            </div>
-            <div class="field">
                 <label for="password">Password</label>
-                <input type="password" id="password" name="password" autocomplete="current-password" required>
+                <input type="password" id="password" name="password" autocomplete="current-password" required autofocus>
             </div>
             <button type="submit" class="login-btn">Sign in</button>
         </form>

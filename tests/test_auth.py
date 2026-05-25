@@ -26,10 +26,10 @@ def _reload_web(monkeypatch, **env):
     return web
 
 
-def _login(client, username="admin", password="testpass"):
+def _login(client, password="testpass"):
     return client.post(
         "/login",
-        data={"username": username, "password": password, "next": "/"},
+        data={"password": password, "next": "/"},
         follow_redirects=False,
     )
 
@@ -73,7 +73,7 @@ def test_login_logout_flow(monkeypatch):
     client = web.app.test_client()
     bad = _login(client, password="wrong")
     assert bad.status_code == 200
-    assert b"Invalid username or password" in bad.data
+    assert b"Incorrect password" in bad.data
 
     ok = _login(client)
     assert ok.status_code == 302
@@ -91,6 +91,20 @@ def test_login_logout_flow(monkeypatch):
     assert client.get("/settings").status_code == 302
 
 
+def test_hibs_hibs_password_alias(monkeypatch):
+    web = _reload_web(
+        monkeypatch,
+        HIBS_AUTH_ENABLED="1",
+        HIBS_AUTH_PASSWORD=None,
+        HIBS_HIBS_PASSWORD="alias-pass",
+        HIBS_SECRET_KEY="test-secret-key",
+    )
+    client = web.app.test_client()
+    ok = _login(client, password="alias-pass")
+    assert ok.status_code == 302
+    assert client.get("/settings").status_code == 200
+
+
 def test_public_health_when_configured(monkeypatch):
     web = _reload_web(
         monkeypatch,
@@ -106,10 +120,24 @@ def test_public_health_when_configured(monkeypatch):
 
 def test_auth_enabled_requires_secret_key(monkeypatch):
     monkeypatch.setenv("HIBS_AUTH_ENABLED", "1")
+    monkeypatch.setenv("HIBS_AUTH_PASSWORD", "testpass")
     monkeypatch.delenv("HIBS_SECRET_KEY", raising=False)
     import hibs_predictor.auth as auth_mod
     import hibs_predictor.web as web_mod
 
     importlib.reload(auth_mod)
     with pytest.raises(RuntimeError, match="HIBS_SECRET_KEY"):
+        importlib.reload(web_mod)
+
+
+def test_auth_enabled_requires_password(monkeypatch):
+    monkeypatch.setenv("HIBS_AUTH_ENABLED", "1")
+    monkeypatch.delenv("HIBS_AUTH_PASSWORD", raising=False)
+    monkeypatch.delenv("HIBS_HIBS_PASSWORD", raising=False)
+    monkeypatch.setenv("HIBS_SECRET_KEY", "test-secret-key")
+    import hibs_predictor.auth as auth_mod
+    import hibs_predictor.web as web_mod
+
+    importlib.reload(auth_mod)
+    with pytest.raises(RuntimeError, match="HIBS_AUTH_PASSWORD"):
         importlib.reload(web_mod)
