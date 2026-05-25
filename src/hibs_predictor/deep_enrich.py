@@ -273,7 +273,13 @@ def apply_xg_ladder(
     if fixture_id:
         _invalidate_cache_key(aggregator, f"xg_data_v2_{fixture_id}")
         try:
-            xh, xa, tag = aggregator._fetch_expected_goals(fixture_id, home_rates, away_rates, league_strength)
+            xh, xa, tag = aggregator._fetch_expected_goals(
+                fixture_id,
+                home_rates,
+                away_rates,
+                league_strength,
+                allow_statistics_xg=True,
+            )
             enriched["xg_home"], enriched["xg_away"], enriched["xg_source"] = float(xh), float(xa), tag
         except Exception:
             pass

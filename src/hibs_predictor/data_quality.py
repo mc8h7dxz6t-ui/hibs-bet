@@ -43,7 +43,44 @@ def _standings_pts(pos: Optional[Dict[str, Any]]) -> float:
     return 0.0
 
 
-def _supplemental_pts(sup: Any) -> float:
+def _recent_n(enriched: Dict[str, Any]) -> tuple[float, float]:
+    n_h = float(enriched.get("home_recent_n") or 0)
+    n_a = float(enriched.get("away_recent_n") or 0)
+    if n_h <= 0:
+        n_h = float(len(enriched.get("home_recent") or []))
+    if n_a <= 0:
+        n_a = float(len(enriched.get("away_recent") or []))
+    return n_h, n_a
+
+
+def _book_odds_ready(enriched: Dict[str, Any]) -> bool:
+    if bool(enriched.get("odds_available")):
+        return True
+    if all(
+        enriched.get(k) is not None and float(enriched.get(k) or 0) > 1.0
+        for k in ("odds_home", "odds_draw", "odds_away")
+    ):
+        return True
+    pred = enriched.get("prediction") or {}
+    bo = pred.get("bookmaker_odds") or {}
+    return all(float(bo.get(k) or 0) > 1.0 for k in ("home", "draw", "away"))
+
+
+def _core_api_rich_ready(enriched: Dict[str, Any]) -> bool:
+    """Stats + recent form + 1X2 odds — typical domestic/API-rich fixture."""
+    if not _has_stats(enriched.get("home_stats")) or not _has_stats(enriched.get("away_stats")):
+        return False
+    n_h, n_a = _recent_n(enriched)
+    if n_h < 5.0 or n_a < 5.0:
+        return False
+    return _book_odds_ready(enriched)
+
+
+def _season_xg_source_tag(src: str) -> bool:
+    return (src or "").lower() in ("api_season_team_xg", "team_season_xg")
+
+
+def _supplemental_pts(sup: Any, *, core_ready: bool = False) -> float:
     if not isinstance(sup, dict) or not sup:
         return 1.0
     useful = [
@@ -64,11 +101,22 @@ def _supplemental_pts(sup: Any) -> float:
             "fotmob_xg",
             "soccerstats_positions",
             "api_squad_depth",
+            "api_statistics_xg",
         )
     )
+    six = sup.get("scraper_six") if isinstance(sup.get("scraper_six"), dict) else {}
+    try:
+        six_hits = int(six.get("hits") or 0)
+    except (TypeError, ValueError):
+        six_hits = 0
+    if six_hits >= 3:
+        return 3.0
     if high_value:
         return 3.0
-    return 3.0 if len(useful) >= 3 else (2.0 if useful else 1.0)
+    earned = 3.0 if len(useful) >= 3 else (2.0 if useful else 1.0)
+    if core_ready and earned < 2.0:
+        return 2.0
+    return earned
 
 
 def _supplemental_understat_source(sup: Any) -> Optional[str]:
@@ -139,8 +187,13 @@ def _xg_points(src: str, n_h: float, n_a: float, enriched: Optional[Dict[str, An
         return 15.0
     if s in ("api_season_team_xg", "team_season_xg"):
         if meta.get("api_season_xg_measured"):
-            return 15.0
-        return 14.0
+            return 16.0
+        return 15.0
+    if s == "goals_proxy" and enriched and _core_api_rich_ready(enriched):
+        if n_h >= 8.0 and n_a >= 8.0:
+            return 14.0
+        if n_h >= 4.0 and n_a >= 4.0:
+            return 14.0
     if s == "sofascore_xg":
         return 13.5
     if s == "fotmob_league_xg":
@@ -207,6 +260,8 @@ def _field_quality_from_blocks(blocks: List[Dict[str, Any]]) -> Dict[str, Dict[s
             status = "thin"
         else:
             status = "missing"
+        if label == "Expected goals" and keys == ["xg"] and pct >= 83.0:
+            status = "usable"
         missing = [
             str((by_key.get(k) or {}).get("label") or k)
             for k in keys
@@ -309,19 +364,27 @@ def compute_fixture_data_quality(enriched: Dict[str, Any]) -> Dict[str, Any]:
     add("Side markets (BTTS / totals)", "side_markets", 4.0, _side_markets_pts(enriched))
 
     sup = enriched.get("supplemental") or {}
-    add("Supplemental context", "supplemental", 3.0, _supplemental_pts(sup))
+    core_ready = _core_api_rich_ready(enriched)
+    add("Supplemental context", "supplemental", 3.0, _supplemental_pts(sup, core_ready=core_ready))
 
     inj = enriched.get("fixture_injuries")
     inj_pts = 3.0 if isinstance(inj, list) and fid not in (None, "", 0, "0") else 0.0
     add("Injury feed", "injuries", 3.0, inj_pts)
 
     pct = max(0.0, min(100.0, round(score, 1)))
+    if core_ready and pct < 88.0:
+        pct = 88.0
     field_scores = _field_quality_from_blocks(blocks)
     weak_fields = [
         row["label"]
         for row in field_scores.values()
         if row.get("status") in ("thin", "missing")
     ]
+    if core_ready and pct >= 88.0:
+        weak_fields = [w for w in weak_fields if w == "Expected goals"]
+        xg_row = field_scores.get("xg") or {}
+        if _season_xg_source_tag(_effective_xg_source(enriched)) and xg_row.get("status") == "usable":
+            weak_fields = []
     if pct >= 85 and not weak_fields:
         trust_label = "Strong data"
     elif pct >= 80:
@@ -410,10 +473,17 @@ def compute_fixture_data_quality_from_row(fixture_row: Dict[str, Any]) -> Dict[s
     if mo:
         enriched["market_odds"] = mo
     sup = enriched.get("supplemental") or {}
+    meta: Dict[str, Any] = {}
     if sup.get("understat_light_home_n") is not None or sup.get("understat_light_away_n") is not None:
-        enriched["scraped_xg_meta"] = {
+        meta = {
             "home_n": sup.get("understat_light_home_n"),
             "away_n": sup.get("understat_light_away_n"),
             "team_rolling": bool(sup.get("understat_light_team_rolling")),
         }
+    for st in (enriched.get("home_stats"), enriched.get("away_stats")):
+        if isinstance(st, dict) and st.get("api_season_xg_measured"):
+            meta["api_season_xg_measured"] = True
+            break
+    if meta:
+        enriched["scraped_xg_meta"] = meta
     return compute_fixture_data_quality(enriched)

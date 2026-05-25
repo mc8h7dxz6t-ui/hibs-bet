@@ -454,9 +454,17 @@ def gather_health() -> Dict[str, Any]:
                 )
             )
 
+    try:
+        from hibs_predictor.scrapers.scraper_six import scraper_six_plan_summary
+
+        scraper_six = scraper_six_plan_summary()
+    except Exception:
+        scraper_six = None
+
     return {
         "apis": apis,
         "scrapers": scrapers,
+        "scraper_six_plan": scraper_six,
         "latency_ok_ms": 200,
         "cache_disk": cache_disk_summary(),
     }

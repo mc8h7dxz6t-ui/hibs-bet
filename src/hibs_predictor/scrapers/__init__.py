@@ -7,5 +7,13 @@ FootyStats, SoccerStats, DataMB) with ToS / implementation notes.
 
 from hibs_predictor.scrapers.supplemental import collect_supplemental
 from hibs_predictor.scrapers.source_registry import SOURCE_CATALOG, sources_by_status
+from hibs_predictor.scrapers.scraper_six import SCRAPER_SIX, annotate_scraper_six, scraper_six_plan_summary
 
-__all__ = ["collect_supplemental", "SOURCE_CATALOG", "sources_by_status"]
+__all__ = [
+    "collect_supplemental",
+    "SOURCE_CATALOG",
+    "sources_by_status",
+    "SCRAPER_SIX",
+    "annotate_scraper_six",
+    "scraper_six_plan_summary",
+]

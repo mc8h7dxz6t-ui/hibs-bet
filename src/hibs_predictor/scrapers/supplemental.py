@@ -328,5 +328,12 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
     except Exception as exc:
         out["sofascore_error"] = str(exc)
 
+    try:
+        from hibs_predictor.scrapers.scraper_six import annotate_scraper_six
+
+        annotate_scraper_six(out, enriched, league_code)
+    except Exception as exc:
+        out["scraper_six_error"] = str(exc)[:120]
+
     cache.set(key, out, ttl_hours=6)
     return out

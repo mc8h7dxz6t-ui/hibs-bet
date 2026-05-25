@@ -1,6 +1,7 @@
 # hibs-bet data sources (evaluation)
 
 Planning catalog: `src/hibs_predictor/scrapers/source_registry.py`  
+Production six-scraper plan: `docs/SCRAPER_SIX_PLAN.md` + `scraper_six.py`  
 Coverage scoring: `src/hibs_predictor/data_quality.py` (`full_scope` ≥ **85%**; UI default `HIBS_UI_FULL_DATA_MIN_PCT=85`)
 
 ## Live probe status (typical)
