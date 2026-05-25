@@ -1,4 +1,20 @@
 {% extends "base.html" %}
+{% macro monitor_tally(bp) %}
+<p class="monitor-tally">Wins: <strong class="tally-w">{{ bp.wins or 0 }}</strong> · Losses: <strong class="tally-l">{{ bp.losses or 0 }}</strong> · Pending: <strong class="tally-p">{{ bp.pending or 0 }}</strong></p>
+{% endmacro %}
+{% macro result_badge(res) %}
+{% if res == 'W' %}<span class="result-badge result-badge-w" title="Won">W</span>{% elif res == 'L' %}<span class="result-badge result-badge-l" title="Lost">L</span>{% else %}<span class="result-badge result-badge-pending" title="Awaiting full-time result">pending</span>{% endif %}
+{% endmacro %}
+{% macro monitor_row(row) %}
+<tr class="{% if row.result == 'W' %}monitor-win{% elif row.result == 'L' %}monitor-loss{% endif %}">
+    <td>{{ row.match }}</td>
+    <td>{{ row.pick or '—' }}</td>
+    <td>{% if row.model_pct is not none %}{{ row.model_pct }}%{% else %}—{% endif %}</td>
+    <td>{{ result_badge(row.result) }}</td>
+    <td>{{ row.score or '—' }}</td>
+    <td>{% if row.clv_pp is not none %}{{ row.clv_pp }} pp{% else %}—{% endif %}</td>
+</tr>
+{% endmacro %}
 {% block title %}hibs-bet — Insights{% endblock %}
 {% block container_class %} dash-outer{% endblock %}
 {% block extra_css %}
@@ -45,22 +61,6 @@
 .btn-acca-slip{background:rgba(255,215,0,0.12);border:1px solid rgba(255,215,0,0.35);color:var(--gold);padding:6px 12px;border-radius:8px;font-size:0.72em;font-weight:800;cursor:pointer;font-family:'Inter',sans-serif;}
 .btn-acca-slip:hover{background:rgba(255,215,0,0.2);}
 </style>
-{% macro monitor_tally(bp) %}
-<p class="monitor-tally">Wins: <strong class="tally-w">{{ bp.wins or 0 }}</strong> · Losses: <strong class="tally-l">{{ bp.losses or 0 }}</strong> · Pending: <strong class="tally-p">{{ bp.pending or 0 }}</strong></p>
-{% endmacro %}
-{% macro result_badge(res) %}
-{% if res == 'W' %}<span class="result-badge result-badge-w" title="Won">W</span>{% elif res == 'L' %}<span class="result-badge result-badge-l" title="Lost">L</span>{% else %}<span class="result-badge result-badge-pending" title="Awaiting full-time result">pending</span>{% endif %}
-{% endmacro %}
-{% macro monitor_row(row) %}
-<tr class="{% if row.result == 'W' %}monitor-win{% elif row.result == 'L' %}monitor-loss{% endif %}">
-    <td>{{ row.match }}</td>
-    <td>{{ row.pick or '—' }}</td>
-    <td>{% if row.model_pct is not none %}{{ row.model_pct }}%{% else %}—{% endif %}</td>
-    <td>{{ result_badge(row.result) }}</td>
-    <td>{{ row.score or '—' }}</td>
-    <td>{% if row.clv_pp is not none %}{{ row.clv_pp }} pp{% else %}—{% endif %}</td>
-</tr>
-{% endmacro %}
 {% endblock %}
 {% block content %}
 <div class="insights-page">
@@ -165,9 +165,9 @@
                         </td>
                         <td>{{ leg.market_label }}</td>
                         <td>{{ result_badge(leg.result) }}</td>
-                        <td>{% if leg.model_pct is not none %}{{ leg.model_pct }}%{% else %}—{% endif %}</td>
-                        <td>{% if leg.odds %}<span data-odds-dec="{{ leg.odds }}" data-odds-template="{odds}">{{ "%.2f"|format(leg.odds) }}</span>{% else %}—{% endif %}</td>
-                        <td>{% if leg.edge_pct is not none %}<span class="ir-good">+{{ "%.1f"|format(leg.edge_pct) }}%</span>{% else %}—{% endif %}</td>
+                        <td>{% if leg.model_pct|default(none) is not none %}{{ leg.model_pct }}%{% else %}—{% endif %}</td>
+                        <td>{% if leg.odds|default(none) %}<span data-odds-dec="{{ leg.odds }}" data-odds-template="{odds}">{{ "%.2f"|format(leg.odds) }}</span>{% else %}—{% endif %}</td>
+                        <td>{% if leg.edge_pct|default(none) is not none %}<span class="ir-good">+{{ "%.1f"|format(leg.edge_pct) }}%</span>{% else %}—{% endif %}</td>
                         <td class="acca-rec-reason">{{ leg.reasoning }}</td>
                     </tr>
                     {% endfor %}

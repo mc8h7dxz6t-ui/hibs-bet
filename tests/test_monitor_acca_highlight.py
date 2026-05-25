@@ -152,6 +152,10 @@ def test_insights_template_highlight_markup():
     assert "acca-win-card" in text
     assert "monitor-tally" in text
     assert "result-badge-w" in text
+    # Macros must live outside {% block extra_css %} so content block can call them.
+    css_block = text.split("{% block extra_css %}")[1].split("{% endblock %}")[0]
+    assert "{% macro result_badge" not in css_block
+    assert text.index("{% macro result_badge") < text.index("{% block content %}")
 
 
 def test_annotate_acca_all_legs_won():
