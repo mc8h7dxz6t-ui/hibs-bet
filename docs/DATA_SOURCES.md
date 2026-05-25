@@ -22,7 +22,7 @@ Coverage scoring: `src/hibs_predictor/data_quality.py` (`full_scope` ≥ **85%**
 |--------|------|-------------|
 | API-Football (api-sports) | Fixtures, recent matches, team stats, standings, injuries, squad depth, odds, fixture xG when present; **`fixtures/statistics` Expected Goals** when fixture payload xG is empty | `API_SPORTS_*`; `HIBS_FETCH_FIXTURE_STATISTICS_XG=1` (budget `HIBS_FETCH_FIXTURE_STATISTICS_XG_MAX`, default 24/refresh, 12h cache); `HIBS_DISABLE_API_SPORTS`, `HIBS_SKIP_API_*` |
 | Football-Data.org | Fixture + standings fallback | `FOOTBALL_DATA_ORG_KEY`, `HIBS_PREFER_FOOTBALL_DATA_FIXTURES` |
-| The Odds API | 1X2 + cross-book lines | `ODDS_API_KEY`; skip via `HIBS_SKIP_ODDS_API` |
+| The Odds API | 1X2, totals (O/U 2.5+), BTTS when offered; league fetch cached 1h (`odds_api_league_*`) | `ODDS_API_KEY`; skip via `HIBS_SKIP_ODDS_API=1` (default **on** when key set). Sport keys: EPL `soccer_epl`, Championship `soccer_efl_champ`, SPL `soccer_spl` (fallback `soccer_scotland_premiership`) |
 | RapidAPI stats (api-football.com host) | Fixture-level xG | `STATS_API_KEY` + `HIBS_MAX_DATA=1` (default skips Rapid xG) |
 | Understat | Per-match xG for top leagues via `/getLeagueData` | `HIBS_ENABLE_UNDERSTAT_LIGHT`, `HIBS_SCRAPE_XG` |
 | FBref | Squad tables (heavy); schedule xG for Scottish + EFL + top/mid-tier EU + Norway/Finland | `HIBS_ENABLE_FBREF_SCHEDULE_XG` (default on); `HIBS_FBREF_BLOCKED=1` on blocked hosts |

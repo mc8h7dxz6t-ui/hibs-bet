@@ -529,7 +529,7 @@ class OddsApiClient(BaseApiClient):
     # Map our league codes to The Odds API v4 sport keys (see https://the-odds-api.com/liveapi/guides/v4/)
     SPORT_KEYS = {
         "EPL": "soccer_epl",
-        "CHAMPIONSHIP": "soccer_england_efl_championship",
+        "CHAMPIONSHIP": "soccer_efl_champ",
         "LEAGUE_ONE": "soccer_england_league1",
         "LEAGUE_TWO": "soccer_england_league2",
         "FA_CUP": "soccer_fa_cup",
@@ -558,6 +558,7 @@ class OddsApiClient(BaseApiClient):
     }
     # Legacy / alternate keys tried when the primary sport returns HTTP 404.
     SPORT_KEY_FALLBACKS: Dict[str, List[str]] = {
+        "CHAMPIONSHIP": ["soccer_england_efl_championship"],
         "SCOTLAND": ["soccer_scotland_premiership"],
     }
 
@@ -584,7 +585,7 @@ class OddsApiClient(BaseApiClient):
         params = {
             "apiKey": self.api_key,
             "regions": "uk",
-            "markets": "h2h,totals",
+            "markets": "h2h,totals,btts",
             "oddsFormat": "decimal",
             "dateFormat": "iso",
         }
@@ -608,7 +609,7 @@ class OddsApiClient(BaseApiClient):
         params = {
             "apiKey": self.api_key,
             "regions": "uk,eu",
-            "markets": "h2h,totals",
+            "markets": "h2h,totals,btts",
             "oddsFormat": "decimal",
         }
         try:

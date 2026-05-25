@@ -578,6 +578,7 @@
         {% endif %}
         {% if p and p.line_odds %}
         <div class="section-title" style="margin-top:4px;">📗 Book side markets</div>
+        <p style="font-size:0.68em;color:var(--muted);margin:-4px 0 8px;">Best available prices across API-Football and The Odds API (when configured).</p>
         <div class="market-pills" style="margin-bottom:12px;">
             {% set lo2 = p.line_odds %}
             {% if lo2.get('btts_yes') %}<span class="mpill">BTTS Y <strong data-odds-dec="{{ lo2.btts_yes }}">{{ "%.2f"|format(lo2.btts_yes) }}</strong></span>{% endif %}
@@ -589,6 +590,25 @@
             {% if lo2.get('over35') %}<span class="mpill">O3.5 <strong data-odds-dec="{{ lo2.over35 }}">{{ "%.2f"|format(lo2.over35) }}</strong></span>{% endif %}
             {% if lo2.get('under35') %}<span class="mpill">U3.5 <strong data-odds-dec="{{ lo2.under35 }}">{{ "%.2f"|format(lo2.under35) }}</strong></span>{% endif %}
         </div>
+        {% endif %}
+        {% if fixture.all_bookmaker_odds %}
+        <div class="section-title" style="margin-top:4px;">📗 Side markets by bookmaker</div>
+        <table class="data-table" style="margin-bottom:12px;font-size:0.82em;">
+            <tr><th>Bookmaker</th><th>BTTS Y</th><th>BTTS N</th><th>O2.5</th><th>U2.5</th><th>O1.5</th><th>U1.5</th></tr>
+            {% for bm in fixture.all_bookmaker_odds[:16] %}
+            {% if bm.btts_yes or bm.btts_no or bm.over_2_5 or bm.under_2_5 or bm.over_1_5 or bm.under_1_5 or bm.over_3_5 or bm.under_3_5 %}
+            <tr>
+                <td style="color:var(--muted);">{{ bm.bookmaker or bm.name or 'Book' }}{% if bm.source %} <span style="opacity:0.65;font-size:0.85em;">({{ bm.source }})</span>{% endif %}</td>
+                <td>{% if bm.btts_yes %}<span data-odds-dec="{{ bm.btts_yes }}">{{ "%.2f"|format(bm.btts_yes) }}</span>{% else %}—{% endif %}</td>
+                <td>{% if bm.btts_no %}<span data-odds-dec="{{ bm.btts_no }}">{{ "%.2f"|format(bm.btts_no) }}</span>{% else %}—{% endif %}</td>
+                <td>{% if bm.over_2_5 %}<span data-odds-dec="{{ bm.over_2_5 }}">{{ "%.2f"|format(bm.over_2_5) }}</span>{% else %}—{% endif %}</td>
+                <td>{% if bm.under_2_5 %}<span data-odds-dec="{{ bm.under_2_5 }}">{{ "%.2f"|format(bm.under_2_5) }}</span>{% else %}—{% endif %}</td>
+                <td>{% if bm.over_1_5 %}<span data-odds-dec="{{ bm.over_1_5 }}">{{ "%.2f"|format(bm.over_1_5) }}</span>{% else %}—{% endif %}</td>
+                <td>{% if bm.under_1_5 %}<span data-odds-dec="{{ bm.under_1_5 }}">{{ "%.2f"|format(bm.under_1_5) }}</span>{% else %}—{% endif %}</td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </table>
         {% endif %}
 
         <p class="betting-guide-note" style="margin:0 0 12px;"><a href="#betting-guide" onclick="document.getElementById('betting-guide')&&document.getElementById('betting-guide').open()">Value, edge &amp; Kelly</a> — explained in the collapsible guide on the dashboard. Edge = our probability minus the book’s implied chance; Kelly = suggested stake % from that edge (conservative).</p>

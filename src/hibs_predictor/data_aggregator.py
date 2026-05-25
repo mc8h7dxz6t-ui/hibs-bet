@@ -460,7 +460,19 @@ def _normalize_bookmaker_odds_rows(rows: List[Dict[str, Any]]) -> List[Dict[str,
         if cur is None:
             cur = {"bookmaker": name, "source": row.get("source")}
             merged[key] = cur
-        for side in ("home", "draw", "away"):
+        for side in (
+            "home",
+            "draw",
+            "away",
+            "over_1_5",
+            "under_1_5",
+            "over_2_5",
+            "under_2_5",
+            "over_3_5",
+            "under_3_5",
+            "btts_yes",
+            "btts_no",
+        ):
             raw = row.get(side)
             try:
                 price = float(raw) if raw is not None else 0.0
@@ -471,7 +483,20 @@ def _normalize_bookmaker_odds_rows(rows: List[Dict[str, Any]]) -> List[Dict[str,
             prev = cur.get(side)
             if prev is None or price > float(prev):
                 cur[side] = price
-    out = [r for r in merged.values() if any(r.get(s) for s in ("home", "draw", "away"))]
+    keep_sides = (
+        "home",
+        "draw",
+        "away",
+        "over_1_5",
+        "under_1_5",
+        "over_2_5",
+        "under_2_5",
+        "over_3_5",
+        "under_3_5",
+        "btts_yes",
+        "btts_no",
+    )
+    out = [r for r in merged.values() if any(r.get(s) for s in keep_sides)]
     out.sort(key=lambda r: str(r.get("bookmaker") or ""))
     return out
 
@@ -616,6 +641,198 @@ def _parse_api_sports_side_markets(odds_data: List[Dict[str, Any]]) -> Dict[str,
         out["over_3_5"] = max(over35)
     if under35:
         out["under_3_5"] = max(under35)
+    return out
+
+
+def _odds_api_decimal_price(raw: Any) -> Optional[float]:
+    try:
+        price = float(raw or 0)
+    except (TypeError, ValueError):
+        return None
+    return price if price > 1.0 else None
+
+
+def _odds_api_totals_point(raw: Any) -> Optional[float]:
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _odds_api_apply_markets_to_book_row(
+    bm: Dict[str, Any],
+    bm_odds: Dict[str, Any],
+    *,
+    home_display: str,
+    away_display: str,
+    teams_swapped: bool,
+    side_acc: Dict[str, List[float]],
+) -> None:
+    """Fill 1X2 and side-market prices on a bookmaker row from The Odds API markets."""
+    for market in bm.get("markets", []) or []:
+        if not isinstance(market, dict):
+            continue
+        mkey = market.get("key")
+        if mkey == "h2h":
+            for o in market.get("outcomes", []) or []:
+                price = _odds_api_decimal_price(o.get("price"))
+                if price is None:
+                    continue
+                side = _odds_outcome_side(
+                    str(o.get("name") or ""),
+                    home_display,
+                    away_display,
+                    teams_swapped=teams_swapped,
+                )
+                if side == "draw":
+                    bm_odds["draw"] = max(bm_odds.get("draw") or 0.0, price)
+                elif side == "home":
+                    bm_odds["home"] = max(bm_odds.get("home") or 0.0, price)
+                elif side == "away":
+                    bm_odds["away"] = max(bm_odds.get("away") or 0.0, price)
+        elif mkey == "totals":
+            for o in market.get("outcomes", []) or []:
+                price = _odds_api_decimal_price(o.get("price"))
+                if price is None:
+                    continue
+                point = _odds_api_totals_point(o.get("point"))
+                name = str(o.get("name") or "").lower()
+                if point == 1.5:
+                    if "over" in name:
+                        bm_odds["over_1_5"] = max(bm_odds.get("over_1_5") or 0.0, price)
+                        side_acc["over_1_5"].append(price)
+                    elif "under" in name:
+                        bm_odds["under_1_5"] = max(bm_odds.get("under_1_5") or 0.0, price)
+                        side_acc["under_1_5"].append(price)
+                elif point == 2.5:
+                    if "over" in name:
+                        bm_odds["over_2_5"] = max(bm_odds.get("over_2_5") or 0.0, price)
+                        side_acc["over_2_5"].append(price)
+                    elif "under" in name:
+                        bm_odds["under_2_5"] = max(bm_odds.get("under_2_5") or 0.0, price)
+                        side_acc["under_2_5"].append(price)
+                elif point == 3.5:
+                    if "over" in name:
+                        bm_odds["over_3_5"] = max(bm_odds.get("over_3_5") or 0.0, price)
+                        side_acc["over_3_5"].append(price)
+                    elif "under" in name:
+                        bm_odds["under_3_5"] = max(bm_odds.get("under_3_5") or 0.0, price)
+                        side_acc["under_3_5"].append(price)
+        elif mkey == "btts":
+            for o in market.get("outcomes", []) or []:
+                price = _odds_api_decimal_price(o.get("price"))
+                if price is None:
+                    continue
+                name = str(o.get("name") or "").strip().lower()
+                if name == "yes":
+                    bm_odds["btts_yes"] = max(bm_odds.get("btts_yes") or 0.0, price)
+                    side_acc["btts_yes"].append(price)
+                elif name == "no":
+                    bm_odds["btts_no"] = max(bm_odds.get("btts_no") or 0.0, price)
+                    side_acc["btts_no"].append(price)
+
+
+def _parse_odds_api_event_side_markets(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Best decimal BTTS / totals lines across bookmakers for one Odds API event."""
+    side_acc: Dict[str, List[float]] = {
+        "btts_yes": [],
+        "btts_no": [],
+        "over_1_5": [],
+        "under_1_5": [],
+        "over_2_5": [],
+        "under_2_5": [],
+        "over_3_5": [],
+        "under_3_5": [],
+    }
+    for bm in event.get("bookmakers", []) or []:
+        if not isinstance(bm, dict):
+            continue
+        scratch: Dict[str, Any] = {}
+        _odds_api_apply_markets_to_book_row(
+            bm,
+            scratch,
+            home_display="",
+            away_display="",
+            teams_swapped=False,
+            side_acc=side_acc,
+        )
+    out: Dict[str, Any] = {}
+    if side_acc["btts_yes"]:
+        out["btts_yes"] = max(side_acc["btts_yes"])
+    if side_acc["btts_no"]:
+        out["btts_no"] = max(side_acc["btts_no"])
+    if side_acc["over_1_5"]:
+        out["over_1_5"] = max(side_acc["over_1_5"])
+    if side_acc["under_1_5"]:
+        out["under_1_5"] = max(side_acc["under_1_5"])
+    if side_acc["over_2_5"]:
+        out["over_2_5"] = max(side_acc["over_2_5"])
+    if side_acc["under_2_5"]:
+        out["under_2_5"] = max(side_acc["under_2_5"])
+    if side_acc["over_3_5"]:
+        out["over_3_5"] = max(side_acc["over_3_5"])
+    if side_acc["under_3_5"]:
+        out["under_3_5"] = max(side_acc["under_3_5"])
+    return out
+
+
+def _market_odds_from_side_parsed(side: Dict[str, Any]) -> Dict[str, Any]:
+    """Shape parsed side dict into fixture ``market_odds`` structure."""
+    market_odds: Dict[str, Any] = {}
+    if side.get("btts_yes") or side.get("btts_no"):
+        market_odds["btts"] = {
+            k: v
+            for k, v in (("yes", side.get("btts_yes")), ("no", side.get("btts_no")))
+            if v
+        }
+    if side.get("over_2_5") or side.get("under_2_5"):
+        market_odds["totals_2_5"] = {
+            k: v
+            for k, v in (("over", side.get("over_2_5")), ("under", side.get("under_2_5")))
+            if v
+        }
+    if side.get("over_1_5") or side.get("under_1_5"):
+        market_odds["totals_1_5"] = {
+            k: v
+            for k, v in (("over", side.get("over_1_5")), ("under", side.get("under_1_5")))
+            if v
+        }
+    if side.get("over_3_5") or side.get("under_3_5"):
+        market_odds["totals_3_5"] = {
+            k: v
+            for k, v in (("over", side.get("over_3_5")), ("under", side.get("under_3_5")))
+            if v
+        }
+    return market_odds
+
+
+def _merge_market_odds_additive(
+    primary: Dict[str, Any],
+    supplemental: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Fill missing side-market prices only; never overwrite API-Sports lines."""
+    out = dict(primary or {})
+    for key in ("btts", "totals_2_5", "totals_1_5", "totals_3_5"):
+        sub = supplemental.get(key)
+        if not isinstance(sub, dict) or not sub:
+            continue
+        cur = out.get(key)
+        if not isinstance(cur, dict):
+            cur = {}
+        merged = dict(cur)
+        for side, val in sub.items():
+            try:
+                fv = float(val)
+            except (TypeError, ValueError):
+                continue
+            if fv <= 1.0:
+                continue
+            if not merged.get(side):
+                merged[side] = fv
+        if merged:
+            out[key] = merged
     return out
 
 
@@ -1616,6 +1833,7 @@ class DataAggregator:
         as_home = as_draw = as_away = None
         all_bookmakers: List = []
         api_odds_raw: List[Dict[str, Any]] = []
+        oa_side: Dict[str, Any] = {}
 
         if "odds_api" in self.clients and not _effective_skip_odds_api(self.clients):
             try:
@@ -1634,34 +1852,33 @@ class DataAggregator:
                         str(event.get("away_team") or ""),
                     )
                     home_odds_list, draw_odds_list, away_odds_list = [], [], []
+                    side_acc: Dict[str, List[float]] = {
+                        "btts_yes": [],
+                        "btts_no": [],
+                        "over_1_5": [],
+                        "under_1_5": [],
+                        "over_2_5": [],
+                        "under_2_5": [],
+                        "over_3_5": [],
+                        "under_3_5": [],
+                    }
                     for bm in event.get("bookmakers", []) or []:
                         bm_name = _odds_bookmaker_display_name(bm)
                         bm_odds: Dict[str, Any] = {"bookmaker": bm_name, "source": "the_odds_api"}
-                        for market in bm.get("markets", []):
-                            if market.get("key") != "h2h":
-                                continue
-                            for o in market.get("outcomes", []):
-                                try:
-                                    price = float(o.get("price", 0) or 0)
-                                except (TypeError, ValueError):
-                                    continue
-                                if price <= 1.0:
-                                    continue
-                                side = _odds_outcome_side(
-                                    str(o.get("name") or ""),
-                                    home_display,
-                                    away_display,
-                                    teams_swapped=swapped,
-                                )
-                                if side == "draw":
-                                    bm_odds["draw"] = price
-                                    draw_odds_list.append(price)
-                                elif side == "home":
-                                    bm_odds["home"] = price
-                                    home_odds_list.append(price)
-                                elif side == "away":
-                                    bm_odds["away"] = price
-                                    away_odds_list.append(price)
+                        _odds_api_apply_markets_to_book_row(
+                            bm,
+                            bm_odds,
+                            home_display=home_display,
+                            away_display=away_display,
+                            teams_swapped=swapped,
+                            side_acc=side_acc,
+                        )
+                        if bm_odds.get("home"):
+                            home_odds_list.append(float(bm_odds["home"]))
+                        if bm_odds.get("draw"):
+                            draw_odds_list.append(float(bm_odds["draw"]))
+                        if bm_odds.get("away"):
+                            away_odds_list.append(float(bm_odds["away"]))
                         if len(bm_odds) > 1:
                             all_bookmakers.append(bm_odds)
                     if home_odds_list:
@@ -1670,6 +1887,13 @@ class DataAggregator:
                         oa_draw = max(draw_odds_list)
                     if away_odds_list:
                         oa_away = max(away_odds_list)
+                    oa_side = _parse_odds_api_event_side_markets(event)
+                    if not oa_side and side_acc:
+                        oa_side = {
+                            k: max(v)
+                            for k, v in side_acc.items()
+                            if v
+                        }
                     if oa_home and oa_draw and oa_away:
                         break
             except Exception:
@@ -1710,21 +1934,8 @@ class DataAggregator:
                 pass
 
         side = _parse_api_sports_side_markets(api_odds_raw)
-        market_odds: Dict[str, Any] = {}
-        if side.get("btts_yes") or side.get("btts_no"):
-            market_odds["btts"] = {k: v for k, v in (("yes", side.get("btts_yes")), ("no", side.get("btts_no"))) if v}
-        if side.get("over_2_5") or side.get("under_2_5"):
-            market_odds["totals_2_5"] = {
-                k: v for k, v in (("over", side.get("over_2_5")), ("under", side.get("under_2_5"))) if v
-            }
-        if side.get("over_1_5") or side.get("under_1_5"):
-            market_odds["totals_1_5"] = {
-                k: v for k, v in (("over", side.get("over_1_5")), ("under", side.get("under_1_5"))) if v
-            }
-        if side.get("over_3_5") or side.get("under_3_5"):
-            market_odds["totals_3_5"] = {
-                k: v for k, v in (("over", side.get("over_3_5")), ("under", side.get("under_3_5"))) if v
-            }
+        market_odds = _market_odds_from_side_parsed(side)
+        market_odds = _merge_market_odds_additive(market_odds, _market_odds_from_side_parsed(oa_side))
 
         as_ok = bool(as_home and as_draw and as_away and as_home > 1 and as_draw > 1 and as_away > 1)
         oa_ok = bool(oa_home and oa_draw and oa_away and oa_home > 1 and oa_draw > 1 and oa_away > 1)
