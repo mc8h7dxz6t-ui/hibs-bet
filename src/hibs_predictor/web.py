@@ -132,7 +132,7 @@ def _api_football_season_year(now: datetime) -> int:
 _FDO_CALENDAR_COMPS = frozenset({"WC", "EC", "UNL", "CL", "EL", "UECL"})
 # UEFA club cups: API-Football season id is Jul-based; FDO often 403/429 on finals week.
 _API_FIRST_FIXTURE_LEAGUES = frozenset({"UCL", "EUROPA_LEAGUE", "UECL"})
-_FIXTURE_CACHE_VERSION = "v28"
+_FIXTURE_CACHE_VERSION = "v29"
 _EMPTY_FIXTURE_CACHE_TTL_HOURS = 0.2  # short negative cache — avoid hour-long empty poison
 
 
@@ -450,8 +450,7 @@ def _maybe_warm_fixture_cache() -> None:
 
 
 def _slim_row_enrich_fresh(row: Dict[str, Any]) -> bool:
-    """True when a cached per-league fixture row can skip another full enrich pass."""
-    from hibs_predictor.data_aggregator import DataAggregator
+    """True when a cached per-league row has core API blocks (stats + form); xG tier may still upgrade later."""
     from hibs_predictor.data_quality import _has_stats
 
     home_id = row.get("home_id")
@@ -464,12 +463,7 @@ def _slim_row_enrich_fresh(row: Dict[str, Any]) -> bool:
         return False
     if away_id and not _has_stats(row.get("away_stats")):
         return False
-    proxy = {
-        "enriched_at": row.get("enriched_at"),
-        "home_recent": row.get("home_last10") or [],
-        "away_recent": row.get("away_last10") or [],
-    }
-    return DataAggregator._enriched_cache_fresh(proxy, home_id, away_id)
+    return True
 
 
 def _league_fixture_cache_fresh(rows: List[Dict[str, Any]]) -> bool:
@@ -1063,10 +1057,7 @@ def _ensure_fixture_data_quality(all_fixtures: List[Dict[str, Any]]) -> None:
         if not f.get("xg_source_hint"):
             attach_xg_display_fields(f)
         try:
-            new_dq = compute_fixture_data_quality_from_row(f)
-            old_pct = float((f.get("data_quality") or {}).get("score_pct") or 0)
-            if float(new_dq.get("score_pct") or 0) >= old_pct:
-                f["data_quality"] = new_dq
+            f["data_quality"] = compute_fixture_data_quality_from_row(f)
         except Exception as exc:
             print(f"[Data quality] {f.get('home')} v {f.get('away')}: {exc!r}")
 

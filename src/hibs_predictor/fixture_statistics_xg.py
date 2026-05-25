@@ -15,6 +15,14 @@ MEASURED_XG_SOURCES = frozenset(
     }
 )
 
+# Season blend from API team stats is useful xG; do not spend fixtures/statistics budget on it.
+SEASON_XG_SOURCES = frozenset(
+    {
+        "api_season_team_xg",
+        "team_season_xg",
+    }
+)
+
 _statistics_budget_remaining: Optional[int] = None
 
 
@@ -43,7 +51,9 @@ def max_statistics_fetches_per_refresh() -> int:
 
 def needs_statistics_xg_fetch(xg_source: Any) -> bool:
     s = str(xg_source or "").strip().lower()
-    return s not in MEASURED_XG_SOURCES
+    if s in MEASURED_XG_SOURCES or s in SEASON_XG_SOURCES:
+        return False
+    return True
 
 
 def _take_budget() -> bool:

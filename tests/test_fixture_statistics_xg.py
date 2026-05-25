@@ -15,6 +15,8 @@ def test_needs_statistics_xg_fetch():
     assert needs_statistics_xg_fetch("goals_proxy") is True
     assert needs_statistics_xg_fetch("api_fixture_xg") is False
     assert needs_statistics_xg_fetch("api_statistics_xg") is False
+    assert needs_statistics_xg_fetch("api_season_team_xg") is False
+    assert needs_statistics_xg_fetch("team_season_xg") is False
 
 
 def test_fetch_fixture_statistics_xg_parses_and_caches(monkeypatch):

@@ -989,9 +989,10 @@ def test_league_fixture_cache_bust_on_partial_enrich():
         thin["home_last10"] = []
         thin["home_stats"] = {}
 
-        assert _slim_row_enrich_fresh(complete) is False  # no real recent rows
+        assert _slim_row_enrich_fresh(complete) is True
         assert _slim_row_enrich_fresh(thin) is False
         assert _league_fixture_cache_fresh([complete, thin]) is False
+        assert _league_fixture_cache_fresh([complete]) is True
         assert _league_fixture_cache_fresh([]) is False
         print("  ✓ Partial enrich cache bust OK")
         return True

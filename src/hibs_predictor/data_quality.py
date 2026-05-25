@@ -187,8 +187,8 @@ def _xg_points(src: str, n_h: float, n_a: float, enriched: Optional[Dict[str, An
         return 15.0
     if s in ("api_season_team_xg", "team_season_xg"):
         if meta.get("api_season_xg_measured"):
-            return 16.0
-        return 15.0
+            return 17.0
+        return 16.0
     if s == "goals_proxy" and enriched and _core_api_rich_ready(enriched):
         if n_h >= 8.0 and n_a >= 8.0:
             return 14.0
