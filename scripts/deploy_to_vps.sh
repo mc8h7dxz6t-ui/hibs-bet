@@ -30,6 +30,10 @@ ssh "${USER}@${HOST}" "set -euo pipefail
     python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt
   fi
   cp deploy/hibs-bet.service /etc/systemd/system/hibs-bet.service
+  CACHE_DIR=\"\${HIBS_CACHE_DIR:-${APP}/.cache}\"
+  echo \"==> clear fixture caches (v28 season xG)\"
+  rm -f \"\${CACHE_DIR}\"/all_fixtures_*.json \"\${CACHE_DIR}\"/fixtures_*.json \"\${CACHE_DIR}\"/league_*.json \"\${CACHE_DIR}\"/enriched_fixture_*.json 2>/dev/null || true
+  chown -R www-data:www-data \"\${CACHE_DIR}\" 2>/dev/null || true
   bash deploy/apply-vps-production-tuning.sh
 "
 

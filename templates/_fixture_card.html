@@ -64,16 +64,34 @@
         </div>
     </div>
 
-    {% set card_xh = fixture.xg_home if fixture.xg_home is defined and fixture.xg_home is not none else (p.expected_goals_home if show_pred else none) %}
-    {% set card_xa = fixture.xg_away if fixture.xg_away is defined and fixture.xg_away is not none else (p.expected_goals_away if show_pred else none) %}
+    {% set card_xh = fixture.compact_xg_home if fixture.compact_xg_home is defined and fixture.compact_xg_home is not none else (fixture.xg_home if fixture.xg_home is defined and fixture.xg_home is not none else none) %}
+    {% set card_xa = fixture.compact_xg_away if fixture.compact_xg_away is defined and fixture.compact_xg_away is not none else (fixture.xg_away if fixture.xg_away is defined and fixture.xg_away is not none else none) %}
+    {% if card_xh is none and card_xa is none and show_pred %}
+        {% set card_xh = p.expected_goals_home %}
+        {% set card_xa = p.expected_goals_away %}
+    {% endif %}
+    {% if card_xh is none and card_xa is none %}
+        {% set hs = fixture.home_stats if fixture.home_stats is mapping else {} %}
+        {% set aws = fixture.away_stats if fixture.away_stats is mapping else {} %}
+        {% if (hs.get('played') or 0)|int >= 3 and (aws.get('played') or 0)|int >= 3 %}
+            {% set h_for = hs.get('xg_for_pg') or ((hs.get('goals_for') or 0) / (hs.get('played') or 1)) %}
+            {% set a_ga = aws.get('xg_against_pg') or ((aws.get('goals_against') or 0) / (aws.get('played') or 1)) %}
+            {% set a_for = aws.get('xg_for_pg') or ((aws.get('goals_for') or 0) / (aws.get('played') or 1)) %}
+            {% set h_ga = hs.get('xg_against_pg') or ((hs.get('goals_against') or 0) / (hs.get('played') or 1)) %}
+            {% if h_for and a_for %}
+                {% set card_xh = (h_for + a_ga) / 2 %}
+                {% set card_xa = (a_for + h_ga) / 2 %}
+            {% endif %}
+        {% endif %}
+    {% endif %}
     {% if card_xh is not none or card_xa is not none %}
     <div class="fixture-xg-row" style="display:flex;align-items:center;justify-content:center;gap:10px;margin:6px 0 4px;font-size:0.92em;">
         <span style="color:var(--muted);font-size:0.78em;">xG</span>
         <strong style="font-size:1.05em;color:var(--neon-value);">{% if card_xh is not none %}{{ "%.2f"|format(card_xh) }}{% else %}—{% endif %} – {% if card_xa is not none %}{{ "%.2f"|format(card_xa) }}{% else %}—{% endif %}</strong>
-        {% if fixture.xg_confidence_tier == 'proxy' %}
+        {% if fixture.xg_confidence_tier == 'proxy' and fixture.xg_source not in ['api_season_team_xg', 'team_season_xg'] %}
         <span style="font-size:0.72em;color:#fde68a;font-weight:600;" title="{{ fixture.xg_source_hint or 'Goals-based estimate only' }}">⚠ proxy</span>
-        {% elif fixture.xg_source_label %}
-        <span style="font-size:0.68em;color:var(--muted);max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ fixture.xg_source_hint or '' }}">{{ fixture.xg_source_label }}</span>
+        {% elif fixture.xg_source %}
+        <span style="font-size:0.68em;color:var(--muted);max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ fixture.xg_source_hint or fixture.xg_source }}">{{ fixture.xg_source_label or fixture.xg_source }}</span>
         {% endif %}
     </div>
     {% endif %}

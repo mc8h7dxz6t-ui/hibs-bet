@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from hibs_predictor.historic_calibration import xg_quality_tier
 
@@ -124,6 +124,61 @@ def xg_source_hint(
     if conf == "usable":
         return f"{base} Confidence: usable."
     return f"{base} Confidence: strong."
+
+
+def compact_fixture_xg(
+    fixture: Dict[str, Any],
+    *,
+    prediction: Optional[Dict[str, Any]] = None,
+) -> Tuple[Optional[float], Optional[float]]:
+    """
+    xG values for compact dashboard rows: fixture xG, then prediction, then season rates in team_stats.
+    """
+    xh = fixture.get("xg_home")
+    xa = fixture.get("xg_away")
+    if xh is not None and xa is not None:
+        try:
+            return float(xh), float(xa)
+        except (TypeError, ValueError):
+            pass
+    pred = prediction or fixture.get("prediction") or {}
+    if isinstance(pred, dict):
+        ph = pred.get("expected_goals_home")
+        pa = pred.get("expected_goals_away")
+        if ph is not None and pa is not None:
+            try:
+                return float(ph), float(pa)
+            except (TypeError, ValueError):
+                pass
+    hs = fixture.get("home_stats") if isinstance(fixture.get("home_stats"), dict) else {}
+    aws = fixture.get("away_stats") if isinstance(fixture.get("away_stats"), dict) else {}
+    try:
+        hp = int(hs.get("played") or 0)
+        ap = int(aws.get("played") or 0)
+    except (TypeError, ValueError):
+        hp = ap = 0
+    if hp >= 3 and ap >= 3:
+        try:
+            h_for = float(hs.get("xg_for_pg") or 0)
+            h_ga = float(hs.get("xg_against_pg") or hs.get("goals_against", 0) / hp or 0)
+            a_for = float(aws.get("xg_for_pg") or 0)
+            a_ga = float(aws.get("xg_against_pg") or aws.get("goals_against", 0) / ap or 0)
+            if h_for <= 0:
+                h_for = float(hs.get("goals_for") or 0) / hp
+            if a_for <= 0:
+                a_for = float(aws.get("goals_for") or 0) / ap
+            if h_ga <= 0:
+                h_ga = float(hs.get("goals_against") or 0) / hp
+            if a_ga <= 0:
+                a_ga = float(aws.get("goals_against") or 0) / ap
+            if h_for > 0 and a_for > 0:
+                return (
+                    max(0.35, min(3.2, (h_for + a_ga) / 2.0)),
+                    max(0.35, min(3.2, (a_for + h_ga) / 2.0)),
+                )
+        except (TypeError, ValueError, ZeroDivisionError):
+            pass
+    return None, None
 
 
 def attach_xg_display_fields(target: Dict[str, Any], enriched: Optional[Dict[str, Any]] = None) -> None:

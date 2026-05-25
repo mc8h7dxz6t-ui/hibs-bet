@@ -1,5 +1,6 @@
 from hibs_predictor.xg_source_display import (
     attach_xg_display_fields,
+    compact_fixture_xg,
     xg_confidence_tier,
     xg_source_hint,
     xg_source_label,
@@ -22,6 +23,22 @@ def test_attach_display_fields():
     assert row["xg_source_label"]
     assert row["xg_confidence_tier"] == "strong"
     assert row["xg_source_hint"]
+
+
+def test_compact_fixture_xg_from_team_stats():
+    fixture = {
+        "home_stats": {"played": 10, "goals_for": 15, "goals_against": 12},
+        "away_stats": {"played": 10, "goals_for": 14, "goals_against": 11},
+    }
+    xh, xa = compact_fixture_xg(fixture)
+    assert xh is not None and xa is not None
+    assert xh > 0 and xa > 0
+
+
+def test_compact_fixture_xg_prefers_fixture_fields():
+    fixture = {"xg_home": 1.8, "xg_away": 0.9, "home_stats": {"played": 10, "goals_for": 15, "goals_against": 12}}
+    xh, xa = compact_fixture_xg(fixture)
+    assert xh == 1.8 and xa == 0.9
 
 
 def test_api_season_hint_includes_per_match():

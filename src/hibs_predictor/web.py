@@ -132,7 +132,7 @@ def _api_football_season_year(now: datetime) -> int:
 _FDO_CALENDAR_COMPS = frozenset({"WC", "EC", "UNL", "CL", "EL", "UECL"})
 # UEFA club cups: API-Football season id is Jul-based; FDO often 403/429 on finals week.
 _API_FIRST_FIXTURE_LEAGUES = frozenset({"UCL", "EUROPA_LEAGUE", "UECL"})
-_FIXTURE_CACHE_VERSION = "v27"
+_FIXTURE_CACHE_VERSION = "v28"
 _EMPTY_FIXTURE_CACHE_TTL_HOURS = 0.2  # short negative cache — avoid hour-long empty poison
 
 
@@ -539,7 +539,14 @@ def clear_application_caches(*, all_disk: bool = False) -> int:
     if all_disk:
         return cache.clear_all()
     removed = 0
-    for pattern in ("all_fixtures_", "fixtures_", "recent_results_", "results_", "enriched_fixture_"):
+    for pattern in (
+        "all_fixtures_",
+        "fixtures_",
+        "league_",
+        "recent_results_",
+        "results_",
+        "enriched_fixture_",
+    ):
         removed += cache.clear_pattern(pattern, prefix=True)
     return removed
 
@@ -1004,6 +1011,17 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
             ),
         }
         row["data_quality"] = _data_quality_for_enriched(enriched, prediction)
+        try:
+            from hibs_predictor.xg_source_display import attach_xg_display_fields, compact_fixture_xg
+
+            attach_xg_display_fields(row, enriched)
+            cxh, cxa = compact_fixture_xg(row, prediction=prediction)
+            if cxh is not None:
+                row["compact_xg_home"] = cxh
+            if cxa is not None:
+                row["compact_xg_away"] = cxa
+        except Exception as exc:
+            print(f"[Fixture compact_xg] {league_code} {_fixture_key(fixture)}: {exc!r}")
         fixtures.append(row)
 
     fixtures.sort(key=lambda x: x.get("date") or "")
