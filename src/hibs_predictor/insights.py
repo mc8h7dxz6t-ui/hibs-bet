@@ -187,10 +187,15 @@ def _avoid_watchlist(packets: List[Dict[str, Any]], limit: int = 8) -> List[Dict
     return rows[:limit]
 
 
-def _monitor_snapshot() -> Dict[str, Any]:
+def _monitor_snapshot(fixtures: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     try:
-        from hibs_predictor.prediction_log import monitor_summary_dict
+        from hibs_predictor.prediction_log import (
+            backfill_snapshots_from_fixtures,
+            monitor_summary_dict,
+        )
 
+        if fixtures:
+            backfill_snapshots_from_fixtures(fixtures)
         return monitor_summary_dict()
     except Exception as exc:
         return {"ok": False, "message": f"monitor unavailable: {exc!r}"}
@@ -223,7 +228,11 @@ def _audit_snapshot() -> Dict[str, Any]:
     return out_audit
 
 
-def build_insights(fixtures: List[Dict[str, Any]]) -> Dict[str, Any]:
+def build_insights(
+    fixtures: List[Dict[str, Any]],
+    *,
+    backfill_fixtures: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     """Build a compact handicapper-style insights payload for templates/API."""
     packets = [build_assistant_packet(f) for f in fixtures]
     recommendations = build_assistant_recommendations(packets)
@@ -241,5 +250,5 @@ def build_insights(fixtures: List[Dict[str, Any]]) -> Dict[str, Any]:
         "trust_digest": _trust_digest(packets),
         "avoid_watchlist": _avoid_watchlist(packets),
         "audit": _audit_snapshot(),
-        "monitor": _monitor_snapshot(),
+        "monitor": _monitor_snapshot(list(fixtures) + list(backfill_fixtures or [])),
     }

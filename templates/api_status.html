@@ -45,9 +45,13 @@
         <div class="status-section" id="model-monitor">
             <h2>Model monitor</h2>
             <p id="status-monitor-yesterday-headline" class="status-impact-headline" style="font-size:0.95em;">—</p>
-            <table class="data-table status-xg-table" id="status-monitor-yesterday-rows" style="margin-top:8px;font-size:0.78em;width:100%;"></table>
+            <table class="data-table status-xg-table" id="status-monitor-yesterday-kickoff-rows" style="margin-top:8px;font-size:0.78em;width:100%;"></table>
+            <p id="status-monitor-yesterday-scored-headline" class="status-impact-headline" style="font-size:0.88em;margin-top:10px;">—</p>
+            <table class="data-table status-xg-table" id="status-monitor-yesterday-scored-rows" style="margin-top:6px;font-size:0.78em;width:100%;"></table>
             <p id="status-monitor-today-headline" class="status-impact-headline" style="font-size:0.95em;margin-top:14px;">—</p>
-            <table class="data-table status-xg-table" id="status-monitor-today-rows" style="margin-top:8px;font-size:0.78em;width:100%;"></table>
+            <table class="data-table status-xg-table" id="status-monitor-today-kickoff-rows" style="margin-top:8px;font-size:0.78em;width:100%;"></table>
+            <p id="status-monitor-today-scored-headline" class="status-impact-headline" style="font-size:0.88em;margin-top:10px;">—</p>
+            <table class="data-table status-xg-table" id="status-monitor-today-scored-rows" style="margin-top:6px;font-size:0.78em;width:100%;"></table>
             <p id="status-monitor-headline" class="status-impact-headline" style="margin-top:14px;">—</p>
             <table class="data-table status-xg-table" id="status-monitor-leagues" style="margin-top:10px;font-size:0.78em;width:100%;"></table>
             <p id="status-monitor-cron" class="status-note" style="margin-top:10px;"></p>
@@ -177,17 +181,26 @@
             var mon = ao.monitor || {};
             var yd = mon.yesterday || {};
             var td = mon.today || {};
-            function monitorDayHeadline(slice, prefix) {
+            function monitorSliceHeadline(slice, label) {
                 if (slice.enabled === false || mon.enabled === false) {
-                    return prefix + ': model monitor off — set HIBS_PREDICTION_LOG_ENABLED=1.';
+                    return label + ': model monitor off — set HIBS_PREDICTION_LOG_ENABLED=1.';
                 }
                 if (parseInt(slice.n_logged, 10) > 0) {
                     var bp = slice.best_pick || {};
-                    return prefix + ' (' + (slice.date_local || '') + ' · ' + (slice.display_tz_label || 'local') + '): '
-                        + slice.n_logged + ' fixtures · ' + (slice.n_scored_ft || 0) + ' FT synced · W '
+                    return label + ': ' + slice.n_logged + ' fixtures · W '
                         + (bp.wins || 0) + ' / L ' + (bp.losses || 0) + ' / pending ' + (bp.pending || 0);
                 }
-                return slice.message || ('No fixtures kicking off ' + prefix.toLowerCase() + '.');
+                return slice.message || (label + ': none.');
+            }
+            function monitorDayHeadline(daySlice, prefix) {
+                if (daySlice.enabled === false || mon.enabled === false) {
+                    return prefix + ': model monitor off — set HIBS_PREDICTION_LOG_ENABLED=1.';
+                }
+                var ko = daySlice.kickoff || daySlice;
+                var sc = daySlice.scored || {};
+                var dateLbl = daySlice.date_local || ko.date_local || '';
+                var tzLbl = daySlice.display_tz_label || ko.display_tz_label || 'local';
+                return prefix + ' (' + dateLbl + ' · ' + tzLbl + ')';
             }
             function monitorDayTable(rows, emptyText) {
                 var head = '<tr><th>Match</th><th>Pick</th><th>Model %</th><th>Result</th><th>Score</th><th>CLV</th></tr>';
@@ -200,14 +213,26 @@
                 }).join('');
                 return head + (body || '<tr><td colspan="6">' + esc(emptyText) + '</td></tr>');
             }
+            var ydKo = yd.kickoff || yd;
+            var ydSc = yd.scored || {};
+            var tdKo = td.kickoff || td;
+            var tdSc = td.scored || {};
             var myh = document.getElementById('status-monitor-yesterday-headline');
             if (myh) myh.textContent = monitorDayHeadline(yd, 'Yesterday');
-            var mYestTbl = document.getElementById('status-monitor-yesterday-rows');
-            if (mYestTbl) mYestTbl.innerHTML = monitorDayTable(yd.rows, 'No rows logged yesterday');
+            var mYestKoTbl = document.getElementById('status-monitor-yesterday-kickoff-rows');
+            if (mYestKoTbl) mYestKoTbl.innerHTML = monitorDayTable(ydKo.rows, 'No kickoff rows');
+            var mysh = document.getElementById('status-monitor-yesterday-scored-headline');
+            if (mysh) mysh.textContent = monitorSliceHeadline(ydSc, 'Results recorded');
+            var mYestScTbl = document.getElementById('status-monitor-yesterday-scored-rows');
+            if (mYestScTbl) mYestScTbl.innerHTML = monitorDayTable(ydSc.rows, 'No results recorded');
             var mth = document.getElementById('status-monitor-today-headline');
             if (mth) mth.textContent = monitorDayHeadline(td, 'Today');
-            var mTodayTbl = document.getElementById('status-monitor-today-rows');
-            if (mTodayTbl) mTodayTbl.innerHTML = monitorDayTable(td.rows, 'No rows logged today');
+            var mTodayKoTbl = document.getElementById('status-monitor-today-kickoff-rows');
+            if (mTodayKoTbl) mTodayKoTbl.innerHTML = monitorDayTable(tdKo.rows, 'No kickoff rows');
+            var mtsh = document.getElementById('status-monitor-today-scored-headline');
+            if (mtsh) mtsh.textContent = monitorSliceHeadline(tdSc, 'Results recorded');
+            var mTodayScTbl = document.getElementById('status-monitor-today-scored-rows');
+            if (mTodayScTbl) mTodayScTbl.innerHTML = monitorDayTable(tdSc.rows, 'No results recorded');
             var mh = document.getElementById('status-monitor-headline');
             if (mh) {
                 if (parseInt(mon.n_logged, 10) > 0) {

@@ -2208,7 +2208,13 @@ def api_insights():
 
     data = fetch_all_fixtures()
     upcoming = _bundle_fixtures(data)
-    return jsonify(build_insights(upcoming))
+    all_rows = data.get("all") or []
+    return jsonify(
+        build_insights(
+            upcoming,
+            backfill_fixtures=[f for f in all_rows if f.get("prediction")],
+        )
+    )
 
 
 @app.route("/api/acca/recommendations")
@@ -2232,7 +2238,11 @@ def insights_page():
 
     data = fetch_all_fixtures()
     upcoming = _bundle_fixtures(data)
-    insights = build_insights(upcoming)
+    all_rows = data.get("all") or []
+    insights = build_insights(
+        upcoming,
+        backfill_fixtures=[f for f in all_rows if f.get("prediction")],
+    )
     assistant_bundle = _assistant_bundle(upcoming)
     fixture_coverage = data.get("fixture_coverage") or {}
     return render_template(

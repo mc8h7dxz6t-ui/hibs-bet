@@ -290,7 +290,12 @@ def _enrich_summary(fixture: Dict[str, Any], prediction: Optional[Dict[str, Any]
     return out
 
 
-def maybe_log_prediction_snapshot(fixture: Dict[str, Any], prediction: Dict[str, Any]) -> None:
+def maybe_log_prediction_snapshot(
+    fixture: Dict[str, Any],
+    prediction: Dict[str, Any],
+    *,
+    skip_interval: bool = False,
+) -> None:
     """Append a snapshot row if logging is enabled and interval / dedupe rules pass."""
     if not _enabled():
         return
@@ -306,7 +311,7 @@ def maybe_log_prediction_snapshot(fixture: Dict[str, Any], prediction: Dict[str,
         interval = _min_interval_sec()
         conn = sqlite3.connect(path, timeout=15)
         try:
-            if interval > 0:
+            if interval > 0 and not skip_interval:
                 cur = conn.execute(
                     "SELECT captured_at FROM prediction_snapshots WHERE fixture_id = ? ORDER BY id DESC LIMIT 1",
                     (fid,),
@@ -713,6 +718,76 @@ def _rows_scored_ft_today(
     )
 
 
+def _rows_result_recorded_in_day(
+    conn: sqlite3.Connection,
+    *,
+    start_iso: str,
+    end_iso: str,
+) -> List[sqlite3.Row]:
+    """Latest snapshot per fixture whose FT result was recorded in the display-TZ day window."""
+    conn.row_factory = sqlite3.Row
+    candidates = conn.execute(
+        """
+        SELECT id, fixture_id, league_code, captured_at, kickoff_iso,
+               home_name, away_name, prediction_json, enrich_summary_json,
+               result_home, result_away, result_outcome, result_status, result_recorded_at
+        FROM prediction_snapshots
+        WHERE result_recorded_at IS NOT NULL AND result_recorded_at != ''
+          AND result_recorded_at >= ? AND result_recorded_at <= ?
+          AND result_outcome IS NOT NULL AND result_outcome != ''
+        ORDER BY result_recorded_at DESC
+        """,
+        (start_iso, end_iso),
+    ).fetchall()
+    seen: set[int] = set()
+    out: List[sqlite3.Row] = []
+    for r in candidates:
+        fid = int(r["fixture_id"])
+        if fid in seen:
+            continue
+        seen.add(fid)
+        out.append(r)
+    return out
+
+
+def backfill_snapshots_from_fixtures(
+    fixtures: List[Dict[str, Any]],
+    *,
+    max_rows: int = 80,
+) -> int:
+    """Log snapshots for fixtures that already have predictions but no audit row yet (best-effort)."""
+    if not _enabled() or not fixtures:
+        return 0
+    try:
+        init_db()
+        conn = sqlite3.connect(_db_path(), timeout=15)
+        try:
+            existing = {
+                int(r[0])
+                for r in conn.execute(
+                    "SELECT DISTINCT fixture_id FROM prediction_snapshots"
+                ).fetchall()
+            }
+        finally:
+            conn.close()
+    except Exception:
+        return 0
+    logged = 0
+    for fixture in fixtures:
+        if logged >= max_rows:
+            break
+        pred = fixture.get("prediction")
+        if not isinstance(pred, dict) or pred.get("prediction_unavailable"):
+            continue
+        fid = _fixture_id(fixture)
+        if not fid or fid in existing:
+            continue
+        maybe_log_prediction_snapshot(fixture, pred, skip_interval=True)
+        existing.add(fid)
+        logged += 1
+    return logged
+
+
 def _best_pick_result_label(
     pred: Dict[str, Any],
     *,
@@ -761,52 +836,10 @@ def _clv_pp_from_enrich(enrich_raw: Any) -> Optional[float]:
         return None
 
 
-def _monitor_day_dict(*, day_offset: int, empty_label: str) -> Dict[str, Any]:
-    """Fixtures kicking off on a display-TZ calendar day (kick-off window, not capture time)."""
-    start_dt, end_dt, date_local, tz_label = _day_bounds_datetimes(day_offset)
-    start_iso, end_iso = start_dt.isoformat(), end_dt.isoformat()
-    from hibs_predictor.display_tz import display_timezone
-
-    tz_key = getattr(display_timezone(), "key", "UTC")
-    out: Dict[str, Any] = {
-        "ok": True,
-        "enabled": prediction_log_enabled(),
-        "date_local": date_local,
-        "display_tz": tz_key,
-        "display_tz_label": tz_label,
-        "window_start_utc": start_iso[:19],
-        "window_end_utc": end_iso[:19],
-        "n_logged": 0,
-        "n_scored_ft": 0,
-        "best_pick": {"wins": 0, "losses": 0, "pending": 0},
-        "rows": [],
-    }
-    if not prediction_log_enabled():
-        out["message"] = (
-            "Model monitor off — prediction log disabled. Set HIBS_PREDICTION_LOG_ENABLED=1."
-        )
-        return out
-    if not os.path.isfile(_db_path()):
-        out["message"] = (
-            "Model monitor waiting for audit DB — set HIBS_PREDICTION_LOG_ENABLED=1 and use the dashboard."
-        )
-        return out
-
-    init_db()
-    conn = sqlite3.connect(_db_path(), timeout=20)
-    try:
-        kickoff_rows = _rows_kickoff_today(conn, start_dt=start_dt, end_dt=end_dt)
-        scored_ft = _rows_scored_ft_today(conn, start_iso=start_iso, end_iso=end_iso)
-    finally:
-        conn.close()
-
-    out["n_logged"] = len(kickoff_rows)
-    out["n_scored_ft"] = len(scored_ft)
-
+def _monitor_rows_to_table(rows: List[sqlite3.Row]) -> Tuple[Dict[str, int], List[Dict[str, Any]]]:
     wins = losses = pending = 0
     table_rows: List[Dict[str, Any]] = []
-
-    for r in kickoff_rows:
+    for r in rows:
         fid = int(r["fixture_id"])
         try:
             pred = json.loads(r["prediction_json"])
@@ -842,22 +875,106 @@ def _monitor_day_dict(*, day_offset: int, empty_label: str) -> Dict[str, Any]:
                 "clv_pp": _clv_pp_from_enrich(r["enrich_summary_json"]),
             }
         )
+    return {"wins": wins, "losses": losses, "pending": pending}, table_rows
 
-    out["best_pick"] = {"wins": wins, "losses": losses, "pending": pending}
+
+def _monitor_day_dict(
+    *,
+    day_offset: int,
+    empty_label: str,
+    window_mode: str = "kickoff",
+) -> Dict[str, Any]:
+    """One calendar slice: kickoff window or FT results recorded that day (display TZ)."""
+    start_dt, end_dt, date_local, tz_label = _day_bounds_datetimes(day_offset)
+    start_iso, end_iso = start_dt.isoformat(), end_dt.isoformat()
+    from hibs_predictor.display_tz import display_timezone
+
+    tz_key = getattr(display_timezone(), "key", "UTC")
+    mode = "scored" if window_mode == "scored" else "kickoff"
+    out: Dict[str, Any] = {
+        "ok": True,
+        "enabled": prediction_log_enabled(),
+        "section": mode,
+        "date_local": date_local,
+        "display_tz": tz_key,
+        "display_tz_label": tz_label,
+        "window_start_utc": start_iso[:19],
+        "window_end_utc": end_iso[:19],
+        "n_logged": 0,
+        "n_scored_ft": 0,
+        "best_pick": {"wins": 0, "losses": 0, "pending": 0},
+        "rows": [],
+    }
+    if not prediction_log_enabled():
+        out["message"] = (
+            "Model monitor off — prediction log disabled. Set HIBS_PREDICTION_LOG_ENABLED=1."
+        )
+        return out
+    if not os.path.isfile(_db_path()):
+        out["message"] = (
+            "Model monitor waiting for audit DB — set HIBS_PREDICTION_LOG_ENABLED=1 and use the dashboard."
+        )
+        return out
+
+    init_db()
+    conn = sqlite3.connect(_db_path(), timeout=20)
+    try:
+        if mode == "scored":
+            day_rows = _rows_result_recorded_in_day(conn, start_iso=start_iso, end_iso=end_iso)
+            scored_ft = day_rows
+        else:
+            day_rows = _rows_kickoff_today(conn, start_dt=start_dt, end_dt=end_dt)
+            scored_ft = _rows_scored_ft_today(conn, start_iso=start_iso, end_iso=end_iso)
+    finally:
+        conn.close()
+
+    out["n_logged"] = len(day_rows)
+    out["n_scored_ft"] = len(scored_ft)
+    best_pick, table_rows = _monitor_rows_to_table(day_rows)
+    out["best_pick"] = best_pick
     out["rows"] = table_rows
-    if not kickoff_rows:
-        out["message"] = f"No fixtures kicking off {empty_label} ({date_local})."
+    if not day_rows:
+        if mode == "scored":
+            out["message"] = (
+                f"No FT results recorded {empty_label} ({date_local}) — run pred-log-sync after matches finish."
+            )
+        else:
+            out["message"] = (
+                f"No fixtures kicking off {empty_label} ({date_local}) — load the dashboard before kick-off to log predictions."
+            )
     return out
 
 
+def _monitor_combined_day(*, day_offset: int, empty_label: str) -> Dict[str, Any]:
+    """Kickoff-day and results-recorded-day slices for templates/API."""
+    kickoff = _monitor_day_dict(day_offset=day_offset, empty_label=empty_label, window_mode="kickoff")
+    scored = _monitor_day_dict(day_offset=day_offset, empty_label=empty_label, window_mode="scored")
+    return {
+        "ok": kickoff.get("ok", True),
+        "enabled": kickoff.get("enabled"),
+        "date_local": kickoff.get("date_local"),
+        "display_tz": kickoff.get("display_tz"),
+        "display_tz_label": kickoff.get("display_tz_label"),
+        "window_start_utc": kickoff.get("window_start_utc"),
+        "window_end_utc": kickoff.get("window_end_utc"),
+        "kickoff": kickoff,
+        "scored": scored,
+        "n_logged": kickoff.get("n_logged", 0),
+        "n_scored_ft": kickoff.get("n_scored_ft", 0),
+        "best_pick": kickoff.get("best_pick") or {"wins": 0, "losses": 0, "pending": 0},
+        "rows": kickoff.get("rows") or [],
+        "message": kickoff.get("message"),
+    }
+
+
 def monitor_today_dict() -> Dict[str, Any]:
-    """Fixtures kicking off today in display timezone (HIBS_DISPLAY_TIMEZONE, default Europe/London)."""
-    return _monitor_day_dict(day_offset=0, empty_label="today")
+    """Today in display timezone: kickoff window + results recorded today."""
+    return _monitor_combined_day(day_offset=0, empty_label="today")
 
 
 def monitor_yesterday_dict() -> Dict[str, Any]:
-    """Fixtures that kicked off yesterday in display timezone."""
-    return _monitor_day_dict(day_offset=-1, empty_label="yesterday")
+    """Yesterday in display timezone: kickoff window + results recorded yesterday."""
+    return _monitor_combined_day(day_offset=-1, empty_label="yesterday")
 
 
 def _rows_in_monitor_window(

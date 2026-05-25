@@ -308,22 +308,28 @@
             {% set m = insights.monitor %}
             {% set y = m.yesterday or {} %}
             {% set t = m.today or {} %}
+            {% set yk = y.kickoff or y %}
+            {% set ys = y.scored or {} %}
+            {% set tk = t.kickoff or t %}
+            {% set ts = t.scored or {} %}
             <h3 style="font-size:0.95em;margin:12px 0 6px;">Yesterday ({{ y.display_tz_label or display_tz_label }})</h3>
             {% if m.get('enabled') is sameas false or y.get('enabled') is sameas false %}
             <div class="empty-mini">Model monitor off — set HIBS_PREDICTION_LOG_ENABLED=1.</div>
-            {% elif y.n_logged %}
+            {% else %}
+            <h4 style="font-size:0.88em;margin:8px 0 4px;font-weight:600;">Kickoff yesterday</h4>
+            {% if yk.n_logged %}
             <div class="insight-row">
-                <div class="ir-main">{{ y.n_logged }} fixtures · {{ y.n_scored_ft }} FT synced</div>
-                {% set ybp = y.best_pick or {} %}
+                <div class="ir-main">{{ yk.n_logged }} fixtures · {{ yk.n_scored_ft }} FT synced</div>
+                {% set ybp = yk.best_pick or {} %}
                 <span class="ir-pill ir-gold">W {{ ybp.wins or 0 }}</span>
                 <span class="ir-pill">L {{ ybp.losses or 0 }}</span>
                 <span class="ir-pill ir-warn">Pending {{ ybp.pending or 0 }}</span>
             </div>
-            {% if y.rows %}
+            {% if yk.rows %}
             <table class="data-table" style="margin-top:10px;font-size:0.78em;width:100%;">
                 <thead><tr><th>Match</th><th>Pick</th><th>Model %</th><th>Result</th><th>Score</th><th>CLV</th></tr></thead>
                 <tbody>
-                {% for row in y.rows %}
+                {% for row in yk.rows %}
                 <tr>
                     <td>{{ row.match }}</td>
                     <td>{{ row.pick or '—' }}</td>
@@ -337,24 +343,56 @@
             </table>
             {% endif %}
             {% else %}
-            <div class="empty-mini">{{ y.message or 'No fixtures kicking off yesterday.' }}</div>
+            <div class="empty-mini">{{ yk.message or 'No fixtures kicking off yesterday.' }}</div>
+            {% endif %}
+            <h4 style="font-size:0.88em;margin:14px 0 4px;font-weight:600;">Results recorded yesterday</h4>
+            {% if ys.n_logged %}
+            <div class="insight-row">
+                <div class="ir-main">{{ ys.n_logged }} fixtures scored</div>
+                {% set ysb = ys.best_pick or {} %}
+                <span class="ir-pill ir-gold">W {{ ysb.wins or 0 }}</span>
+                <span class="ir-pill">L {{ ysb.losses or 0 }}</span>
+                <span class="ir-pill ir-warn">Pending {{ ysb.pending or 0 }}</span>
+            </div>
+            {% if ys.rows %}
+            <table class="data-table" style="margin-top:10px;font-size:0.78em;width:100%;">
+                <thead><tr><th>Match</th><th>Pick</th><th>Model %</th><th>Result</th><th>Score</th><th>CLV</th></tr></thead>
+                <tbody>
+                {% for row in ys.rows %}
+                <tr>
+                    <td>{{ row.match }}</td>
+                    <td>{{ row.pick or '—' }}</td>
+                    <td>{% if row.model_pct is not none %}{{ row.model_pct }}%{% else %}—{% endif %}</td>
+                    <td>{% if row.result == 'W' %}<span class="ir-pill ir-gold">W</span>{% elif row.result == 'L' %}<span class="ir-pill">L</span>{% else %}<span class="ir-pill ir-warn">pending</span>{% endif %}</td>
+                    <td>{{ row.score or '—' }}</td>
+                    <td>{% if row.clv_pp is not none %}{{ row.clv_pp }} pp{% else %}—{% endif %}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% else %}
+            <div class="empty-mini">{{ ys.message or 'No FT results recorded yesterday — run pred-log-sync after matches finish.' }}</div>
+            {% endif %}
             {% endif %}
             <h3 style="font-size:0.95em;margin:16px 0 6px;">Today ({{ t.display_tz_label or display_tz_label }})</h3>
             {% if m.get('enabled') is sameas false or t.get('enabled') is sameas false %}
             <div class="empty-mini">Model monitor off — set HIBS_PREDICTION_LOG_ENABLED=1.</div>
-            {% elif t.n_logged %}
+            {% else %}
+            <h4 style="font-size:0.88em;margin:8px 0 4px;font-weight:600;">Kickoff today</h4>
+            {% if tk.n_logged %}
             <div class="insight-row">
-                <div class="ir-main">{{ t.n_logged }} fixtures · {{ t.n_scored_ft }} FT synced today</div>
-                {% set bp = t.best_pick or {} %}
+                <div class="ir-main">{{ tk.n_logged }} fixtures · {{ tk.n_scored_ft }} FT synced today</div>
+                {% set bp = tk.best_pick or {} %}
                 <span class="ir-pill ir-gold">W {{ bp.wins or 0 }}</span>
                 <span class="ir-pill">L {{ bp.losses or 0 }}</span>
                 <span class="ir-pill ir-warn">Pending {{ bp.pending or 0 }}</span>
             </div>
-            {% if t.rows %}
+            {% if tk.rows %}
             <table class="data-table" style="margin-top:10px;font-size:0.78em;width:100%;">
                 <thead><tr><th>Match</th><th>Pick</th><th>Model %</th><th>Result</th><th>Score</th><th>CLV</th></tr></thead>
                 <tbody>
-                {% for row in t.rows %}
+                {% for row in tk.rows %}
                 <tr>
                     <td>{{ row.match }}</td>
                     <td>{{ row.pick or '—' }}</td>
@@ -368,7 +406,37 @@
             </table>
             {% endif %}
             {% else %}
-            <div class="empty-mini">{{ t.message or 'No fixtures kicking off today.' }}</div>
+            <div class="empty-mini">{{ tk.message or 'No fixtures kicking off today.' }}</div>
+            {% endif %}
+            <h4 style="font-size:0.88em;margin:14px 0 4px;font-weight:600;">Results recorded today</h4>
+            {% if ts.n_logged %}
+            <div class="insight-row">
+                <div class="ir-main">{{ ts.n_logged }} fixtures scored</div>
+                {% set tsb = ts.best_pick or {} %}
+                <span class="ir-pill ir-gold">W {{ tsb.wins or 0 }}</span>
+                <span class="ir-pill">L {{ tsb.losses or 0 }}</span>
+                <span class="ir-pill ir-warn">Pending {{ tsb.pending or 0 }}</span>
+            </div>
+            {% if ts.rows %}
+            <table class="data-table" style="margin-top:10px;font-size:0.78em;width:100%;">
+                <thead><tr><th>Match</th><th>Pick</th><th>Model %</th><th>Result</th><th>Score</th><th>CLV</th></tr></thead>
+                <tbody>
+                {% for row in ts.rows %}
+                <tr>
+                    <td>{{ row.match }}</td>
+                    <td>{{ row.pick or '—' }}</td>
+                    <td>{% if row.model_pct is not none %}{{ row.model_pct }}%{% else %}—{% endif %}</td>
+                    <td>{% if row.result == 'W' %}<span class="ir-pill ir-gold">W</span>{% elif row.result == 'L' %}<span class="ir-pill">L</span>{% else %}<span class="ir-pill ir-warn">pending</span>{% endif %}</td>
+                    <td>{{ row.score or '—' }}</td>
+                    <td>{% if row.clv_pp is not none %}{{ row.clv_pp }} pp{% else %}—{% endif %}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% else %}
+            <div class="empty-mini">{{ ts.message or 'No FT results recorded today yet.' }}</div>
+            {% endif %}
             {% endif %}
             <h3 style="font-size:0.95em;margin:16px 0 6px;">Last {{ m.window_days or 28 }} days</h3>
             {% if m.ok and m.n_logged %}

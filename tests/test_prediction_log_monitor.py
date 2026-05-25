@@ -379,9 +379,10 @@ def test_monitor_yesterday_rows_wlp(audit_db, today_window):
 
     yest = monitor_yesterday_dict()
     assert yest["date_local"] == "2026-05-23"
+    assert yest["kickoff"]["n_logged"] == 2
     assert yest["n_logged"] == 2
-    assert yest["best_pick"] == {"wins": 1, "losses": 1, "pending": 0}
-    by_fid = {r["fixture_id"]: r for r in yest["rows"]}
+    assert yest["kickoff"]["best_pick"] == {"wins": 1, "losses": 1, "pending": 0}
+    by_fid = {r["fixture_id"]: r for r in yest["kickoff"]["rows"]}
     assert by_fid[701]["result"] == "W"
     assert by_fid[702]["result"] == "L"
 
@@ -412,6 +413,39 @@ def test_monitor_yesterday_uses_kickoff_not_captured_at(audit_db, today_window):
         conn.close()
 
     yest = monitor_yesterday_dict()
-    assert yest["n_logged"] == 1
-    assert yest["rows"][0]["fixture_id"] == 801
-    assert monitor_today_dict()["n_logged"] == 0
+    assert yest["kickoff"]["n_logged"] == 1
+    assert yest["kickoff"]["rows"][0]["fixture_id"] == 801
+    assert monitor_today_dict()["kickoff"]["n_logged"] == 0
+
+
+def test_monitor_yesterday_scored_section(audit_db, today_window):
+    """FT synced yesterday appears under scored even when kickoff was earlier."""
+    _start, _end, noon = today_window
+    old_ko = datetime(2026, 5, 20, 15, 0, 0, tzinfo=timezone.utc).isoformat()
+    yest_sync = datetime(2026, 5, 23, 20, 0, 0, tzinfo=timezone.utc).isoformat()
+
+    conn = sqlite3.connect(str(audit_db))
+    try:
+        _insert_row(
+            conn,
+            captured_at=old_ko,
+            kickoff_iso=old_ko,
+            league="EPL",
+            outcome="home",
+            predicted="home",
+            probs={"home": 0.7, "draw": 0.2, "away": 0.1},
+            result_home=2,
+            result_away=0,
+            result_status="FT",
+            result_recorded_at=yest_sync,
+            fixture_id=901,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    yest = monitor_yesterday_dict()
+    assert yest["kickoff"]["n_logged"] == 0
+    assert yest["scored"]["n_logged"] == 1
+    assert yest["scored"]["rows"][0]["fixture_id"] == 901
+    assert yest["scored"]["rows"][0]["result"] == "W"
