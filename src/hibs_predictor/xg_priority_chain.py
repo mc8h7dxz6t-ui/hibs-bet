@@ -49,35 +49,47 @@ def xg_priority_chain_dict() -> Dict[str, Any]:
         {
             "rank": "4",
             "source": "fotmob_league_xg",
-            "when": "FotMob league table xG/conceded when enabled (UEFA cups default on; HIBS_ENABLE_FOTMOB_XG).",
-            "leagues": "UCL, Europa, UECL, internationals; domestic when MAX_DATA or explicit flag.",
+            "when": "FotMob season table xG/conceded (UEFA cups + domestic cups default-on; HIBS_ENABLE_FOTMOB_XG for all).",
+            "leagues": "UCL, Europa, UECL, internationals, SCOTTISH_CUP→SPFL table; domestic when MAX_DATA or explicit flag.",
         },
         {
             "rank": "5",
+            "source": "scraped_recent_xg",
+            "when": "Average xG from each team's last finished matches where API published Expected Goals.",
+            "leagues": "Any league where last-N API stats include per-match xG.",
+        },
+        {
+            "rank": "6",
+            "source": "api_season_team_xg",
+            "when": "Season GF/GA per game from API team statistics blended attack vs opponent defence.",
+            "leagues": "When fixture xG empty but API season stats have 5+ matches played.",
+        },
+        {
+            "rank": "7",
             "source": "fbref_schedule_xg / scottish_fbref_xg",
             "when": "FBref schedule or squad aggregates when heavy scrapers run and not blocked.",
             "leagues": "Scottish + schedule-linked leagues; skipped entirely when HIBS_FBREF_BLOCKED=1.",
         },
         {
-            "rank": "6",
-            "source": "scraped_recent_xg / sofascore_xg",
-            "when": "Recent finished matches carry API statistics xG per team.",
-            "leagues": "Any league where last-N API stats include Expected Goals.",
-        },
-        {
-            "rank": "7",
-            "source": "form_derived_xg / statsbomb_goals_proxy_xg",
-            "when": "4+ recent games each side with goals but no direct xG; cup open-data proxy.",
-            "leagues": "Cups without API xG; domestic when form is deep enough.",
-        },
-        {
             "rank": "8",
+            "source": "sofascore_xg",
+            "when": "SofaScore team xG averages when enabled.",
+            "leagues": "Optional; lower priority than API recent/season paths.",
+        },
+        {
+            "rank": "9",
+            "source": "statsbomb_goals_proxy_xg",
+            "when": "StatsBomb open-data goals proxy for cups when other scrapes miss.",
+            "leagues": "UEFA cups, domestic cups, COUPE_DE_FRANCE, etc.",
+        },
+        {
+            "rank": "10",
             "source": "mixed_api_goals_proxy",
             "when": "Partial API xG or attack/defence estimate from recent GF/GA.",
             "leagues": "Fallback for thin API coverage.",
         },
         {
-            "rank": "9",
+            "rank": "11",
             "source": "goals_proxy",
             "when": "No trustworthy xG path; Poisson λ from recent goals only.",
             "leagues": "Lower coverage fixtures; lowest data_quality xG block score.",
@@ -97,27 +109,30 @@ def xg_priority_chain_dict() -> Dict[str, Any]:
             "note": "Calendar-year season candidates before Jul id when month < 7; SoccerStats table fallback.",
         },
         {
-            "code": "SCOTLAND",
-            "note": "FBref schedule xG when not blocked; otherwise API + SoccerStats.",
+            "code": "SCOTLAND / SCOTTISH_CUP",
+            "note": "SPFL FotMob id 64; cup ties use SCOTLAND table fallback. FBref when not blocked; else API recent/season.",
         },
         {
             "code": "WORLD_CUP / EUROS / NATIONS_LEAGUE",
-            "note": "FotMob ids 77 / 50 / 9806–9809 when HIBS_ENABLE_FOTMOB_XG; else API fixture xG and form-derived paths.",
+            "note": "FotMob ids 77 / 50 / 9806–9809 when HIBS_ENABLE_FOTMOB_XG or cup default-on.",
         },
         {
             "code": "INTL_FRIENDLIES",
-            "note": "API-Football league 10; no FotMob table — API fixture xG, recent-match stats, or form/goals_proxy.",
+            "note": "API-Football league 10; no FotMob table — API fixture xG, recent-match stats, or goals_proxy.",
         },
     ]
     notes: List[str] = []
     if fbref_blocked:
         notes.append(
-            "HIBS_FBREF_BLOCKED=1 — FBref steps are skipped on VPS; chain jumps from FotMob/Understat to recent-match xG or goals_proxy."
+            "HIBS_FBREF_BLOCKED=1 — FBref steps are skipped on VPS; chain uses FotMob, Understat, recent API xG, or goals_proxy."
         )
     if not heavy:
         notes.append(
             "HIBS_ENABLE_HEAVY_SCRAPERS=0 — full Understat league pages and FBref squad paths are off; rely on API + light scrapers."
         )
+    notes.append(
+        "UI shows xg_source_label + xg_confidence_tier (strong / usable / thin / proxy) on each fixture expand panel."
+    )
     return {
         "headline": "xG priority chain (highest wins; never invent stats)",
         "fbref_blocked": fbref_blocked,

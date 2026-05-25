@@ -45,6 +45,7 @@ def test_cup_fixture_gets_statsbomb_xg_source(monkeypatch):
     monkeypatch.delenv("HIBS_ENABLE_STATSBOMB_LIGHT", raising=False)
     monkeypatch.delenv("HIBS_MAX_DATA", raising=False)
     monkeypatch.setenv("HIBS_SCRAPE_XG", "1")
+    monkeypatch.setenv("HIBS_ENABLE_FOTMOB_XG", "0")
 
     from hibs_predictor.scraped_xg import apply_scraped_xg_to_enriched
 

@@ -38,10 +38,31 @@ FOTMOB_PRIMARY_LEAGUE_ID: Dict[str, int] = {
     "PRIMEIRA": 61,
 }
 
-# UEFA / internationals: league-table xG on by default (main xG gap vs Understat).
+# UEFA / internationals / domestic cups: league-table xG on by default (main xG gap vs Understat).
 FOTMOB_XG_CUP_DEFAULT_ON = frozenset(
-    {"UCL", "EUROPA_LEAGUE", "UECL", "EUROS", "WORLD_CUP", "NATIONS_LEAGUE"}
+    {
+        "UCL",
+        "EUROPA_LEAGUE",
+        "UECL",
+        "EUROS",
+        "WORLD_CUP",
+        "NATIONS_LEAGUE",
+        "SCOTTISH_CUP",
+        "FA_CUP",
+        "LEAGUE_CUP",
+        "COUPE_DE_FRANCE",
+    }
 )
+
+# Cup ties without their own FotMob xG table — use parent league season xG.
+FOTMOB_XG_LEAGUE_FALLBACK: Dict[str, str] = {
+    "SCOTTISH_CUP": "SCOTLAND",
+    "SCOTLAND_L1": "SCOTLAND_CHAMP",
+    "SCOTLAND_L2": "SCOTLAND_CHAMP",
+    "FA_CUP": "EPL",
+    "LEAGUE_CUP": "EPL",
+    "COUPE_DE_FRANCE": "LIGUE_1",
+}
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -121,9 +142,17 @@ def fotmob_xg_enabled(league_code: str = "") -> bool:
     return _env_on("HIBS_MAX_DATA", "0")
 
 
+def effective_xg_league_code(league_code: str) -> str:
+    """Map cup / lower-tier codes to a FotMob league with an xG table."""
+    code = (league_code or "").strip().upper()
+    if code in FOTMOB_LEAGUE_IDS:
+        return code
+    return FOTMOB_XG_LEAGUE_FALLBACK.get(code, code)
+
+
 def primary_league_id(league_code: str) -> Optional[int]:
     """Single FotMob competition id for a hibs league code."""
-    code = (league_code or "").strip().upper()
+    code = effective_xg_league_code(league_code)
     if code in FOTMOB_PRIMARY_LEAGUE_ID:
         return FOTMOB_PRIMARY_LEAGUE_ID[code]
     ids = FOTMOB_LEAGUE_IDS.get(code)
@@ -265,7 +294,8 @@ def resolve_league_fixture_xg(
     """
     if not fotmob_xg_enabled(league_code):
         return None
-    lid = primary_league_id(league_code)
+    effective = effective_xg_league_code(league_code)
+    lid = primary_league_id(effective)
     if lid is None:
         return None
     try:
@@ -291,6 +321,8 @@ def resolve_league_fixture_xg(
             "home_avg_for": round(float(hp["avg_xg_for"]), 3),
             "away_avg_for": round(float(ap["avg_xg_for"]), 3),
         }
+        if effective != (league_code or "").strip().upper():
+            meta["fotmob_league_fallback"] = effective
         return pair[0], pair[1], meta
     except Exception:
         return None

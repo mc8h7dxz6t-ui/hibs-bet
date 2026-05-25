@@ -135,14 +135,25 @@ def _xg_points(src: str, n_h: float, n_a: float, enriched: Optional[Dict[str, An
         "scottish_fbref_avg_xg",
         "fbref_schedule_xg",
         "fbref_schedule_avg_xg",
-        "sofascore_xg",
-        "fotmob_league_xg",
     ):
         return 15.0
-    if s == "statsbomb_goals_proxy_xg":
-        return 12.0
-    if s in ("form_derived_xg",):
+    if s == "api_season_team_xg":
         return 14.0
+    if s == "sofascore_xg":
+        return 13.5
+    if s == "fotmob_league_xg":
+        try:
+            hn = int(meta.get("home_n") or 0)
+            an = int(meta.get("away_n") or 0)
+        except (TypeError, ValueError):
+            hn = an = 0
+        if hn >= 10 and an >= 10:
+            return 14.0
+        return 13.0
+    if s == "statsbomb_goals_proxy_xg":
+        return 11.0
+    if s in ("form_derived_xg",):
+        return 9.0
     if s in ("partial_scraped_xg", "mixed_api_goals_proxy", "partial_single_side", "partial_xg"):
         return 10.0
     if s == "goals_proxy":

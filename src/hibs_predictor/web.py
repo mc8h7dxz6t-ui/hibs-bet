@@ -988,6 +988,9 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
             "market_odds": enriched.get("market_odds", {}),
             "supplemental": enriched.get("supplemental", {}),
             "xg_source": enriched.get("xg_source", "unknown"),
+            "xg_source_label": enriched.get("xg_source_label"),
+            "xg_confidence_tier": enriched.get("xg_confidence_tier"),
+            "xg_source_hint": enriched.get("xg_source_hint"),
             "best_odds_1x2": enriched.get("best_odds_1x2") or {},
             "best_odds_source": enriched.get("best_odds_source") or {},
             "sharp_anchor_implied": enriched.get("sharp_anchor_implied") or {},
@@ -1033,8 +1036,11 @@ def _data_quality_for_enriched(enriched: Dict[str, Any], prediction: Dict[str, A
 def _ensure_fixture_data_quality(all_fixtures: List[Dict[str, Any]]) -> None:
     """Re-score slim cached rows so xG/form/line-odds fallbacks apply without full re-enrich."""
     from hibs_predictor.data_quality import compute_fixture_data_quality_from_row
+    from hibs_predictor.xg_source_display import attach_xg_display_fields
 
     for f in all_fixtures:
+        if not f.get("xg_source_hint"):
+            attach_xg_display_fields(f)
         try:
             new_dq = compute_fixture_data_quality_from_row(f)
             old_pct = float((f.get("data_quality") or {}).get("score_pct") or 0)

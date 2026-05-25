@@ -1,25 +1,36 @@
 """
 Scraped / derived xG for upcoming fixtures when API-Football fixture stats are empty.
 
-Sources (priority):
+Resolution order (score-based upgrade; never downgrade API fixture xG):
   1. Understat league-page row for this fixture (top leagues)
-  2. FotMob league-table xG (UEFA cups default-on; domestic when HIBS_MAX_DATA=1)
-  3. FBref schedule xG / team rolling averages (Scottish, EFL, selected European)
-  4. StatsBomb open-data goals proxy → estimated xG when enabled
-  5. Average xG from API-Sports last finished matches per team (all leagues with stats)
-  6. Optional blend with existing goals_proxy when only one side has xG
+  2. FotMob league-table xG (UEFA cups default-on; domestic when HIBS_ENABLE_FOTMOB_XG)
+  3. Recent finished matches with API statistics xG per team
+  4. API season team attack/defence blend (real season stats only)
+  5. FBref schedule xG when heavy scrapers run and not blocked on VPS
+  6. SofaScore team averages (optional)
+  7. StatsBomb open-data goals proxy (cups / when enabled)
+  8. Partial scrape / goals_proxy re-tags avoided where possible
 """
 
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from hibs_predictor.betting_engine import TeamStrengthCalculator
+
+Resolver = Callable[
+    [Dict[str, Any], str, Dict[str, Any], Dict[str, Any], int, int, str, str],
+    Optional[Tuple[float, float, str, Dict[str, Any]]],
+]
 
 
 def _env_on(name: str, default: str = "1") -> bool:
     return (os.getenv(name, default) or default).strip().lower() not in ("0", "false", "no", "off")
+
+
+def _fbref_blocked() -> bool:
+    return os.getenv("HIBS_FBREF_BLOCKED", "0").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _avg_team_xg_from_recent(matches: List[Dict[str, Any]], team_id: int, min_samples: int = 2) -> Optional[float]:
@@ -117,32 +128,48 @@ def _fetch_understat_row(
     return None
 
 
-def resolve_scraped_xg(
+def _api_season_team_xg(
+    enriched: Dict[str, Any],
+    league_strength: float,
+) -> Optional[Tuple[float, float, Dict[str, Any]]]:
+    """Blend season GF/GA per game from API team statistics (not recent-form proxy)."""
+    hs = enriched.get("home_stats") if isinstance(enriched.get("home_stats"), dict) else {}
+    aws = enriched.get("away_stats") if isinstance(enriched.get("away_stats"), dict) else {}
+    if str(hs.get("source") or "") == "football_data_org" or str(aws.get("source") or "") == "football_data_org":
+        return None
+    try:
+        hp = int(hs.get("played") or 0)
+        ap = int(aws.get("played") or 0)
+        h_gf = float(hs.get("goals_for") or 0)
+        h_ga = float(hs.get("goals_against") or 0)
+        a_gf = float(aws.get("goals_for") or 0)
+        a_ga = float(aws.get("goals_against") or 0)
+    except (TypeError, ValueError):
+        return None
+    if hp < 5 or ap < 5 or h_gf <= 0 or a_gf <= 0:
+        return None
+    h_for_pg = h_gf / hp
+    h_against_pg = h_ga / hp
+    a_for_pg = a_gf / ap
+    a_against_pg = a_ga / ap
+    strength = max(0.55, min(1.45, float(league_strength or 1.0)))
+    xh = max(0.35, min(3.2, (h_for_pg + a_against_pg) / 2.0 * strength / 1.12))
+    xa = max(0.35, min(3.2, (a_for_pg + h_against_pg) / 2.0 * strength / 1.12))
+    meta = {"home_played": hp, "away_played": ap, "api_season_blend": True}
+    return xh, xa, meta
+
+
+def _try_understat(
     fixture: Dict[str, Any],
     league_code: str,
     enriched: Dict[str, Any],
+    sup: Dict[str, Any],
+    home_id: int,
+    away_id: int,
+    home_nm: str,
+    away_nm: str,
 ) -> Optional[Tuple[float, float, str, Dict[str, Any]]]:
-    """
-    Return (xg_home, xg_away, source_tag, debug_meta) or None if no scrape improves on goals-only proxy.
-    """
-    if not _env_on("HIBS_SCRAPE_XG", "1"):
-        return None
-
-    current = str(enriched.get("xg_source") or "").lower()
-    always_deep = os.getenv("HIBS_ALWAYS_DEEP_SCRAPE", "1").lower() not in ("0", "false", "no", "off")
-    if current in ("api_fixture_xg", "stats_api_xg") and not always_deep:
-        return None
-
-    from hibs_predictor.fixture_utils import fixture_team_id, fixture_team_name
-
-    home_id = fixture_team_id(fixture, "home") or fixture_team_id(enriched, "home") or 0
-    away_id = fixture_team_id(fixture, "away") or fixture_team_id(enriched, "away") or 0
-
-    home_nm = fixture_team_name(fixture, "home")
-    away_nm = fixture_team_name(fixture, "away")
-    sup = enriched.get("supplemental") if isinstance(enriched.get("supplemental"), dict) else {}
     meta: Dict[str, Any] = {}
-
     for key in ("understat", "understat_light"):
         us = sup.get(key) if isinstance(sup, dict) else None
         if isinstance(us, dict):
@@ -164,7 +191,20 @@ def resolve_scraped_xg(
             if pair:
                 meta.update(fmeta)
                 return pair[0], pair[1], tag, meta
+    return None
 
+
+def _try_fotmob(
+    fixture: Dict[str, Any],
+    league_code: str,
+    enriched: Dict[str, Any],
+    sup: Dict[str, Any],
+    home_id: int,
+    away_id: int,
+    home_nm: str,
+    away_nm: str,
+) -> Optional[Tuple[float, float, str, Dict[str, Any]]]:
+    meta: Dict[str, Any] = {}
     fm_block = sup.get("fotmob_xg") if isinstance(sup, dict) else None
     if isinstance(fm_block, dict):
         pair = _understat_pair_from_dict(fm_block)
@@ -186,7 +226,65 @@ def resolve_scraped_xg(
                 return float(xh), float(xa), "fotmob_league_xg", meta
     except Exception:
         pass
+    return None
 
+
+def _try_recent_api_xg(
+    fixture: Dict[str, Any],
+    league_code: str,
+    enriched: Dict[str, Any],
+    sup: Dict[str, Any],
+    home_id: int,
+    away_id: int,
+    home_nm: str,
+    away_nm: str,
+) -> Optional[Tuple[float, float, str, Dict[str, Any]]]:
+    meta: Dict[str, Any] = {}
+    h_avg = _avg_team_xg_from_recent(enriched.get("home_recent") or [], int(home_id or 0))
+    a_avg = _avg_team_xg_from_recent(enriched.get("away_recent") or [], int(away_id or 0))
+    if h_avg is not None and a_avg is not None:
+        meta["home_xg_samples"] = "recent_api"
+        meta["away_xg_samples"] = "recent_api"
+        return h_avg, a_avg, "scraped_recent_xg", meta
+    return None
+
+
+def _try_api_season(
+    fixture: Dict[str, Any],
+    league_code: str,
+    enriched: Dict[str, Any],
+    sup: Dict[str, Any],
+    home_id: int,
+    away_id: int,
+    home_nm: str,
+    away_nm: str,
+) -> Optional[Tuple[float, float, str, Dict[str, Any]]]:
+    league = enriched.get("league_factor")
+    if league is None:
+        try:
+            from hibs_predictor.config import LEAGUES
+
+            league = LEAGUES.get(league_code, {}).get("strength_factor", 1.0)
+        except Exception:
+            league = 1.0
+    hit = _api_season_team_xg(enriched, float(league or 1.0))
+    if hit:
+        xh, xa, meta = hit
+        return xh, xa, "api_season_team_xg", meta
+    return None
+
+
+def _try_sofascore(
+    fixture: Dict[str, Any],
+    league_code: str,
+    enriched: Dict[str, Any],
+    sup: Dict[str, Any],
+    home_id: int,
+    away_id: int,
+    home_nm: str,
+    away_nm: str,
+) -> Optional[Tuple[float, float, str, Dict[str, Any]]]:
+    meta: Dict[str, Any] = {}
     ss_block = sup.get("sofascore_xg") if isinstance(sup, dict) else None
     if isinstance(ss_block, dict):
         try:
@@ -216,6 +314,29 @@ def resolve_scraped_xg(
                     return xh, xa, "sofascore_xg", meta
     except Exception:
         pass
+    return None
+
+
+def _try_fbref(
+    fixture: Dict[str, Any],
+    league_code: str,
+    enriched: Dict[str, Any],
+    sup: Dict[str, Any],
+    home_id: int,
+    away_id: int,
+    home_nm: str,
+    away_nm: str,
+) -> Optional[Tuple[float, float, str, Dict[str, Any]]]:
+    if _fbref_blocked():
+        return None
+    meta: Dict[str, Any] = {}
+    sup_fbref = sup.get("fbref_schedule") or sup.get("fbref_scottish")
+    if isinstance(sup_fbref, dict):
+        pair = _understat_pair_from_dict(sup_fbref)
+        if pair:
+            meta["fbref_schedule_key"] = "supplemental"
+            src = str(sup_fbref.get("source") or "fbref_schedule_xg")
+            return pair[0], pair[1], src, meta
 
     try:
         from hibs_predictor.scrapers.fbref_scottish_xg import resolve_fbref_schedule_xg
@@ -227,48 +348,93 @@ def resolve_scraped_xg(
             return float(xh), float(xa), tag, meta
     except Exception:
         pass
+    return None
 
-    sup_fbref = sup.get("fbref_schedule") or sup.get("fbref_scottish")
-    if isinstance(sup_fbref, dict):
-        pair = _understat_pair_from_dict(sup_fbref)
-        if pair:
-            meta["fbref_schedule_key"] = "supplemental"
-            src = str(sup_fbref.get("source") or "fbref_schedule_xg")
-            return pair[0], pair[1], src, meta
 
-    if _statsbomb_xg_enabled(league_code):
-        sb_proxy = sup.get("statsbomb_open_team_proxy") if isinstance(sup, dict) else None
-        pair = _xg_from_statsbomb_proxy(sb_proxy, enriched)
-        if pair:
-            meta["statsbomb"] = "open_goals_proxy"
-            return pair[0], pair[1], "statsbomb_goals_proxy_xg", meta
+def _try_statsbomb(
+    fixture: Dict[str, Any],
+    league_code: str,
+    enriched: Dict[str, Any],
+    sup: Dict[str, Any],
+    home_id: int,
+    away_id: int,
+    home_nm: str,
+    away_nm: str,
+) -> Optional[Tuple[float, float, str, Dict[str, Any]]]:
+    if not _statsbomb_xg_enabled(league_code):
+        return None
+    sb_proxy = sup.get("statsbomb_open_team_proxy") if isinstance(sup, dict) else None
+    pair = _xg_from_statsbomb_proxy(sb_proxy, enriched)
+    if pair:
+        return pair[0], pair[1], "statsbomb_goals_proxy_xg", {"statsbomb": "open_goals_proxy"}
+    return None
 
+
+def _try_partial_scrape(
+    fixture: Dict[str, Any],
+    league_code: str,
+    enriched: Dict[str, Any],
+    sup: Dict[str, Any],
+    home_id: int,
+    away_id: int,
+    home_nm: str,
+    away_nm: str,
+) -> Optional[Tuple[float, float, str, Dict[str, Any]]]:
     h_avg = _avg_team_xg_from_recent(enriched.get("home_recent") or [], int(home_id or 0))
     a_avg = _avg_team_xg_from_recent(enriched.get("away_recent") or [], int(away_id or 0))
-    if h_avg is not None and a_avg is not None:
-        meta["home_xg_samples"] = "recent_api"
-        meta["away_xg_samples"] = "recent_api"
-        return h_avg, a_avg, "scraped_recent_xg", meta
-
     if h_avg is not None or a_avg is not None:
         base_h = float(enriched.get("xg_home") or 1.2)
         base_a = float(enriched.get("xg_away") or 1.1)
-        meta["partial_scrape"] = True
-        return (h_avg if h_avg is not None else base_h), (a_avg if a_avg is not None else base_a), "partial_scraped_xg", meta
+        return (
+            h_avg if h_avg is not None else base_h,
+            a_avg if a_avg is not None else base_a,
+            "partial_scraped_xg",
+            {"partial_scrape": True},
+        )
+    return None
 
-    if current in ("goals_proxy", "mixed_api_goals_proxy", "unknown", ""):
-        try:
-            nh = int(float(enriched.get("home_recent_n") or 0))
-            na = int(float(enriched.get("away_recent_n") or 0))
-        except (TypeError, ValueError):
-            nh = na = 0
-        xh = float(enriched.get("xg_home") or 0)
-        xa = float(enriched.get("xg_away") or 0)
-        if nh >= 4 and na >= 4 and xh > 0.08 and xa > 0.08:
-            meta["form_derived"] = True
-            meta["home_n"] = nh
-            meta["away_n"] = na
-            return xh, xa, "form_derived_xg", meta
+
+_SCRAPE_RESOLVERS: List[Resolver] = [
+    _try_understat,
+    _try_fotmob,
+    _try_recent_api_xg,
+    _try_api_season,
+    _try_fbref,
+    _try_sofascore,
+    _try_statsbomb,
+    _try_partial_scrape,
+]
+
+
+def resolve_scraped_xg(
+    fixture: Dict[str, Any],
+    league_code: str,
+    enriched: Dict[str, Any],
+) -> Optional[Tuple[float, float, str, Dict[str, Any]]]:
+    """
+    Return (xg_home, xg_away, source_tag, debug_meta) or None if no scrape improves on goals-only proxy.
+    """
+    if not _env_on("HIBS_SCRAPE_XG", "1"):
+        return None
+
+    current = str(enriched.get("xg_source") or "").lower()
+    always_deep = os.getenv("HIBS_ALWAYS_DEEP_SCRAPE", "1").lower() not in ("0", "false", "no", "off")
+    if current in ("api_fixture_xg", "stats_api_xg") and not always_deep:
+        return None
+
+    from hibs_predictor.fixture_utils import fixture_team_id, fixture_team_name
+
+    home_id = fixture_team_id(fixture, "home") or fixture_team_id(enriched, "home") or 0
+    away_id = fixture_team_id(fixture, "away") or fixture_team_id(enriched, "away") or 0
+
+    home_nm = fixture_team_name(fixture, "home")
+    away_nm = fixture_team_name(fixture, "away")
+    sup = enriched.get("supplemental") if isinstance(enriched.get("supplemental"), dict) else {}
+
+    for resolver in _SCRAPE_RESOLVERS:
+        hit = resolver(fixture, league_code, enriched, sup, home_id, away_id, home_nm, away_nm)
+        if hit:
+            return hit
 
     return None
 
@@ -289,13 +455,22 @@ def apply_scraped_xg_to_enriched(
     """Mutate enriched xG fields when scrapers / recent-match xG beat goals_proxy."""
     resolved = resolve_scraped_xg(fixture, league_code, enriched)
     if not resolved:
+        from hibs_predictor.xg_source_display import attach_xg_display_fields
+
+        attach_xg_display_fields(enriched, enriched)
         return enriched
     xh, xa, tag, meta = resolved
     current = str(enriched.get("xg_source") or "").lower()
     if current and _xg_source_score(tag, enriched) < _xg_source_score(current, enriched):
+        from hibs_predictor.xg_source_display import attach_xg_display_fields
+
+        attach_xg_display_fields(enriched, enriched)
         return enriched
     enriched["xg_home"] = float(xh)
     enriched["xg_away"] = float(xa)
     enriched["xg_source"] = tag
     enriched["scraped_xg_meta"] = meta
+    from hibs_predictor.xg_source_display import attach_xg_display_fields
+
+    attach_xg_display_fields(enriched, enriched)
     return enriched

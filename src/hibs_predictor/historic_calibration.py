@@ -29,9 +29,8 @@ _PROXY_XG_MARKERS = (
     "goals_proxy",
     "form_derived",
     "fbref_avg",
-    "scraped_recent",
-    "sofascore",
     "statsbomb_goals",
+    "fotmob_league",
 )
 
 
@@ -62,8 +61,12 @@ def xg_quality_tier(xg_source: Any) -> str:
         return "high"
     if any(m in s for m in ("api_fixture_xg", "api_xg", "stats_api_xg", "stats_api")):
         return "high"
+    if any(m in s for m in ("scraped_recent", "api_season_team")):
+        return "high"
     if "api" in s and "xg" in s and "proxy" not in s:
         return "high"
+    if "fotmob_league" in s:
+        return "medium"
     if any(m in s for m in _PROXY_XG_MARKERS) or "proxy" in s:
         return "low"
     return "medium"

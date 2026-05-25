@@ -134,7 +134,12 @@
                     {% else %}
                     <strong>Not available</strong>
                     {% endif %}
-                    <em>{{ fixture.xg_source or 'source unknown' }}</em>
+                    {% if fixture.xg_source_hint %}
+                    <em class="xg-source-hint">{{ fixture.xg_source_label or fixture.xg_source or 'source unknown' }}{% if fixture.xg_confidence_tier %} · {{ fixture.xg_confidence_tier }}{% endif %}</em>
+                    <p class="xg-source-hint-detail">{{ fixture.xg_source_hint }}</p>
+                    {% else %}
+                    <em class="xg-source-hint">{{ fixture.xg_source or 'source unknown' }}</em>
+                    {% endif %}
                 </div>
                 <div class="rationale-tile">
                     <span class="rt-label">{% if fixture.is_cup_competition %}Cup / Stage{% else %}Table Context{% endif %}</span>
@@ -243,7 +248,7 @@
         <div class="dq-panel" style="margin-bottom:14px;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:rgba(2,6,23,0.45);font-size:0.76em;line-height:1.45;">
             <div class="section-title" style="margin-bottom:6px;">📡 Data coverage (inputs)</div>
             <p style="color:var(--text);margin-bottom:6px;"><strong>{{ fixture.data_quality.score_pct }}%</strong> of ideal match inputs present
-            {% if fixture.xg_source %} · xG: <code style="font-size:0.85em;">{{ fixture.xg_source }}</code>{% endif %}</p>
+            {% if fixture.xg_source %} · xG: <span class="xg-source-hint" style="font-size:0.85em;">{{ fixture.xg_source_label or fixture.xg_source }}{% if fixture.xg_confidence_tier %} ({{ fixture.xg_confidence_tier }}){% endif %}</span>{% endif %}</p>
             {% if fixture.data_quality.full_scope %}
             <p style="color:var(--neon-value);font-weight:700;">Full-scope coverage (≥85%) — multi-market signals most reliable.</p>
             {% elif fixture.data_quality.strong_scope %}
