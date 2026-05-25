@@ -479,7 +479,7 @@ def resolve_scraped_xg(
 
     current = str(enriched.get("xg_source") or "").lower()
     always_deep = os.getenv("HIBS_ALWAYS_DEEP_SCRAPE", "1").lower() not in ("0", "false", "no", "off")
-    if current in ("api_fixture_xg", "stats_api_xg") and not always_deep:
+    if current in ("api_fixture_xg", "api_statistics_xg", "stats_api_xg") and not always_deep:
         return None
 
     from hibs_predictor.fixture_utils import fixture_team_id, fixture_team_name

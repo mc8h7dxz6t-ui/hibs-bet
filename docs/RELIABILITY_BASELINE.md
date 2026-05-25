@@ -30,7 +30,7 @@ Prioritises **consistency over new features** — enables player/injury/lineup l
 | `HIBS_RESULTS_FETCH_EVENTS` | `1` | Goal scorers on Recent results via API-Football `fixtures/events` (default on). |
 | `HIBS_RESULTS_MAX_EVENT_FETCHES` | `12` | Max new events API calls per results refresh (24h per-fixture cache). |
 
-Also set by the script (not injury/lineup specific): `HIBS_FETCH_DAYS=7`, `HIBS_MAX_DATA=1`, `HIBS_ENABLE_FOTMOB_XG=1`, `HIBS_DASHBOARD_LITE=0`, `HIBS_WARM_FIXTURE_CACHE=1`.
+Also set by the script (not injury/lineup specific): `HIBS_FETCH_DAYS=7`, `HIBS_MAX_DATA=1`, `HIBS_ENABLE_FOTMOB_XG=1`, `HIBS_FETCH_FIXTURE_STATISTICS_XG=1`, `HIBS_DASHBOARD_LITE=0`, `HIBS_WARM_FIXTURE_CACHE=1`.
 
 ## xG (post–81af3d5 beef-up)
 
@@ -47,7 +47,7 @@ Priority stays **fixture API xG first**; supplemental scrapers only upgrade (nev
 
 Optional: `HIBS_MEASURED_XG_LAMBDA_BOOST=0.02` slightly widens calibrated Poisson λ for measured xG only (leave at `0` if you prefer no λ nudge).
 
-After deploy, bump clears stale enriched rows: fixture cache **v25** — run cache clear once (see below).
+After deploy, bump clears stale enriched rows: fixture cache **v26** — run cache clear once (see below).
 
 ## Auth (manual — never in git)
 
@@ -55,7 +55,7 @@ After the script runs, add to `/opt/hibs-bet/.env`:
 
 ```bash
 HIBS_SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
-HIBS_AUTH_PASSWORD=<strong password>
+HIBS_AUTH_PASSWORD=<strong password>   # or HIBS_HIBS_PASSWORD
 # optional: HIBS_AUTH_USERNAME=admin  HIBS_AUTH_PUBLIC_HEALTH=1
 sudo systemctl restart hibs-bet
 ```
@@ -89,7 +89,7 @@ Check `/api/health` for API quota and enrichment errors.
 
 ## World Cup / international period
 
-**No manual switch on 1 Jun 2026.** Leave `HIBS_TOURNAMENT_FOCUS` unset on the VPS (do not set `=0` in `apply-vps-safe-production.sh`). The app turns international-default fetch on at the first dashboard load on or after **2026-06-01** (UTC), and off again after **2026-07-18**. No cache bump needed solely for the date switch — only when deploying code that changes enrich fields (fixture cache **v25**).
+**No manual switch on 1 Jun 2026.** Leave `HIBS_TOURNAMENT_FOCUS` unset on the VPS (do not set `=0` in `apply-vps-safe-production.sh`). The app turns international-default fetch on at the first dashboard load on or after **2026-06-01** (UTC), and off again after **2026-07-18**. No cache bump needed solely for the date switch — only when deploying code that changes enrich fields (fixture cache **v26**).
 
 Override only when needed:
 

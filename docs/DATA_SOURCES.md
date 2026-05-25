@@ -19,7 +19,7 @@ Coverage scoring: `src/hibs_predictor/data_quality.py` (`full_scope` ≥ **85%**
 
 | Source | Role | Env / notes |
 |--------|------|-------------|
-| API-Football (api-sports) | Fixtures, recent matches, team stats, standings, injuries, squad depth, odds, fixture xG when present | `API_SPORTS_*`; `HIBS_DISABLE_API_SPORTS`, `HIBS_SKIP_API_*`, `HIBS_ENABLE_API_SQUAD_DEPTH=1` |
+| API-Football (api-sports) | Fixtures, recent matches, team stats, standings, injuries, squad depth, odds, fixture xG when present; **`fixtures/statistics` Expected Goals** when fixture payload xG is empty | `API_SPORTS_*`; `HIBS_FETCH_FIXTURE_STATISTICS_XG=1` (budget `HIBS_FETCH_FIXTURE_STATISTICS_XG_MAX`, default 24/refresh, 12h cache); `HIBS_DISABLE_API_SPORTS`, `HIBS_SKIP_API_*` |
 | Football-Data.org | Fixture + standings fallback | `FOOTBALL_DATA_ORG_KEY`, `HIBS_PREFER_FOOTBALL_DATA_FIXTURES` |
 | The Odds API | 1X2 + cross-book lines | `ODDS_API_KEY`; skip via `HIBS_SKIP_ODDS_API` |
 | RapidAPI stats (api-football.com host) | Fixture-level xG | `STATS_API_KEY` + `HIBS_MAX_DATA=1` (default skips Rapid xG) |
@@ -46,6 +46,8 @@ Coverage scoring: `src/hibs_predictor/data_quality.py` (`full_scope` ≥ **85%**
 |----------|---------|
 | `HIBS_MAX_DATA=1` | Prefer maximum safe inputs (Rapid xG, heavy scrapers, StatsBomb, FotMob domestic xG) |
 | `HIBS_ENABLE_FOTMOB_XG=1` | Force FotMob league-table xG for all mapped leagues (VPS safe profile sets this with `MAX_DATA`) |
+| `HIBS_FETCH_FIXTURE_STATISTICS_XG=1` | Call API-Football `fixtures/statistics` for fixtures still on goals_proxy (max `HIBS_FETCH_FIXTURE_STATISTICS_XG_MAX` per dashboard refresh) |
+| `HIBS_ENABLE_SOFASCORE_XG=1` | SofaScore team rolling xG when reachable (403 skipped gracefully; optional with `HIBS_MAX_DATA`) |
 | `HIBS_MEASURED_XG_LAMBDA_BOOST` | Optional 0–0.03 nudge to calibrated λ when xG tier is measured (default `0` = off) |
 | `HIBS_MIN_ENRICH_LEAGUES` | Comma list to **prioritize** enrichment (e.g. `SCOTLAND,EPL,UCL`). Empty = all `ALL_LEAGUE_CODES` |
 | `HIBS_ENABLE_STATSBOMB_LIGHT=1` | Goals proxy for leagues in open-data + UEFA cups |

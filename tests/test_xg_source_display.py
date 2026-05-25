@@ -8,7 +8,9 @@ from hibs_predictor.xg_source_display import (
 
 def test_labels_and_tiers():
     assert "API match" in xg_source_label("api_fixture_xg")
+    assert "statistics" in xg_source_label("api_statistics_xg").lower()
     assert xg_confidence_tier("api_fixture_xg") == "strong"
+    assert xg_confidence_tier("api_statistics_xg") == "strong"
     assert xg_confidence_tier("fotmob_league_xg", meta={"home_n": 4, "away_n": 4}) == "usable"
     assert xg_confidence_tier("goals_proxy") == "proxy"
     assert "cautiously" in xg_source_hint("goals_proxy").lower()

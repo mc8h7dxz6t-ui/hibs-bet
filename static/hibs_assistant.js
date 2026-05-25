@@ -495,9 +495,19 @@
         if (pkt.bet_confidence != null) {
             html += '<p class="ac-line" style="font-size:0.84em;">Bet confidence: <strong>' + pkt.bet_confidence + '%</strong></p>';
         }
+        if (pkt.xg_home != null || pkt.xg_away != null) {
+            var xh = pkt.xg_home != null ? Number(pkt.xg_home).toFixed(2) : '—';
+            var xa = pkt.xg_away != null ? Number(pkt.xg_away).toFixed(2) : '—';
+            html += '<p class="ac-line" style="font-size:0.9em;"><strong style="color:var(--neon-value);">xG ' + xh + ' – ' + xa + '</strong>';
+            if (pkt.xg_source_label) html += ' <span style="color:var(--muted);font-size:0.85em;">(' + esc(pkt.xg_source_label) + ')</span>';
+            html += '</p>';
+            if (pkt.xg_confidence_tier === 'proxy') {
+                html += '<p class="ac-line" style="font-size:0.78em;color:#fde68a;">⚠ Proxy xG only — treat picks cautiously.</p>';
+            }
+        }
         if (pkt.sources_summary) {
             html += '<p class="ac-line" style="font-size:0.82em;color:var(--muted);">Sources: ' + esc(pkt.sources_summary) + '</p>';
-        } else if (pkt.xg_source) {
+        } else if (pkt.xg_source && pkt.xg_home == null && pkt.xg_away == null) {
             html += '<p class="ac-line" style="font-size:0.84em;color:var(--muted);">xG source: ' + esc(pkt.xg_source) + '</p>';
         }
         if (pkt.has_value_dual_agree) {

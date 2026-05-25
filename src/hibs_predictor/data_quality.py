@@ -110,7 +110,7 @@ def _effective_xg_source(enriched: Dict[str, Any]) -> str:
 def _xg_points(src: str, n_h: float, n_a: float, enriched: Optional[Dict[str, Any]] = None) -> float:
     s = (src or "unknown").lower()
     meta = (enriched or {}).get("scraped_xg_meta") or {}
-    if s == "api_fixture_xg":
+    if s in ("api_fixture_xg", "api_statistics_xg"):
         return 18.0
     if s == "stats_api_xg":
         return 15.0

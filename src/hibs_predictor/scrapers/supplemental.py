@@ -49,7 +49,7 @@ def _skip_heavy_when_api_strong(enriched: Dict[str, Any]) -> tuple:
     if not enriched.get("odds_available"):
         return False, ""
     src = str(enriched.get("xg_source") or "").lower()
-    if src not in ("api_fixture_xg", "stats_api_xg"):
+    if src not in ("api_fixture_xg", "api_statistics_xg", "stats_api_xg"):
         return False, ""
     try:
         xh = float(enriched.get("xg_home") or 0)

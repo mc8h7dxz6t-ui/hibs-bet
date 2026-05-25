@@ -64,12 +64,25 @@
         </div>
     </div>
 
+    {% set card_xh = fixture.xg_home if fixture.xg_home is defined and fixture.xg_home is not none else (p.expected_goals_home if show_pred else none) %}
+    {% set card_xa = fixture.xg_away if fixture.xg_away is defined and fixture.xg_away is not none else (p.expected_goals_away if show_pred else none) %}
+    {% if card_xh is not none or card_xa is not none %}
+    <div class="fixture-xg-row" style="display:flex;align-items:center;justify-content:center;gap:10px;margin:6px 0 4px;font-size:0.92em;">
+        <span style="color:var(--muted);font-size:0.78em;">xG</span>
+        <strong style="font-size:1.05em;color:var(--neon-value);">{% if card_xh is not none %}{{ "%.2f"|format(card_xh) }}{% else %}—{% endif %} – {% if card_xa is not none %}{{ "%.2f"|format(card_xa) }}{% else %}—{% endif %}</strong>
+        {% if fixture.xg_confidence_tier == 'proxy' %}
+        <span style="font-size:0.72em;color:#fde68a;font-weight:600;" title="{{ fixture.xg_source_hint or 'Goals-based estimate only' }}">⚠ proxy</span>
+        {% elif fixture.xg_source_label %}
+        <span style="font-size:0.68em;color:var(--muted);max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ fixture.xg_source_hint or '' }}">{{ fixture.xg_source_label }}</span>
+        {% endif %}
+    </div>
+    {% endif %}
     {% if show_pred %}
     <!-- MARKET PILLS -->
     <div class="market-pills">
         <span class="mpill">BTTS <strong>{{ p.btts_probability_pct }}%</strong></span>
         <span class="mpill">O2.5 <strong>{{ p.over25_probability_pct }}%</strong></span>
-        <span class="mpill">xG <strong>{{ p.expected_goals_home }}/{{ p.expected_goals_away }}</strong></span>
+        <span class="mpill">xG <strong>{% if card_xh is not none %}{{ "%.2f"|format(card_xh) }}{% else %}{{ p.expected_goals_home }}{% endif %}/{% if card_xa is not none %}{{ "%.2f"|format(card_xa) }}{% else %}{{ p.expected_goals_away }}{% endif %}</strong></span>
         <span class="mpill conf">Conf <strong>{{ p.confidence_pct }}%</strong></span>
         {% if p.score_and_btts_pct is defined %}
         <span class="mpill" title="Poisson joint">H+BTTS <strong>{{ p.score_and_btts_pct.home_win_and_btts }}%</strong></span>

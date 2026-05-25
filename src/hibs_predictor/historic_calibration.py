@@ -59,7 +59,7 @@ def xg_quality_tier(xg_source: Any) -> str:
         return "low"
     if "understat" in s and "proxy" not in s:
         return "high"
-    if any(m in s for m in ("api_fixture_xg", "api_xg", "stats_api_xg", "stats_api")):
+    if any(m in s for m in ("api_fixture_xg", "api_statistics_xg", "api_xg", "stats_api_xg", "stats_api")):
         return "high"
     if any(m in s for m in ("scraped_recent", "api_season_team")):
         return "high"

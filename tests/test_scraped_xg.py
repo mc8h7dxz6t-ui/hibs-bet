@@ -36,6 +36,13 @@ def test_skips_when_api_fixture_xg_present(monkeypatch):
     assert resolve_scraped_xg(fixture, "EPL", enriched) is None
 
 
+def test_skips_when_api_statistics_xg_present(monkeypatch):
+    monkeypatch.setenv("HIBS_ALWAYS_DEEP_SCRAPE", "0")
+    enriched = _base_enriched(xg_source="api_statistics_xg", xg_home=1.4, xg_away=1.1)
+    fixture = {"teams": {"home": {"id": 1}, "away": {"id": 2}}}
+    assert resolve_scraped_xg(fixture, "EPL", enriched) is None
+
+
 def test_recent_api_xg_beats_statsbomb_on_cup(monkeypatch):
     monkeypatch.delenv("HIBS_ENABLE_STATSBOMB_LIGHT", raising=False)
     monkeypatch.delenv("HIBS_MAX_DATA", raising=False)

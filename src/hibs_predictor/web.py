@@ -28,7 +28,7 @@ except Exception as exc:
 from flask import Flask, render_template, jsonify, request, abort, g, has_request_context, make_response, redirect, url_for
 from hibs_predictor.auth import (
     auth_enabled,
-    check_credentials,
+    check_password,
     init_app as init_auth,
     is_logged_in,
     login_required,
@@ -132,7 +132,7 @@ def _api_football_season_year(now: datetime) -> int:
 _FDO_CALENDAR_COMPS = frozenset({"WC", "EC", "UNL", "CL", "EL", "UECL"})
 # UEFA club cups: API-Football season id is Jul-based; FDO often 403/429 on finals week.
 _API_FIRST_FIXTURE_LEAGUES = frozenset({"UCL", "EUROPA_LEAGUE", "UECL"})
-_FIXTURE_CACHE_VERSION = "v25"
+_FIXTURE_CACHE_VERSION = "v26"
 _EMPTY_FIXTURE_CACHE_TTL_HOURS = 0.2  # short negative cache — avoid hour-long empty poison
 
 
@@ -1745,6 +1745,9 @@ def _dashboard_info_box(fixture_coverage: Dict[str, Any], total: int) -> Dict[st
 
 
 def fetch_all_fixtures(*, attach_live: bool = False, include_domestic: bool = False) -> Dict:
+    from hibs_predictor.fixture_statistics_xg import reset_statistics_xg_budget
+
+    reset_statistics_xg_budget()
     cache = Cache()
     _maybe_prune_cache(cache)
     ttl = _cache_ttl_hours(1.0)
@@ -1939,10 +1942,10 @@ def login():
     next_url = safe_next_url(request.form.get("next") or request.args.get("next"))
     error = None
     if request.method == "POST":
-        if check_credentials(request.form.get("username", ""), request.form.get("password", "")):
+        if check_password(request.form.get("password", "")):
             login_user()
             return redirect(next_url)
-        error = "Invalid username or password."
+        error = "Incorrect password."
     return render_template("login.html", error=error, next_url=next_url)
 
 

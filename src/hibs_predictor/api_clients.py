@@ -435,11 +435,22 @@ class ApiSportsFootballClient(BaseApiClient):
         data = self._get_json(endpoint, params=params)
         return data.get("response", [{}])[0] if data.get("response") else {}
 
-    def fetch_fixture_statistics(self, fixture_id: int) -> List[Dict[str, Any]]:
+    def fetch_fixture_statistics(
+        self,
+        fixture_id: int,
+        *,
+        ttl_hours: float = 12.0,
+    ) -> List[Dict[str, Any]]:
         """Post-match / live statistics (Expected Goals when provider supplies them)."""
+        cache_key = f"api_sports_fixture_stats_{int(fixture_id)}"
+        cached = self.cache.get(cache_key, ttl_hours=ttl_hours)
+        if isinstance(cached, list):
+            return cached
         data = self._get_json("fixtures/statistics", params={"fixture": int(fixture_id)})
         resp = data.get("response")
-        return resp if isinstance(resp, list) else []
+        out = resp if isinstance(resp, list) else []
+        self.cache.set(cache_key, out, ttl_hours=ttl_hours)
+        return out
 
     def fetch_fixtures_by_league(
         self,

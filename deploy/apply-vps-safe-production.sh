@@ -111,6 +111,8 @@ ${SAFE_MARKER}
 HIBS_FETCH_DAYS=7
 HIBS_MAX_DATA=1
 HIBS_ENABLE_FOTMOB_XG=1
+HIBS_FETCH_FIXTURE_STATISTICS_XG=1
+HIBS_FETCH_FIXTURE_STATISTICS_XG_MAX=24
 HIBS_DASHBOARD_LITE=0
 HIBS_ALWAYS_DEEP_SCRAPE=0
 HIBS_SKIP_HEAVY_WHEN_API_STRONG=1
@@ -177,7 +179,7 @@ echo "Done. Reliability baseline applied (see docs/RELIABILITY_BASELINE.md)."
 echo "  Player/injury/lineup ON · squad depth OFF · tournament focus OFF · API limit 400/h"
 echo "Auth: HIBS_AUTH_ENABLED=1 is set. Add to ${ENV_FILE} (do not commit):"
 echo "  HIBS_SECRET_KEY=<run: python3 -c \"import secrets; print(secrets.token_hex(32))\">"
-echo "  HIBS_AUTH_PASSWORD=<choose a strong password>"
+echo "  HIBS_AUTH_PASSWORD=<choose a strong password>  # or HIBS_HIBS_PASSWORD"
 echo "  # optional: HIBS_AUTH_USERNAME=admin  HIBS_AUTH_PUBLIC_HEALTH=1"
 echo "Then: systemctl restart hibs-bet"
 echo "After deploy or key change, clear fixture cache once:"

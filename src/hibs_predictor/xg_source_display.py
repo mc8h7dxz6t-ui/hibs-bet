@@ -9,6 +9,7 @@ from hibs_predictor.historic_calibration import xg_quality_tier
 
 _LABELS: Dict[str, str] = {
     "api_fixture_xg": "API match xG (both teams)",
+    "api_statistics_xg": "API-Football match statistics xG",
     "stats_api_xg": "Stats API match xG",
     "understat_xg": "Understat match xG",
     "understat_team_xg": "Understat team rolling xG",
@@ -31,6 +32,7 @@ _LABELS: Dict[str, str] = {
 
 _HINTS: Dict[str, str] = {
     "api_fixture_xg": "Measured expected goals for this fixture from API-Football.",
+    "api_statistics_xg": "Measured xG from API-Football fixtures/statistics (Expected Goals).",
     "stats_api_xg": "Measured match xG from the stats feed.",
     "understat_xg": "Fixture-level xG from Understat (strong for big leagues).",
     "understat_team_xg": "Team rolling xG from Understat when the exact match row is missing.",

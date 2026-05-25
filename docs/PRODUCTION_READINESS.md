@@ -21,7 +21,7 @@ Legend: **GREEN** = OK for next few weeks · **AMBER** = works but needs attenti
 | `/api/health` unauthenticated | **AMBER** | Returns `login_required` (auth on); use session or `HIBS_AUTH_PUBLIC_HEALTH=1` if needed |
 | International / WC window | **GREEN** | Auto 2026-06-01 → 2026-07-18 (no env switch); `HIBS_TOURNAMENT_FOCUS=0` opt-out only; `?domestic=1` escape |
 | Season codes (May 2026) | **GREEN** | Jul-based `2025` + Nordic calendar-year `2026` candidates in `season.py` |
-| Fixture cache version | **GREEN** | `v25` in `web.py`; clear after deploy if enrich fields stale |
+| Fixture cache version | **GREEN** | `v26` in `web.py`; clear after deploy if enrich fields stale |
 | Partial enrich cache bust | **GREEN** | Thin rows (missing recent/stats) bypass stale enriched cache |
 | xG chain | **GREEN** | API → Understat light → FotMob → recent API xG → season team; FBref blocked on VPS |
 | Rate limiter / 429 guards | **GREEN** | Hourly cap 400, enrich semaphore, squad depth off, partial bust |
@@ -91,7 +91,7 @@ Focused suites also green: `test_tournament_focus`, `test_prediction_log_monitor
 | Empty audit DB | **AMBER** | Log in and load `/` once per match day before kickoff |
 | Auth blocks health curl | **AMBER** | Expected with `HIBS_AUTH_ENABLED=1` |
 | VPS env duplicate keys | **GREEN** | `apply-vps-safe-production.sh` dedupes `HIBS_*` |
-| Stale fixture cache post-deploy | **GREEN** | Cache **v25**; clear via UI or `rm .cache/all_fixtures*` |
+| Stale fixture cache post-deploy | **GREEN** | Cache **v26**; clear via UI or `rm .cache/all_fixtures*` |
 | `deploy_to_vps.sh` default host `.75` | **AMBER** | Production is **`.73`** — use `DEPLOY_HOST=77.68.89.73` |
 
 ---

@@ -304,6 +304,9 @@
             {% if fixture.xg_source_hint %}
             <p class="xg-source-hint-detail" style="margin:0;font-size:0.72em;color:var(--muted);line-height:1.4;">{{ fixture.xg_source_hint }}</p>
             {% endif %}
+            {% if fixture.xg_confidence_tier == 'proxy' %}
+            <p style="margin:8px 0 0;font-size:0.78em;color:#fde68a;font-weight:600;">⚠ Goals-based proxy only — no measured xG for this fixture. Treat model edges cautiously.</p>
+            {% endif %}
         </div>
         {% endif %}
         <!-- LEAGUE TABLE / CUP -->

@@ -801,7 +801,14 @@ class DataAggregator:
 
         try:
             enriched["xg_home"], enriched["xg_away"], enriched["xg_source"] = self._fetch_expected_goals(
-                fixture_id_for_xg, home_rates, away_rates, league.get("strength_factor", 1.0)
+                fixture_id_for_xg,
+                home_rates,
+                away_rates,
+                league.get("strength_factor", 1.0),
+                home_team_id=home_id,
+                away_team_id=away_id,
+                home_name=home_nm,
+                away_name=away_nm,
             )
         except Exception as exc:
             print(f"[enrich xg] {league_code} fid={fixture_id_str}: {exc!r}")
@@ -1222,11 +1229,16 @@ class DataAggregator:
         home_rates: Dict[str, float],
         away_rates: Dict[str, float],
         league_strength: float,
+        *,
+        home_team_id: Optional[int] = None,
+        away_team_id: Optional[int] = None,
+        home_name: Optional[str] = None,
+        away_name: Optional[str] = None,
     ) -> Tuple[float, float, str]:
         """Expected goals from APIs; fall back to attack vs defence estimates from recent real results.
 
         Returns (xg_home, xg_away, source_tag) where source_tag is one of:
-        api_fixture_xg, stats_api_xg, mixed_api_goals_proxy, goals_proxy.
+        api_fixture_xg, api_statistics_xg, stats_api_xg, mixed_api_goals_proxy, goals_proxy.
         """
         if not fixture_id:
             h, a = self._lambda_from_rates(home_rates, away_rates, league_strength)
@@ -1264,9 +1276,14 @@ class DataAggregator:
             except Exception:
                 pass
 
+        hid_fixture: Optional[int] = None
+        aid_fixture: Optional[int] = None
         if "api_sports" in self.clients:
             try:
                 fixture_data = self.clients["api_sports"].fetch_fixture(int(fixture_id))
+                teams = fixture_data.get("teams") or {}
+                hid_fixture = (teams.get("home") or {}).get("id")
+                aid_fixture = (teams.get("away") or {}).get("id")
                 stats_list = fixture_data.get("statistics") or []
                 if len(stats_list) >= 2:
                     for block in stats_list:
@@ -1280,8 +1297,7 @@ class DataAggregator:
                             val = float(raw)
                         except (TypeError, ValueError):
                             continue
-                        hid = fixture_data.get("teams", {}).get("home", {}).get("id")
-                        if tid == hid:
+                        if tid == hid_fixture:
                             xg_home = val
                             filled_via_api_fixture = True
                         else:
@@ -1300,6 +1316,30 @@ class DataAggregator:
             result = (float(xg_home), float(xg_away), tag)
             self.cache.set(cache_key, result, ttl_hours=6)
             return result
+
+        if "api_sports" in self.clients:
+            try:
+                from hibs_predictor.fixture_statistics_xg import fetch_fixture_statistics_xg
+
+                prior = "goals_proxy"
+                if (xg_home is not None and xg_home > 0) or (xg_away is not None and xg_away > 0):
+                    prior = "mixed_api_goals_proxy"
+                stats_hit = fetch_fixture_statistics_xg(
+                    self.clients["api_sports"],
+                    self.cache,
+                    int(fixture_id),
+                    home_team_id=home_team_id or hid_fixture,
+                    away_team_id=away_team_id or aid_fixture,
+                    home_name=home_name,
+                    away_name=away_name,
+                    current_source=prior,
+                )
+                if stats_hit:
+                    result = stats_hit
+                    self.cache.set(cache_key, result, ttl_hours=6)
+                    return result
+            except Exception:
+                pass
 
         est_h, est_a = self._lambda_from_rates(home_rates, away_rates, league_strength)
         use_h = xg_home if xg_home and xg_home > 0 else est_h

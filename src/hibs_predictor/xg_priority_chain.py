@@ -35,6 +35,12 @@ def xg_priority_chain_dict() -> Dict[str, Any]:
             "leagues": "All when API returns per-fixture xG (often top leagues + some cups).",
         },
         {
+            "rank": "1b",
+            "source": "api_statistics_xg",
+            "when": "fixtures/statistics Expected Goals when fixture xG empty (HIBS_FETCH_FIXTURE_STATISTICS_XG=1; budget HIBS_FETCH_FIXTURE_STATISTICS_XG_MAX).",
+            "leagues": "Live/finished fixtures where provider publishes stats xG.",
+        },
+        {
             "rank": "2",
             "source": "stats_api_xg",
             "when": "RapidAPI stats feed returns both sides (skipped when HIBS_SKIP_RAPID_STATS_XG=1).",
