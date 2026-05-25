@@ -716,6 +716,15 @@ class DataAggregator:
             print(f"[enrich away_stats] {league_code} fid={fixture_id_str}: {exc!r}")
             enriched["away_stats"] = {}
 
+        league_strength = float(league.get("strength_factor", 1.0))
+        if home_id and away_id:
+            try:
+                from hibs_predictor.scraped_xg import apply_season_team_xg_from_stats
+
+                apply_season_team_xg_from_stats(enriched, league_strength)
+            except Exception as exc:
+                print(f"[enrich season_team_xg] {league_code} fid={fixture_id_str}: {exc!r}")
+
         try:
             enriched["home_form"] = TeamStrengthCalculator.calculate_form_strength(
                 enriched["home_recent"], home_id
@@ -799,21 +808,29 @@ class DataAggregator:
         enriched["home_position"] = normalize_position_dict(hp)
         enriched["away_position"] = normalize_position_dict(ap)
 
+        season_xg_tag = str(enriched.get("xg_source") or "")
         try:
-            enriched["xg_home"], enriched["xg_away"], enriched["xg_source"] = self._fetch_expected_goals(
+            xh, xa, xg_tag = self._fetch_expected_goals(
                 fixture_id_for_xg,
                 home_rates,
                 away_rates,
-                league.get("strength_factor", 1.0),
+                league_strength,
                 home_team_id=home_id,
                 away_team_id=away_id,
                 home_name=home_nm,
                 away_name=away_nm,
             )
+            if xg_tag in ("api_fixture_xg", "api_statistics_xg", "stats_api_xg"):
+                enriched["xg_home"], enriched["xg_away"], enriched["xg_source"] = float(xh), float(xa), xg_tag
+            elif season_xg_tag not in ("api_season_team_xg", "team_season_xg"):
+                enriched["xg_home"], enriched["xg_away"], enriched["xg_source"] = float(xh), float(xa), xg_tag
+            elif xg_tag == "mixed_api_goals_proxy":
+                enriched["xg_home"], enriched["xg_away"], enriched["xg_source"] = float(xh), float(xa), xg_tag
         except Exception as exc:
             print(f"[enrich xg] {league_code} fid={fixture_id_str}: {exc!r}")
-            lam_h, lam_a = self._lambda_from_rates(home_rates, away_rates, league.get("strength_factor", 1.0))
-            enriched["xg_home"], enriched["xg_away"], enriched["xg_source"] = float(lam_h), float(lam_a), "goals_proxy"
+            if season_xg_tag not in ("api_season_team_xg", "team_season_xg"):
+                lam_h, lam_a = self._lambda_from_rates(home_rates, away_rates, league_strength)
+                enriched["xg_home"], enriched["xg_away"], enriched["xg_source"] = float(lam_h), float(lam_a), "goals_proxy"
 
         try:
             bundle = self._fetch_odds_bundle(fixture, league_code)
@@ -996,7 +1013,7 @@ class DataAggregator:
 
         season = season or (datetime.now().year if datetime.now().month >= 7 else datetime.now().year - 1)
         cache_key = f"team_stats_{team_id}_{league_code}_{season}"
-        cached = self.cache.get(cache_key, ttl_hours=12)
+        cached = self.cache.get(cache_key, ttl_hours=18)
         if cached:
             return cached
 
@@ -1076,7 +1093,7 @@ class DataAggregator:
             stats.setdefault("expected_goals_against", float(stats.get("goals_against", 0)) * 0.92)
 
         if _has_stats(stats):
-            self.cache.set(cache_key, stats, ttl_hours=12)
+            self.cache.set(cache_key, stats, ttl_hours=18)
         else:
             self.cache.set(cache_key, stats, ttl_hours=0.2)
         return stats

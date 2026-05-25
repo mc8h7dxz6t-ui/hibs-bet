@@ -16,6 +16,7 @@ _LABELS: Dict[str, str] = {
     "fotmob_league_xg": "FotMob season table (team attack vs opponent defence)",
     "scraped_recent_xg": "Recent finished matches with API xG stats",
     "api_season_team_xg": "API season goals profile (attack vs defence blend)",
+    "team_season_xg": "Season goals attack/defence blend (API team stats)",
     "sofascore_xg": "SofaScore team xG averages",
     "fbref_schedule_xg": "FBref schedule xG",
     "scottish_fbref_xg": "FBref Scottish schedule xG",
@@ -89,7 +90,7 @@ def xg_confidence_tier(
                 return "usable"
             return "thin"
         return "strong"
-    if s in ("scraped_recent_xg", "api_season_team_xg"):
+    if s in ("scraped_recent_xg", "api_season_team_xg", "team_season_xg"):
         if home_recent_n >= 4 and away_recent_n >= 4:
             return "usable"
         return "thin"
@@ -109,7 +110,7 @@ def xg_source_hint(
     s = str(xg_source or "unknown").strip().lower()
     base = _HINTS.get(s) or _HINTS.get("unknown", "")
     meta = meta or {}
-    if s == "api_season_team_xg":
+    if s in ("api_season_team_xg", "team_season_xg"):
         hx = meta.get("home_xg_per_match")
         ax = meta.get("away_xg_per_match")
         if hx is not None and ax is not None:

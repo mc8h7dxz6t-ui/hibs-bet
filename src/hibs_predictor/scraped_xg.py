@@ -138,13 +138,18 @@ def _fetch_understat_row(
     return None
 
 
+_MEASURED_FIXTURE_XG_SOURCES = frozenset(
+    {"api_fixture_xg", "api_statistics_xg", "stats_api_xg"}
+)
+
+
 def _team_season_rates(stats: Dict[str, Any]) -> Optional[Tuple[float, float, bool]]:
     """Per-match attack/defence rates; True third value when API season xG totals were used."""
     try:
         played = int(stats.get("played") or 0)
     except (TypeError, ValueError):
         return None
-    if played < 5:
+    if played < 3:
         return None
     measured = bool(stats.get("api_season_xg_measured"))
     if measured:
@@ -190,10 +195,39 @@ def _api_season_team_xg(
         "api_season_blend": True,
         "home_xg_per_match": round(h_for_pg, 3),
         "away_xg_per_match": round(a_for_pg, 3),
+        "home_xg_against_per_match": round(h_against_pg, 3),
+        "away_xg_against_per_match": round(a_against_pg, 3),
     }
     if h_meas or a_meas:
         meta["api_season_xg_measured"] = True
     return xh, xa, meta
+
+
+def apply_season_team_xg_from_stats(
+    enriched: Dict[str, Any],
+    league_strength: float,
+) -> bool:
+    """
+    Fill xg_home/xg_away from API team season stats before goals_proxy.
+
+    Does not overwrite measured fixture-level xG already on enriched.
+    """
+    current = str(enriched.get("xg_source") or "").lower()
+    if current in _MEASURED_FIXTURE_XG_SOURCES:
+        return False
+    hit = _api_season_team_xg(enriched, float(league_strength or 1.0))
+    if not hit:
+        return False
+    xh, xa, meta = hit
+    tag = "api_season_team_xg" if meta.get("api_season_xg_measured") else "team_season_xg"
+    enriched["xg_home"] = float(xh)
+    enriched["xg_away"] = float(xa)
+    enriched["xg_source"] = tag
+    enriched["scraped_xg_meta"] = meta
+    from hibs_predictor.xg_source_display import attach_xg_display_fields
+
+    attach_xg_display_fields(enriched, enriched)
+    return True
 
 
 def _try_understat(
@@ -330,7 +364,8 @@ def _try_api_season(
     hit = _api_season_team_xg(enriched, float(league or 1.0))
     if hit:
         xh, xa, meta = hit
-        return xh, xa, "api_season_team_xg", meta
+        tag = "api_season_team_xg" if meta.get("api_season_xg_measured") else "team_season_xg"
+        return xh, xa, tag, meta
     return None
 
 

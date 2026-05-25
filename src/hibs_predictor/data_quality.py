@@ -137,7 +137,7 @@ def _xg_points(src: str, n_h: float, n_a: float, enriched: Optional[Dict[str, An
         "fbref_schedule_avg_xg",
     ):
         return 15.0
-    if s == "api_season_team_xg":
+    if s in ("api_season_team_xg", "team_season_xg"):
         if meta.get("api_season_xg_measured"):
             return 15.0
         return 14.0

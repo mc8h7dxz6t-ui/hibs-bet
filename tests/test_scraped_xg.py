@@ -4,7 +4,11 @@ from unittest.mock import patch
 
 import pytest
 
-from hibs_predictor.scraped_xg import apply_scraped_xg_to_enriched, resolve_scraped_xg
+from hibs_predictor.scraped_xg import (
+    apply_scraped_xg_to_enriched,
+    apply_season_team_xg_from_stats,
+    resolve_scraped_xg,
+)
 
 
 def _base_enriched(**kwargs) -> dict:
@@ -94,7 +98,7 @@ def test_api_season_team_xg_when_stats_deep():
         with patch("hibs_predictor.scraped_xg._try_understat", return_value=None):
             with patch("hibs_predictor.scraped_xg._try_recent_api_xg", return_value=None):
                 out = apply_scraped_xg_to_enriched(fixture, "NORWAY_ELITESERIEN", enriched)
-    assert out["xg_source"] == "api_season_team_xg"
+    assert out["xg_source"] in ("api_season_team_xg", "team_season_xg")
     assert out.get("xg_source_label")
 
 
@@ -139,7 +143,29 @@ def test_fbref_skipped_when_blocked(monkeypatch):
         with patch("hibs_predictor.scraped_xg._try_understat", return_value=None):
             with patch("hibs_predictor.scraped_xg._try_recent_api_xg", return_value=None):
                 out = apply_scraped_xg_to_enriched(fixture, "SCOTLAND", enriched)
-    assert out["xg_source"] == "api_season_team_xg"
+    assert out["xg_source"] in ("api_season_team_xg", "team_season_xg")
+
+
+def test_apply_season_before_goals_proxy():
+    enriched = _base_enriched(xg_source="goals_proxy")
+    assert apply_season_team_xg_from_stats(enriched, 1.0) is True
+    assert enriched["xg_source"] in ("api_season_team_xg", "team_season_xg")
+    assert enriched.get("scraped_xg_meta", {}).get("home_xg_per_match") is not None
+
+
+def test_apply_season_skips_api_fixture_xg():
+    enriched = _base_enriched(xg_source="api_fixture_xg", xg_home=1.9, xg_away=0.8)
+    assert apply_season_team_xg_from_stats(enriched, 1.0) is False
+    assert enriched["xg_source"] == "api_fixture_xg"
+
+
+def test_team_season_xg_tag_when_goals_only_rates():
+    enriched = _base_enriched(
+        home_stats={"played": 12, "goals_for": 18, "goals_against": 14},
+        away_stats={"played": 12, "goals_for": 16, "goals_against": 15},
+    )
+    assert apply_season_team_xg_from_stats(enriched, 1.0) is True
+    assert enriched["xg_source"] == "team_season_xg"
 
 
 def test_attach_display_fields_on_apply():
