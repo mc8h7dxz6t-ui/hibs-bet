@@ -59,3 +59,4 @@ def test_odds_api_sport_keys():
 
     assert OddsApiClient.SPORT_KEYS["NORWAY_ELITESERIEN"] == "soccer_norway_eliteserien"
     assert OddsApiClient.SPORT_KEYS["FINLAND_VEIKKAUSLIIGA"] == "soccer_finland_veikkausliiga"
+    assert OddsApiClient.SPORT_KEYS["SCOTLAND"] == "soccer_spl"

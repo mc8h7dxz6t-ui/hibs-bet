@@ -330,6 +330,87 @@ def _empty_rates() -> Dict[str, float]:
     }
 
 
+def _odds_bookmaker_display_name(bm: Dict[str, Any]) -> str:
+    """Prefer human title from The Odds API (e.g. 'Bet Victor') over internal keys."""
+    return str(bm.get("title") or bm.get("name") or bm.get("key") or "").strip()
+
+
+def _odds_teams_match(fixture_home: str, fixture_away: str, event_home: str, event_away: str) -> bool:
+    from hibs_predictor.live_scores import _team_names_match
+
+    fh, fa = (fixture_home or "").strip(), (fixture_away or "").strip()
+    eh, ea = (event_home or "").strip(), (event_away or "").strip()
+    if not fh or not fa or not eh or not ea:
+        return False
+    if _team_names_match(fh, eh) and _team_names_match(fa, ea):
+        return True
+    return _team_names_match(fh, ea) and _team_names_match(fa, eh)
+
+
+def _odds_teams_swapped(fixture_home: str, fixture_away: str, event_home: str, event_away: str) -> bool:
+    from hibs_predictor.live_scores import _team_names_match
+
+    return _team_names_match(fixture_home or "", event_away or "") and _team_names_match(
+        fixture_away or "", event_home or ""
+    )
+
+
+def _odds_kickoff_matches(
+    fixture: Dict[str, Any],
+    event: Dict[str, Any],
+    *,
+    tolerance_hours: float = 6.0,
+) -> bool:
+    from hibs_predictor.display_tz import parse_kickoff_utc
+
+    fx_raw = fixture.get("date")
+    if fx_raw is None and isinstance(fixture.get("fixture"), dict):
+        fx_raw = fixture["fixture"].get("date")
+    fx_dt = parse_kickoff_utc(fx_raw)
+    ev_dt = parse_kickoff_utc(event.get("commence_time"))
+    if fx_dt is None or ev_dt is None:
+        return True
+    return abs((fx_dt - ev_dt).total_seconds()) <= tolerance_hours * 3600.0
+
+
+def _odds_event_matches_fixture(
+    event: Dict[str, Any],
+    fixture: Dict[str, Any],
+    home_name: str,
+    away_name: str,
+) -> bool:
+    eh = str(event.get("home_team") or "")
+    ea = str(event.get("away_team") or "")
+    if not _odds_teams_match(home_name, away_name, eh, ea):
+        return False
+    return _odds_kickoff_matches(fixture, event)
+
+
+def _odds_outcome_side(
+    outcome_name: str,
+    home_name: str,
+    away_name: str,
+    *,
+    teams_swapped: bool,
+) -> Optional[str]:
+    from hibs_predictor.live_scores import _team_names_match
+
+    oname = (outcome_name or "").strip()
+    if "draw" in oname.lower():
+        return "draw"
+    if teams_swapped:
+        if _team_names_match(away_name, oname):
+            return "home"
+        if _team_names_match(home_name, oname):
+            return "away"
+    else:
+        if _team_names_match(home_name, oname):
+            return "home"
+        if _team_names_match(away_name, oname):
+            return "away"
+    return None
+
+
 def _empty_odds_bundle() -> Dict[str, Any]:
     return {
         "odds_home": None,
@@ -1539,37 +1620,46 @@ class DataAggregator:
         if "odds_api" in self.clients and not _effective_skip_odds_api(self.clients):
             try:
                 events = self.clients["odds_api"].fetch_odds_for_league(league_code)
+                home_display = fixture_team_name(fixture, "home")
+                away_display = fixture_team_name(fixture, "away")
                 for event in events or []:
-                    eh = (event.get("home_team") or "").lower()
-                    ea = (event.get("away_team") or "").lower()
-                    if len(home_name) >= 3 and len(away_name) >= 3:
-                        if not (
-                            (home_name[:4] in eh or eh[:4] in home_name)
-                            and (away_name[:4] in ea or ea[:4] in away_name)
-                        ):
-                            continue
+                    if not _odds_event_matches_fixture(
+                        event, fixture, home_display, away_display
+                    ):
+                        continue
+                    swapped = _odds_teams_swapped(
+                        home_display,
+                        away_display,
+                        str(event.get("home_team") or ""),
+                        str(event.get("away_team") or ""),
+                    )
                     home_odds_list, draw_odds_list, away_odds_list = [], [], []
                     for bm in event.get("bookmakers", []) or []:
-                        bm_name = bm.get("name", "")
+                        bm_name = _odds_bookmaker_display_name(bm)
                         bm_odds: Dict[str, Any] = {"bookmaker": bm_name, "source": "the_odds_api"}
                         for market in bm.get("markets", []):
                             if market.get("key") != "h2h":
                                 continue
                             for o in market.get("outcomes", []):
-                                oname = (o.get("name") or "").lower()
                                 try:
                                     price = float(o.get("price", 0) or 0)
                                 except (TypeError, ValueError):
                                     continue
                                 if price <= 1.0:
                                     continue
-                                if "draw" in oname:
+                                side = _odds_outcome_side(
+                                    str(o.get("name") or ""),
+                                    home_display,
+                                    away_display,
+                                    teams_swapped=swapped,
+                                )
+                                if side == "draw":
                                     bm_odds["draw"] = price
                                     draw_odds_list.append(price)
-                                elif home_name[:4] in oname or oname[:4] in home_name:
+                                elif side == "home":
                                     bm_odds["home"] = price
                                     home_odds_list.append(price)
-                                else:
+                                elif side == "away":
                                     bm_odds["away"] = price
                                     away_odds_list.append(price)
                         if len(bm_odds) > 1:

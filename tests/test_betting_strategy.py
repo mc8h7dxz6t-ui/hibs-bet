@@ -10,6 +10,36 @@ import tempfile
 import pytest
 
 
+def test_odds_event_matches_fixture_by_teams_and_kickoff():
+    from hibs_predictor.data_aggregator import (
+        _odds_event_matches_fixture,
+        _odds_outcome_side,
+        _odds_teams_swapped,
+    )
+
+    fixture = {
+        "home": "Hibernian",
+        "away": "Celtic",
+        "date": "2026-05-25T15:00:00+00:00",
+    }
+    event_ok = {
+        "home_team": "Hibernian",
+        "away_team": "Celtic",
+        "commence_time": "2026-05-25T15:30:00Z",
+    }
+    event_wrong_ko = {**event_ok, "commence_time": "2026-05-26T15:00:00Z"}
+    event_wrong_teams = {**event_ok, "home_team": "Hearts", "away_team": "Rangers"}
+
+    assert _odds_event_matches_fixture(event_ok, fixture, "Hibernian", "Celtic")
+    assert not _odds_event_matches_fixture(event_wrong_ko, fixture, "Hibernian", "Celtic")
+    assert not _odds_event_matches_fixture(event_wrong_teams, fixture, "Hibernian", "Celtic")
+
+    swapped = _odds_teams_swapped("Hibernian", "Celtic", "Celtic", "Hibernian")
+    assert swapped
+    assert _odds_outcome_side("Celtic", "Hibernian", "Celtic", teams_swapped=swapped) == "home"
+    assert _odds_outcome_side("Hibernian", "Hibernian", "Celtic", teams_swapped=swapped) == "away"
+
+
 def test_compute_best_line_from_bookmakers():
     from hibs_predictor.data_aggregator import compute_best_line_from_bookmakers
 

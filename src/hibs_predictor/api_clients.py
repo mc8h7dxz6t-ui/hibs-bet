@@ -535,7 +535,7 @@ class OddsApiClient(BaseApiClient):
         "FA_CUP": "soccer_fa_cup",
         "COUPE_DE_FRANCE": "soccer_france_coupe_de_france",
         "DFB_POKAL": "soccer_germany_dfb_pokal",
-        "SCOTLAND": "soccer_scotland_premiership",
+        "SCOTLAND": "soccer_spl",
         "SCOTLAND_CHAMP": "soccer_scotland_championship",
         "UCL": "soccer_uefa_champs_league",
         "EUROPA_LEAGUE": "soccer_uefa_europa_league",
@@ -556,6 +556,10 @@ class OddsApiClient(BaseApiClient):
         "EUROS": "soccer_uefa_european_championship",
         "NATIONS_LEAGUE": "soccer_uefa_nations_league",
     }
+    # Legacy / alternate keys tried when the primary sport returns HTTP 404.
+    SPORT_KEY_FALLBACKS: Dict[str, List[str]] = {
+        "SCOTLAND": ["soccer_scotland_premiership"],
+    }
 
     def __init__(self, api_key: str) -> None:
         super().__init__(api_key, "https://api.the-odds-api.com/v4", "Authorization", "odds_api")
@@ -572,23 +576,32 @@ class OddsApiClient(BaseApiClient):
         cached = self.cache.get(cache_key, ttl_hours=1)
         if cached is not None:
             return cached
-        try:
-            url = f"{self.base_url}/sports/{sport_key}/odds"
-            params = {
-                "apiKey": self.api_key,
-                "regions": "uk",
-                "markets": "h2h,totals",
-                "oddsFormat": "decimal",
-                "dateFormat": "iso",
-            }
-            import requests as _req
-            resp = _req.get(url, params=params, timeout=15)
-            resp.raise_for_status()
-            data = resp.json()
-            self.cache.set(cache_key, data, ttl_hours=1)
-            return data if isinstance(data, list) else []
-        except Exception:
-            return []
+        keys_to_try = [sport_key] + [
+            k for k in self.SPORT_KEY_FALLBACKS.get(league_code, []) if k != sport_key
+        ]
+        import requests as _req
+
+        params = {
+            "apiKey": self.api_key,
+            "regions": "uk",
+            "markets": "h2h,totals",
+            "oddsFormat": "decimal",
+            "dateFormat": "iso",
+        }
+        for key in keys_to_try:
+            try:
+                url = f"{self.base_url}/sports/{key}/odds"
+                resp = _req.get(url, params=params, timeout=15)
+                if resp.status_code == 404:
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                out = data if isinstance(data, list) else []
+                self.cache.set(cache_key, out, ttl_hours=1)
+                return out
+            except Exception:
+                continue
+        return []
 
     def fetch_live_odds(self, league_key: str = "soccer_epl") -> List[Dict[str, Any]]:
         endpoint = f"sports/{league_key}/odds"
