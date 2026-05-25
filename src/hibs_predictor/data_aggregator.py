@@ -144,6 +144,42 @@ def _effective_skip_rapid_stats_xg(clients: Dict[str, Any]) -> bool:
     return True
 
 
+def _float_from_stat_block(block: Any) -> Optional[float]:
+    if block is None:
+        return None
+    if isinstance(block, dict):
+        for key in ("total", "average", "value"):
+            v = block.get(key)
+            if v is None:
+                continue
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                continue
+        return None
+    try:
+        return float(block)
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_xg_totals_from_api_stats(team_stats: Dict[str, Any]) -> Tuple[Optional[float], Optional[float]]:
+    """
+    Season xG totals from API-Football teams/statistics when present (goals.for.expected etc.).
+    Returns (xg_for_total, xg_against_total) or (None, None).
+    """
+    goals = team_stats.get("goals") if isinstance(team_stats.get("goals"), dict) else {}
+    xg_for = _float_from_stat_block((goals.get("for") or {}).get("expected"))
+    xg_against = _float_from_stat_block((goals.get("against") or {}).get("expected"))
+    if xg_for is None:
+        xg_for = _float_from_stat_block(team_stats.get("expected_goals"))
+    if xg_against is None:
+        xg_against = _float_from_stat_block(team_stats.get("expected_goals_against"))
+    if xg_for is not None and xg_for > 0.04:
+        return xg_for, xg_against if (xg_against is not None and xg_against > 0) else xg_for
+    return None, None
+
+
 def _extract_goals_totals_from_api_stats(team_stats: Dict[str, Any]) -> Tuple[int, int]:
     """Normalize API-Football teams/statistics goals shape to (goals_for, goals_against)."""
     goals = team_stats.get("goals") or {}
@@ -983,6 +1019,7 @@ class DataAggregator:
                         played_n = int(played_total or 0)
                     except (TypeError, ValueError):
                         played_n = 0
+                    xg_for_t, xg_against_t = _extract_xg_totals_from_api_stats(team_stats)
                     stats = {
                         "goals_for": goals_for,
                         "goals_against": goals_against,
@@ -992,6 +1029,14 @@ class DataAggregator:
                         "draws": (fixtures_blk.get("draws", {}) or {}).get("total", 0),
                         "losses": (fixtures_blk.get("loses", {}) or {}).get("total", 0),
                     }
+                    if xg_for_t is not None and played_n >= 3:
+                        stats["xg_for"] = float(xg_for_t)
+                        if xg_against_t is not None:
+                            stats["xg_against"] = float(xg_against_t)
+                        stats["xg_for_pg"] = float(xg_for_t) / played_n
+                        if xg_against_t is not None:
+                            stats["xg_against_pg"] = float(xg_against_t) / played_n
+                        stats["api_season_xg_measured"] = True
                     if goals_for or goals_against or played_n:
                         break
                 except Exception:

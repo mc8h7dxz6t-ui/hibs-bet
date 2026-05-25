@@ -26,7 +26,7 @@ Coverage scoring: `src/hibs_predictor/data_quality.py` (`full_scope` ≥ **85%**
 | Understat | Per-match xG for top leagues via `/getLeagueData` | `HIBS_ENABLE_UNDERSTAT_LIGHT`, `HIBS_SCRAPE_XG` |
 | FBref | Squad tables (heavy); schedule xG for Scottish + EFL + top/mid-tier EU + Norway/Finland | `HIBS_ENABLE_FBREF_SCHEDULE_XG` (default on); `HIBS_FBREF_BLOCKED=1` on blocked hosts |
 | SoccerStats | Standings when API thin | `HIBS_PREFER_SCRAPED_STANDINGS=1`; Norway, Finland, Scotland L1-L2 |
-| FotMob | Fixture calendar fallback; league-table xG (UEFA cups default-on) | `HIBS_ENABLE_FOTMOB_FIXTURES=1`; `HIBS_ENABLE_FOTMOB_XG` / cups / `HIBS_MAX_DATA=1` |
+| FotMob | Fixture calendar fallback; league-table xG (UEFA + domestic cups default-on; all mapped leagues when `HIBS_MAX_DATA=1` or `HIBS_ENABLE_FOTMOB_XG=1`) | `HIBS_ENABLE_FOTMOB_FIXTURES=1`; cup ties fall back to parent league table (e.g. `FA_CUP`→`EPL`, `DFB_POKAL`→`BUNDESLIGA`) |
 | StatsBomb Open | Goals proxy → `statsbomb_goals_proxy_xg` | `HIBS_ENABLE_STATSBOMB_LIGHT` or cup default-on; `HIBS_MAX_DATA=1` |
 | SofaScore | Rolling team xG (optional) | Often **403** — registry `blocked`; skip unless reachable |
 
@@ -44,7 +44,9 @@ Coverage scoring: `src/hibs_predictor/data_quality.py` (`full_scope` ≥ **85%**
 
 | Variable | Purpose |
 |----------|---------|
-| `HIBS_MAX_DATA=1` | Prefer maximum safe inputs (Rapid xG, heavy scrapers, StatsBomb) |
+| `HIBS_MAX_DATA=1` | Prefer maximum safe inputs (Rapid xG, heavy scrapers, StatsBomb, FotMob domestic xG) |
+| `HIBS_ENABLE_FOTMOB_XG=1` | Force FotMob league-table xG for all mapped leagues (VPS safe profile sets this with `MAX_DATA`) |
+| `HIBS_MEASURED_XG_LAMBDA_BOOST` | Optional 0–0.03 nudge to calibrated λ when xG tier is measured (default `0` = off) |
 | `HIBS_MIN_ENRICH_LEAGUES` | Comma list to **prioritize** enrichment (e.g. `SCOTLAND,EPL,UCL`). Empty = all `ALL_LEAGUE_CODES` |
 | `HIBS_ENABLE_STATSBOMB_LIGHT=1` | Goals proxy for leagues in open-data + UEFA cups |
 | `HIBS_ENABLE_API_SQUAD_DEPTH=1` | API-Football `players/squads` roster (24h cache; default on). Skip with `HIBS_SKIP_API_SQUAD_DEPTH=1` |

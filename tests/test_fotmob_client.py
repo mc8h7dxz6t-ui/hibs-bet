@@ -125,6 +125,13 @@ def test_fotmob_xg_enabled_cups_default():
             os.environ.pop("HIBS_MAX_DATA", None)
 
 
+def test_cup_league_fallback_codes():
+    assert fm.effective_xg_league_code("DFB_POKAL") == "BUNDESLIGA"
+    assert fm.effective_xg_league_code("COPA_DEL_REY") == "LA_LIGA"
+    assert fm.effective_xg_league_code("COPPA_ITALIA") == "SERIE_A"
+    assert fm.fotmob_xg_enabled("DFB_POKAL") is True
+
+
 def test_resolve_league_fixture_xg_mocked():
     cache = MagicMock()
     with patch("hibs_predictor.scrapers.fotmob_client.fotmob_xg_enabled", return_value=True):

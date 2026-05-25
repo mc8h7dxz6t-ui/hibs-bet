@@ -132,7 +132,7 @@ def _api_football_season_year(now: datetime) -> int:
 _FDO_CALENDAR_COMPS = frozenset({"WC", "EC", "UNL", "CL", "EL", "UECL"})
 # UEFA club cups: API-Football season id is Jul-based; FDO often 403/429 on finals week.
 _API_FIRST_FIXTURE_LEAGUES = frozenset({"UCL", "EUROPA_LEAGUE", "UECL"})
-_FIXTURE_CACHE_VERSION = "v24"
+_FIXTURE_CACHE_VERSION = "v25"
 _EMPTY_FIXTURE_CACHE_TTL_HOURS = 0.2  # short negative cache — avoid hour-long empty poison
 
 
@@ -987,10 +987,13 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
             "lineup_meta": enriched.get("lineup_meta") or {},
             "market_odds": enriched.get("market_odds", {}),
             "supplemental": enriched.get("supplemental", {}),
+            "xg_home": enriched.get("xg_home"),
+            "xg_away": enriched.get("xg_away"),
             "xg_source": enriched.get("xg_source", "unknown"),
             "xg_source_label": enriched.get("xg_source_label"),
             "xg_confidence_tier": enriched.get("xg_confidence_tier"),
             "xg_source_hint": enriched.get("xg_source_hint"),
+            "scraped_xg_meta": enriched.get("scraped_xg_meta") or {},
             "best_odds_1x2": enriched.get("best_odds_1x2") or {},
             "best_odds_source": enriched.get("best_odds_source") or {},
             "sharp_anchor_implied": enriched.get("sharp_anchor_implied") or {},

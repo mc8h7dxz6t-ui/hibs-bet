@@ -36,7 +36,7 @@ _HINTS: Dict[str, str] = {
     "understat_team_xg": "Team rolling xG from Understat when the exact match row is missing.",
     "fotmob_league_xg": "Season table xG per team — useful for cups; not specific to this kick-off.",
     "scraped_recent_xg": "Average xG from each team's last games where API published xG.",
-    "api_season_team_xg": "Season attack/defence rates from API team stats (no fixture xG).",
+    "api_season_team_xg": "Season attack/defence rates from API team stats (no fixture xG). Shows season xG/match when API publishes team xG totals.",
     "sofascore_xg": "Team xG averages from SofaScore.",
     "statsbomb_goals_proxy_xg": "Goals scored/conceded proxy — weaker than measured xG.",
     "form_derived_xg": "Same goals-based estimate; label upgraded only when form is deep.",
@@ -106,6 +106,13 @@ def xg_source_hint(
 ) -> str:
     s = str(xg_source or "unknown").strip().lower()
     base = _HINTS.get(s) or _HINTS.get("unknown", "")
+    meta = meta or {}
+    if s == "api_season_team_xg":
+        hx = meta.get("home_xg_per_match")
+        ax = meta.get("away_xg_per_match")
+        if hx is not None and ax is not None:
+            kind = "measured season xG" if meta.get("api_season_xg_measured") else "goals-based season rates"
+            base = f"{base} Season xG/match (home {hx}, away {ax}) — {kind}."
     conf = confidence or xg_confidence_tier(s, meta=meta)
     if conf == "proxy":
         return f"{base} Confidence: proxy — treat edges cautiously."

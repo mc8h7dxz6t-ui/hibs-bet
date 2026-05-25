@@ -20,3 +20,12 @@ def test_attach_display_fields():
     assert row["xg_source_label"]
     assert row["xg_confidence_tier"] == "strong"
     assert row["xg_source_hint"]
+
+
+def test_api_season_hint_includes_per_match():
+    hint = xg_source_hint(
+        "api_season_team_xg",
+        meta={"home_xg_per_match": 1.5, "away_xg_per_match": 1.2, "api_season_xg_measured": True},
+    )
+    assert "Season xG/match" in hint
+    assert "1.5" in hint

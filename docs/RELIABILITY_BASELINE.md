@@ -30,7 +30,24 @@ Prioritises **consistency over new features** — enables player/injury/lineup l
 | `HIBS_RESULTS_FETCH_EVENTS` | `1` | Goal scorers on Recent results via API-Football `fixtures/events` (default on). |
 | `HIBS_RESULTS_MAX_EVENT_FETCHES` | `12` | Max new events API calls per results refresh (24h per-fixture cache). |
 
-Also set by the script (not injury/lineup specific): `HIBS_FETCH_DAYS=7`, `HIBS_MAX_DATA=1`, `HIBS_DASHBOARD_LITE=0`, `HIBS_WARM_FIXTURE_CACHE=1`.
+Also set by the script (not injury/lineup specific): `HIBS_FETCH_DAYS=7`, `HIBS_MAX_DATA=1`, `HIBS_ENABLE_FOTMOB_XG=1`, `HIBS_DASHBOARD_LITE=0`, `HIBS_WARM_FIXTURE_CACHE=1`.
+
+## xG (post–81af3d5 beef-up)
+
+Priority stays **fixture API xG first**; supplemental scrapers only upgrade (never downgrade) `api_fixture_xg`.
+
+| Source | When it applies on VPS |
+|--------|-------------------------|
+| API fixture / Rapid stats | Top leagues when API returns per-match xG |
+| Understat light | Big-5 + mapped leagues (`HIBS_ENABLE_UNDERSTAT_LIGHT=1`, default on) |
+| FotMob league table | Cups + domestic with `HIBS_ENABLE_FOTMOB_XG=1` and `HIBS_MAX_DATA=1`; FBref off (`HIBS_FBREF_BLOCKED=1`) |
+| Recent 5-match API xG | Average from `home_recent` / `away_recent` when stats include Expected Goals |
+| API season team | `teams/statistics` season xG per match when API publishes `goals.for.expected`; else goals attack/defence blend |
+| StatsBomb goals proxy | Cups when other paths miss |
+
+Optional: `HIBS_MEASURED_XG_LAMBDA_BOOST=0.02` slightly widens calibrated Poisson λ for measured xG only (leave at `0` if you prefer no λ nudge).
+
+After deploy, bump clears stale enriched rows: fixture cache **v25** — run cache clear once (see below).
 
 ## Auth (manual — never in git)
 

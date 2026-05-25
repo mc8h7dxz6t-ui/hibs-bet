@@ -51,10 +51,13 @@ FOTMOB_XG_CUP_DEFAULT_ON = frozenset(
         "FA_CUP",
         "LEAGUE_CUP",
         "COUPE_DE_FRANCE",
+        "COPA_DEL_REY",
+        "COPPA_ITALIA",
+        "DFB_POKAL",
     }
 )
 
-# Cup ties without their own FotMob xG table — use parent league season xG.
+# Cup ties without their own FotMob xG table — use parent league season xG (all cups in config).
 FOTMOB_XG_LEAGUE_FALLBACK: Dict[str, str] = {
     "SCOTTISH_CUP": "SCOTLAND",
     "SCOTLAND_L1": "SCOTLAND_CHAMP",
@@ -62,6 +65,9 @@ FOTMOB_XG_LEAGUE_FALLBACK: Dict[str, str] = {
     "FA_CUP": "EPL",
     "LEAGUE_CUP": "EPL",
     "COUPE_DE_FRANCE": "LIGUE_1",
+    "COPA_DEL_REY": "LA_LIGA",
+    "COPPA_ITALIA": "SERIE_A",
+    "DFB_POKAL": "BUNDESLIGA",
 }
 
 _HEADERS = {

@@ -285,6 +285,27 @@
         </div>
 
         <div id="{{ tab_gid }}-form" class="tab-panel" data-group="{{ tab_gid }}">
+        {% set fx_xh = fixture.xg_home if fixture.xg_home is defined and fixture.xg_home is not none else (p.expected_goals_home if show_pred and p else none) %}
+        {% set fx_xa = fixture.xg_away if fixture.xg_away is defined and fixture.xg_away is not none else (p.expected_goals_away if show_pred and p else none) %}
+        {% if fx_xh is not none or fx_xa is not none or fixture.xg_source %}
+        <div class="xg-fixture-panel" style="margin-bottom:14px;padding:10px 12px;border-radius:10px;border:1px solid rgba(190,220,205,0.18);background:rgba(2,6,23,0.35);">
+            <div class="section-title" style="margin-bottom:8px;">Expected goals (xG)</div>
+            <div class="in-play-xg-values" style="font-size:0.95em;margin-bottom:6px;">
+                <strong>{{ fixture.home|table_team_label }}</strong>
+                <strong style="margin:0 8px;">{% if fx_xh is not none %}{{ "%.2f"|format(fx_xh) }}{% else %}—{% endif %}</strong>
+                <span class="in-play-xg-vs" style="color:var(--muted);">vs</span>
+                <strong style="margin:0 8px;">{% if fx_xa is not none %}{{ "%.2f"|format(fx_xa) }}{% else %}—{% endif %}</strong>
+                <strong>{{ fixture.away|table_team_label }}</strong>
+            </div>
+            <p class="xg-source-hint" style="margin:0 0 4px;font-size:0.78em;">
+                <strong>{{ fixture.xg_source_label or fixture.xg_source or 'source unknown' }}</strong>
+                {% if fixture.xg_confidence_tier %} · {{ fixture.xg_confidence_tier }}{% endif %}
+            </p>
+            {% if fixture.xg_source_hint %}
+            <p class="xg-source-hint-detail" style="margin:0;font-size:0.72em;color:var(--muted);line-height:1.4;">{{ fixture.xg_source_hint }}</p>
+            {% endif %}
+        </div>
+        {% endif %}
         <!-- LEAGUE TABLE / CUP -->
         {% if fixture.is_cup_competition %}
         <div class="section-title">🏆 {{ fixture.cup_round_label or 'Cup tie' }}</div>

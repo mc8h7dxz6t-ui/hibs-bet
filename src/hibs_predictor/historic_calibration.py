@@ -80,6 +80,27 @@ def league_avg_xg_per_team(league_code: str) -> float:
     return float(_LEAGUE_AVG_XG_PER_TEAM.get((league_code or "").upper(), _DEFAULT_LEAGUE_AVG_XG))
 
 
+def measured_xg_lambda_scale(xg_source: Any) -> float:
+    """
+    Optional nudge for calibrated Poisson λ when xG is measured (not proxy).
+
+    Off by default (`HIBS_MEASURED_XG_LAMBDA_BOOST=0`). Values 0.01–0.03 slightly
+    widen λ spread for high-trust xG without changing proxy paths.
+    """
+    if is_proxy_xg_source(xg_source):
+        return 1.0
+    if xg_quality_tier(xg_source) != "high":
+        return 1.0
+    try:
+        boost = float(os.getenv("HIBS_MEASURED_XG_LAMBDA_BOOST", "0"))
+    except ValueError:
+        boost = 0.0
+    boost = max(0.0, min(0.03, boost))
+    if boost <= 0:
+        return 1.0
+    return 1.0 + boost
+
+
 def adjust_xg_for_source_quality(
     xg_home: float,
     xg_away: float,
@@ -88,6 +109,15 @@ def adjust_xg_for_source_quality(
 ) -> Tuple[float, float, Dict[str, Any]]:
     """Shrink proxy xG 15% toward league-average pace (Poisson λ trust)."""
     dbg: Dict[str, Any] = {"tier": xg_quality_tier(xg_source), "adjusted": False}
+    scale = measured_xg_lambda_scale(xg_source)
+    if scale > 1.0:
+        avg = league_avg_xg_per_team(league_code)
+        xh = float(xg_home)
+        xa = float(xg_away)
+        xg_home = xh + (xh - avg) * (scale - 1.0)
+        xg_away = xa + (xa - avg) * (scale - 1.0)
+        dbg["measured_lambda_scale"] = scale
+        dbg["adjusted"] = True
     if not is_proxy_xg_source(xg_source):
         return xg_home, xg_away, dbg
     try:

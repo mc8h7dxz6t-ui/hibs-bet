@@ -33,11 +33,21 @@ def _fbref_blocked() -> bool:
     return os.getenv("HIBS_FBREF_BLOCKED", "0").strip().lower() in ("1", "true", "yes", "on")
 
 
-def _avg_team_xg_from_recent(matches: List[Dict[str, Any]], team_id: int, min_samples: int = 2) -> Optional[float]:
+_RECENT_XG_WINDOW = 5
+
+
+def _avg_team_xg_from_recent(
+    matches: List[Dict[str, Any]],
+    team_id: int,
+    min_samples: int = 2,
+    *,
+    window: int = _RECENT_XG_WINDOW,
+) -> Optional[float]:
+    """Mean xG from last *window* finished matches where API published Expected Goals."""
     if not team_id or not matches:
         return None
     vals: List[float] = []
-    for m in matches[:10]:
+    for m in matches[: max(1, int(window))]:
         v = TeamStrengthCalculator._team_xg_from_fixture_statistics(m, int(team_id))
         if v is not None and v > 0.04:
             vals.append(float(v))
@@ -128,34 +138,61 @@ def _fetch_understat_row(
     return None
 
 
+def _team_season_rates(stats: Dict[str, Any]) -> Optional[Tuple[float, float, bool]]:
+    """Per-match attack/defence rates; True third value when API season xG totals were used."""
+    try:
+        played = int(stats.get("played") or 0)
+    except (TypeError, ValueError):
+        return None
+    if played < 5:
+        return None
+    measured = bool(stats.get("api_season_xg_measured"))
+    if measured:
+        try:
+            h_for = float(stats.get("xg_for_pg") or 0)
+            h_against = float(stats.get("xg_against_pg") or stats.get("xg_for_pg") or 0)
+        except (TypeError, ValueError):
+            measured = False
+            h_for = h_against = 0.0
+        if h_for > 0.04:
+            return h_for, max(0.04, h_against), True
+    try:
+        gf = float(stats.get("goals_for") or 0)
+        ga = float(stats.get("goals_against") or 0)
+    except (TypeError, ValueError):
+        return None
+    if gf <= 0:
+        return None
+    return gf / played, ga / played, False
+
+
 def _api_season_team_xg(
     enriched: Dict[str, Any],
     league_strength: float,
 ) -> Optional[Tuple[float, float, Dict[str, Any]]]:
-    """Blend season GF/GA per game from API team statistics (not recent-form proxy)."""
+    """Blend season attack/defence per match from API team statistics (xG totals when API provides them)."""
     hs = enriched.get("home_stats") if isinstance(enriched.get("home_stats"), dict) else {}
     aws = enriched.get("away_stats") if isinstance(enriched.get("away_stats"), dict) else {}
     if str(hs.get("source") or "") == "football_data_org" or str(aws.get("source") or "") == "football_data_org":
         return None
-    try:
-        hp = int(hs.get("played") or 0)
-        ap = int(aws.get("played") or 0)
-        h_gf = float(hs.get("goals_for") or 0)
-        h_ga = float(hs.get("goals_against") or 0)
-        a_gf = float(aws.get("goals_for") or 0)
-        a_ga = float(aws.get("goals_against") or 0)
-    except (TypeError, ValueError):
+    h_rates = _team_season_rates(hs)
+    a_rates = _team_season_rates(aws)
+    if not h_rates or not a_rates:
         return None
-    if hp < 5 or ap < 5 or h_gf <= 0 or a_gf <= 0:
-        return None
-    h_for_pg = h_gf / hp
-    h_against_pg = h_ga / hp
-    a_for_pg = a_gf / ap
-    a_against_pg = a_ga / ap
+    h_for_pg, h_against_pg, h_meas = h_rates
+    a_for_pg, a_against_pg, a_meas = a_rates
     strength = max(0.55, min(1.45, float(league_strength or 1.0)))
     xh = max(0.35, min(3.2, (h_for_pg + a_against_pg) / 2.0 * strength / 1.12))
     xa = max(0.35, min(3.2, (a_for_pg + h_against_pg) / 2.0 * strength / 1.12))
-    meta = {"home_played": hp, "away_played": ap, "api_season_blend": True}
+    meta: Dict[str, Any] = {
+        "home_played": int(hs.get("played") or 0),
+        "away_played": int(aws.get("played") or 0),
+        "api_season_blend": True,
+        "home_xg_per_match": round(h_for_pg, 3),
+        "away_xg_per_match": round(a_for_pg, 3),
+    }
+    if h_meas or a_meas:
+        meta["api_season_xg_measured"] = True
     return xh, xa, meta
 
 
@@ -239,13 +276,36 @@ def _try_recent_api_xg(
     home_nm: str,
     away_nm: str,
 ) -> Optional[Tuple[float, float, str, Dict[str, Any]]]:
-    meta: Dict[str, Any] = {}
-    h_avg = _avg_team_xg_from_recent(enriched.get("home_recent") or [], int(home_id or 0))
-    a_avg = _avg_team_xg_from_recent(enriched.get("away_recent") or [], int(away_id or 0))
+    meta: Dict[str, Any] = {"recent_xg_window": _RECENT_XG_WINDOW}
+    h_avg = _avg_team_xg_from_recent(enriched.get("home_recent") or [], int(home_id or 0), window=_RECENT_XG_WINDOW)
+    a_avg = _avg_team_xg_from_recent(enriched.get("away_recent") or [], int(away_id or 0), window=_RECENT_XG_WINDOW)
+    if h_avg is None:
+        h_avg = _avg_team_xg_from_recent(enriched.get("home_recent") or [], int(home_id or 0), window=10)
+    if a_avg is None:
+        a_avg = _avg_team_xg_from_recent(enriched.get("away_recent") or [], int(away_id or 0), window=10)
     if h_avg is not None and a_avg is not None:
         meta["home_xg_samples"] = "recent_api"
         meta["away_xg_samples"] = "recent_api"
         return h_avg, a_avg, "scraped_recent_xg", meta
+    league = enriched.get("league_factor")
+    if league is None:
+        try:
+            from hibs_predictor.config import LEAGUES
+
+            league = LEAGUES.get(league_code, {}).get("strength_factor", 1.0)
+        except Exception:
+            league = 1.0
+    season_hit = _api_season_team_xg(enriched, float(league or 1.0))
+    if season_hit and (h_avg is not None or a_avg is not None):
+        sxh, sxa, smeta = season_hit
+        meta.update(smeta)
+        meta["recent_season_blend"] = True
+        return (
+            h_avg if h_avg is not None else sxh,
+            a_avg if a_avg is not None else sxa,
+            "scraped_recent_xg",
+            meta,
+        )
     return None
 
 

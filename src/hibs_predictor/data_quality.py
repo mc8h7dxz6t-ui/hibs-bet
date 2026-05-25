@@ -138,6 +138,8 @@ def _xg_points(src: str, n_h: float, n_a: float, enriched: Optional[Dict[str, An
     ):
         return 15.0
     if s == "api_season_team_xg":
+        if meta.get("api_season_xg_measured"):
+            return 15.0
         return 14.0
     if s == "sofascore_xg":
         return 13.5

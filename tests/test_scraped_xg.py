@@ -91,6 +91,35 @@ def test_api_season_team_xg_when_stats_deep():
     assert out.get("xg_source_label")
 
 
+def test_api_season_uses_measured_xg_per_match():
+    enriched = _base_enriched(
+        home_stats={
+            "played": 20,
+            "goals_for": 30,
+            "goals_against": 22,
+            "xg_for_pg": 1.55,
+            "xg_against_pg": 1.1,
+            "api_season_xg_measured": True,
+        },
+        away_stats={
+            "played": 20,
+            "goals_for": 28,
+            "goals_against": 24,
+            "xg_for_pg": 1.4,
+            "xg_against_pg": 1.2,
+            "api_season_xg_measured": True,
+        },
+    )
+    from hibs_predictor.scraped_xg import _api_season_team_xg
+
+    hit = _api_season_team_xg(enriched, 1.0)
+    assert hit is not None
+    xh, xa, meta = hit
+    assert meta.get("api_season_xg_measured") is True
+    assert meta.get("home_xg_per_match") == 1.55
+    assert xh > 0.5 and xa > 0.5
+
+
 def test_fbref_skipped_when_blocked(monkeypatch):
     monkeypatch.setenv("HIBS_FBREF_BLOCKED", "1")
     enriched = _base_enriched(
