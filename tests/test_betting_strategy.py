@@ -185,18 +185,26 @@ def test_dual_value_finder_agreement(monkeypatch):
         assert alt["home"].get("value_dual_agree") is True
 
 
+def _minimal_team_stats() -> dict:
+    return {"played": 10, "goals_for": 15, "goals_against": 12}
+
+
 def test_enriched_skips_cache_when_recent_missing():
     from hibs_predictor.data_aggregator import DataAggregator
 
+    stats = _minimal_team_stats()
     cached = {
         "home_recent": [],
         "away_recent": [{"teams": {"home": {"id": 2}, "away": {"id": 3}}, "goals": {"home": 1, "away": 0}}],
+        "away_stats": stats,
     }
     assert DataAggregator._enriched_needs_recent_refetch(cached, 10, 20) is True
     assert DataAggregator._enriched_needs_recent_refetch(cached, None, 20) is False
     full = {
         "home_recent": [{"x": 1}],
         "away_recent": [{"x": 2}],
+        "home_stats": stats,
+        "away_stats": stats,
     }
     assert DataAggregator._enriched_needs_recent_refetch(full, 10, 20) is False
 
@@ -206,16 +214,21 @@ def test_enriched_cache_fresh_within_window():
 
     from hibs_predictor.data_aggregator import DataAggregator
 
+    stats = _minimal_team_stats()
     recent = {
         "enriched_at": datetime.now().isoformat(),
         "home_recent": [{"x": 1}],
         "away_recent": [{"x": 2}],
+        "home_stats": stats,
+        "away_stats": stats,
     }
     assert DataAggregator._enriched_cache_fresh(recent, 10, 20) is True
     stale = {
         "enriched_at": (datetime.now() - timedelta(hours=2)).isoformat(),
         "home_recent": [{"x": 1}],
         "away_recent": [{"x": 2}],
+        "home_stats": stats,
+        "away_stats": stats,
     }
     assert DataAggregator._enriched_cache_fresh(stale, 10, 20, minutes=15) is False
 

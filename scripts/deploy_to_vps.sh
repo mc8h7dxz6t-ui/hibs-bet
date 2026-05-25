@@ -4,7 +4,7 @@
 # Env overrides: DEPLOY_HOST DEPLOY_USER DEPLOY_PATH
 set -euo pipefail
 
-HOST="${DEPLOY_HOST:-77.68.89.75}"
+HOST="${DEPLOY_HOST:-77.68.89.73}"
 USER="${DEPLOY_USER:-root}"
 APP="${DEPLOY_PATH:-/opt/hibs-bet}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -89,6 +89,10 @@ Check `/api/health` for API quota and enrichment errors.
 
 ## World Cup / international period
 
+**Before 11 Jun 2026 (now):** keep `HIBS_TOURNAMENT_FOCUS=0` on the VPS so domestic leagues stay in the default fetch set through season end. No cache bump needed solely for the switch — only when deploying code that changes enrich fields (fixture cache **v25**).
+
+**Switch date:** remove or comment out `HIBS_TOURNAMENT_FOCUS=0` on **2026-06-11** (or set `HIBS_TOURNAMENT_FOCUS=worldcup`); auto window ends **2026-07-18**. Users can still load all leagues with dashboard `?domestic=1` or region **All**.
+
 Auto focus window: **2026-06-11 → 2026-07-18** (override with `HIBS_TOURNAMENT_FOCUS_START` / `HIBS_TOURNAMENT_FOCUS_END`). Friendlies from ~11 June are covered when focus is on (includes `INTL_FRIENDLIES` via API-Football league 10).
 
 | When | `HIBS_TOURNAMENT_FOCUS` | Fetch behaviour | Dashboard default |
