@@ -770,6 +770,27 @@
         .data-table th{color:var(--muted);font-weight:600;padding:3px 5px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.05);}
         .data-table td{padding:4px 5px;border-bottom:1px solid rgba(255,255,255,0.03);}
         .data-table tr:last-child td{border-bottom:none;}
+        .data-table tr.monitor-win td{background:rgba(167,243,208,0.1);border-bottom-color:rgba(167,243,208,0.14);}
+        .data-table tr.monitor-win td:first-child{border-left:3px solid var(--accent);}
+        .data-table tr.monitor-loss td{background:rgba(251,191,36,0.06);border-bottom-color:rgba(251,191,36,0.1);}
+        .data-table tr.monitor-loss td:first-child{border-left:3px solid rgba(248,113,113,0.45);}
+        .monitor-tally{font-size:0.78em;color:var(--muted);margin:0 0 8px;font-weight:600;}
+        .monitor-tally strong{color:var(--text);}
+        .monitor-tally .tally-w{color:var(--neon-value);}
+        .monitor-tally .tally-l{color:#fca5a5;}
+        .monitor-tally .tally-p{color:var(--muted);}
+        .result-badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:0.82em;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;}
+        .result-badge-w{color:var(--neon-value);background:rgba(167,243,208,0.12);border:1px solid rgba(167,243,208,0.35);}
+        .result-badge-l{color:#fecaca;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.28);}
+        .result-badge-pending{color:var(--muted);background:rgba(148,163,184,0.08);border:1px solid rgba(148,163,184,0.2);}
+        .acca-win-card{border-color:rgba(167,243,208,0.45)!important;background:rgba(0,122,51,0.12)!important;box-shadow:0 0 0 1px rgba(167,243,208,0.12);}
+        .acca-win-banner{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:0.72em;font-weight:800;color:var(--neon-value);background:rgba(167,243,208,0.12);border:1px solid rgba(167,243,208,0.35);margin-bottom:6px;}
+        .acca-rec-others{margin-top:14px;padding-top:12px;border-top:1px dashed rgba(148,163,184,0.2);}
+        .acca-rec-others h3{font-size:0.72em;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;margin:0 0 10px;font-weight:700;}
+        .acca-rec-brief{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:baseline;padding:10px 12px;margin-bottom:8px;border:1px solid rgba(148,163,184,0.14);border-radius:10px;background:rgba(2,6,23,0.35);font-size:0.76em;line-height:1.4;}
+        .acca-rec-brief-title{font-weight:800;color:var(--text);min-width:8rem;}
+        .acca-rec-brief-meta{color:var(--muted);}
+        .acca-rec-brief-reason{color:var(--accent);flex:1 1 12rem;min-width:0;}
         .home-row td,.home-row{color:#86efac;}
         .away-row td,.away-row{color:var(--blue);}
 

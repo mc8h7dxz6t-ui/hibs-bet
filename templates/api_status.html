@@ -187,8 +187,8 @@
                 }
                 if (parseInt(slice.n_logged, 10) > 0) {
                     var bp = slice.best_pick || {};
-                    return label + ': ' + slice.n_logged + ' fixtures · W '
-                        + (bp.wins || 0) + ' / L ' + (bp.losses || 0) + ' / pending ' + (bp.pending || 0);
+                    return label + ': ' + slice.n_logged + ' fixtures · Wins: '
+                        + (bp.wins || 0) + ' · Losses: ' + (bp.losses || 0) + ' · Pending: ' + (bp.pending || 0);
                 }
                 return slice.message || (label + ': none.');
             }
@@ -202,12 +202,35 @@
                 var tzLbl = daySlice.display_tz_label || ko.display_tz_label || 'local';
                 return prefix + ' (' + dateLbl + ' · ' + tzLbl + ')';
             }
+            function monitorResultBadge(res) {
+                if (res === 'W') return '<span class="result-badge result-badge-w">W</span>';
+                if (res === 'L') return '<span class="result-badge result-badge-l">L</span>';
+                return '<span class="result-badge result-badge-pending">pending</span>';
+            }
+            function monitorRowClass(res) {
+                if (res === 'W') return 'monitor-win';
+                if (res === 'L') return 'monitor-loss';
+                return '';
+            }
+            function monitorSortRows(rows) {
+                var order = { W: 0, pending: 1, L: 2 };
+                return (rows || []).slice().sort(function (a, b) {
+                    var ra = a.result === 'W' ? 'W' : (a.result === 'L' ? 'L' : 'pending');
+                    var rb = b.result === 'W' ? 'W' : (b.result === 'L' ? 'L' : 'pending');
+                    var oa = order[ra] != null ? order[ra] : 1;
+                    var ob = order[rb] != null ? order[rb] : 1;
+                    if (oa !== ob) return oa - ob;
+                    return String(a.match || '').localeCompare(String(b.match || ''));
+                });
+            }
             function monitorDayTable(rows, emptyText) {
                 var head = '<tr><th>Match</th><th>Pick</th><th>Model %</th><th>Result</th><th>Score</th><th>CLV</th></tr>';
-                var body = (rows || []).map(function (row) {
+                var sorted = monitorSortRows(rows);
+                var body = sorted.map(function (row) {
                     var res = row.result === 'W' ? 'W' : (row.result === 'L' ? 'L' : 'pending');
-                    return '<tr><td>' + esc(row.match) + '</td><td>' + esc(row.pick) + '</td><td>'
-                        + (row.model_pct != null ? esc(row.model_pct) + '%' : '—') + '</td><td>' + esc(res)
+                    var cls = monitorRowClass(res);
+                    return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + esc(row.match) + '</td><td>' + esc(row.pick) + '</td><td>'
+                        + (row.model_pct != null ? esc(row.model_pct) + '%' : '—') + '</td><td>' + monitorResultBadge(res)
                         + '</td><td>' + esc(row.score || '—') + '</td><td>'
                         + (row.clv_pp != null ? esc(row.clv_pp) + ' pp' : '—') + '</td></tr>';
                 }).join('');

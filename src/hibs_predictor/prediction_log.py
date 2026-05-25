@@ -875,6 +875,12 @@ def _monitor_rows_to_table(rows: List[sqlite3.Row]) -> Tuple[Dict[str, int], Lis
                 "clv_pp": _clv_pp_from_enrich(r["enrich_summary_json"]),
             }
         )
+    table_rows.sort(
+        key=lambda r: (
+            0 if r.get("result") == "W" else (2 if r.get("result") == "L" else 1),
+            (r.get("match") or "").lower(),
+        )
+    )
     return {"wins": wins, "losses": losses, "pending": pending}, table_rows
 
 

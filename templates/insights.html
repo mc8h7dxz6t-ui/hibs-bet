@@ -45,6 +45,22 @@
 .btn-acca-slip{background:rgba(255,215,0,0.12);border:1px solid rgba(255,215,0,0.35);color:var(--gold);padding:6px 12px;border-radius:8px;font-size:0.72em;font-weight:800;cursor:pointer;font-family:'Inter',sans-serif;}
 .btn-acca-slip:hover{background:rgba(255,215,0,0.2);}
 </style>
+{% macro monitor_tally(bp) %}
+<p class="monitor-tally">Wins: <strong class="tally-w">{{ bp.wins or 0 }}</strong> · Losses: <strong class="tally-l">{{ bp.losses or 0 }}</strong> · Pending: <strong class="tally-p">{{ bp.pending or 0 }}</strong></p>
+{% endmacro %}
+{% macro result_badge(res) %}
+{% if res == 'W' %}<span class="result-badge result-badge-w" title="Won">W</span>{% elif res == 'L' %}<span class="result-badge result-badge-l" title="Lost">L</span>{% else %}<span class="result-badge result-badge-pending" title="Awaiting full-time result">pending</span>{% endif %}
+{% endmacro %}
+{% macro monitor_row(row) %}
+<tr class="{% if row.result == 'W' %}monitor-win{% elif row.result == 'L' %}monitor-loss{% endif %}">
+    <td>{{ row.match }}</td>
+    <td>{{ row.pick or '—' }}</td>
+    <td>{% if row.model_pct is not none %}{{ row.model_pct }}%{% else %}—{% endif %}</td>
+    <td>{{ result_badge(row.result) }}</td>
+    <td>{{ row.score or '—' }}</td>
+    <td>{% if row.clv_pp is not none %}{{ row.clv_pp }} pp{% else %}—{% endif %}</td>
+</tr>
+{% endmacro %}
 {% endblock %}
 {% block content %}
 <div class="insights-page">
@@ -116,8 +132,12 @@
         <h2>Recommended accas</h2>
         <p class="ir-meta" style="margin:0 0 10px;color:var(--accent);line-height:1.45;">Stat-ranked multi-leg ideas from fixtures with model support and book prices. <strong>Combined odds</strong> = multiply each leg’s decimal price. <strong>Independence</strong> assumes legs don’t affect each other — correlated picks (same game, linked markets) are flagged when detected. {{ acca_rec.eligible_leg_count }} eligible leg(s) · data gate ≥{{ acca_rec.value_data_pct_gate }}%.</p>
         {% if acca_rec.accas %}
-        {% for acca in acca_rec.accas %}
-        <div class="acca-rec-card" data-acca-legs="{{ acca.legs|tojson|e }}">
+        {% set acca_winners = acca_rec.winning_accas or [] %}
+        {% set acca_others = acca_rec.other_accas if acca_winners else [] %}
+        {% set acca_full_list = acca_winners if acca_winners else acca_rec.accas %}
+        {% for acca in acca_full_list %}
+        <div class="acca-rec-card{% if acca.is_winning %} acca-win-card{% endif %}" data-acca-legs="{{ acca.legs|tojson|e }}">
+            {% if acca.is_winning %}<div class="acca-win-banner" aria-label="All legs won">All legs won</div>{% endif %}
             <div class="acca-rec-hd">
                 <span class="acca-rec-title">{{ acca.name }}</span>
                 {% if acca.combined_odds %}<span class="ir-pill ir-gold" data-odds-dec="{{ acca.combined_odds }}" data-odds-template="Combined {odds}">Combined {{ "%.2f"|format(acca.combined_odds) }}</span>{% endif %}
@@ -129,6 +149,7 @@
                     <tr>
                         <th>Fixture</th>
                         <th>Pick</th>
+                        <th>Result</th>
                         <th>Model</th>
                         <th>Odds</th>
                         <th>Edge</th>
@@ -137,12 +158,13 @@
                 </thead>
                 <tbody>
                     {% for leg in acca.legs %}
-                    <tr>
+                    <tr class="{% if leg.result == 'W' %}monitor-win{% elif leg.result == 'L' %}monitor-loss{% endif %}">
                         <td>
                             <a href="/#fix-{{ leg.fixture_id }}">{{ leg.match }}</a>
                             {% if leg.league %}<div class="ir-meta">{{ leg.league }}{% if leg.kickoff_time %} · {{ leg.kickoff_time }}{% endif %}</div>{% endif %}
                         </td>
                         <td>{{ leg.market_label }}</td>
+                        <td>{{ result_badge(leg.result) }}</td>
                         <td>{% if leg.model_pct is not none %}{{ leg.model_pct }}%{% else %}—{% endif %}</td>
                         <td>{% if leg.odds %}<span data-odds-dec="{{ leg.odds }}" data-odds-template="{odds}">{{ "%.2f"|format(leg.odds) }}</span>{% else %}—{% endif %}</td>
                         <td>{% if leg.edge_pct is not none %}<span class="ir-good">+{{ "%.1f"|format(leg.edge_pct) }}%</span>{% else %}—{% endif %}</td>
@@ -160,6 +182,19 @@
             </div>
         </div>
         {% endfor %}
+        {% if acca_others %}
+        <div class="acca-rec-others" aria-label="Other recommended accas">
+            <h3>Other accas</h3>
+            {% for acca in acca_others %}
+            <div class="acca-rec-brief" data-acca-legs="{{ acca.legs|tojson|e }}">
+                <span class="acca-rec-brief-title">{{ acca.name }}</span>
+                <span class="acca-rec-brief-meta">{{ acca.leg_count }} leg{% if acca.leg_count != 1 %}s{% endif %}{% if acca.combined_odds %} · <span data-odds-dec="{{ acca.combined_odds }}" data-odds-template="Combined {odds}">{{ "%.2f"|format(acca.combined_odds) }}</span>{% endif %}</span>
+                <span class="acca-rec-brief-reason">{{ acca.brief_summary or acca.name }}</span>
+                <button type="button" class="btn-acca-slip hibs-insights-acca-slip" style="margin-left:auto;flex-shrink:0;">Add</button>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
         <p class="ir-meta">{{ acca_rec.disclaimer }}</p>
         {% else %}
         <div class="empty-mini">{{ acca_rec.message or "No acca legs cleared the model/value gates in this window." }}</div>
@@ -320,24 +355,15 @@
             {% if yk.n_logged %}
             <div class="insight-row">
                 <div class="ir-main">{{ yk.n_logged }} fixtures · {{ yk.n_scored_ft }} FT synced</div>
-                {% set ybp = yk.best_pick or {} %}
-                <span class="ir-pill ir-gold">W {{ ybp.wins or 0 }}</span>
-                <span class="ir-pill">L {{ ybp.losses or 0 }}</span>
-                <span class="ir-pill ir-warn">Pending {{ ybp.pending or 0 }}</span>
             </div>
+            {% set ybp = yk.best_pick or {} %}
+            {{ monitor_tally(ybp) }}
             {% if yk.rows %}
             <table class="data-table" style="margin-top:10px;font-size:0.78em;width:100%;">
                 <thead><tr><th>Match</th><th>Pick</th><th>Model %</th><th>Result</th><th>Score</th><th>CLV</th></tr></thead>
                 <tbody>
                 {% for row in yk.rows %}
-                <tr>
-                    <td>{{ row.match }}</td>
-                    <td>{{ row.pick or '—' }}</td>
-                    <td>{% if row.model_pct is not none %}{{ row.model_pct }}%{% else %}—{% endif %}</td>
-                    <td>{% if row.result == 'W' %}<span class="ir-pill ir-gold">W</span>{% elif row.result == 'L' %}<span class="ir-pill">L</span>{% else %}<span class="ir-pill ir-warn">pending</span>{% endif %}</td>
-                    <td>{{ row.score or '—' }}</td>
-                    <td>{% if row.clv_pp is not none %}{{ row.clv_pp }} pp{% else %}—{% endif %}</td>
-                </tr>
+                {{ monitor_row(row) }}
                 {% endfor %}
                 </tbody>
             </table>
@@ -349,24 +375,15 @@
             {% if ys.n_logged %}
             <div class="insight-row">
                 <div class="ir-main">{{ ys.n_logged }} fixtures scored</div>
-                {% set ysb = ys.best_pick or {} %}
-                <span class="ir-pill ir-gold">W {{ ysb.wins or 0 }}</span>
-                <span class="ir-pill">L {{ ysb.losses or 0 }}</span>
-                <span class="ir-pill ir-warn">Pending {{ ysb.pending or 0 }}</span>
             </div>
+            {% set ysb = ys.best_pick or {} %}
+            {{ monitor_tally(ysb) }}
             {% if ys.rows %}
             <table class="data-table" style="margin-top:10px;font-size:0.78em;width:100%;">
                 <thead><tr><th>Match</th><th>Pick</th><th>Model %</th><th>Result</th><th>Score</th><th>CLV</th></tr></thead>
                 <tbody>
                 {% for row in ys.rows %}
-                <tr>
-                    <td>{{ row.match }}</td>
-                    <td>{{ row.pick or '—' }}</td>
-                    <td>{% if row.model_pct is not none %}{{ row.model_pct }}%{% else %}—{% endif %}</td>
-                    <td>{% if row.result == 'W' %}<span class="ir-pill ir-gold">W</span>{% elif row.result == 'L' %}<span class="ir-pill">L</span>{% else %}<span class="ir-pill ir-warn">pending</span>{% endif %}</td>
-                    <td>{{ row.score or '—' }}</td>
-                    <td>{% if row.clv_pp is not none %}{{ row.clv_pp }} pp{% else %}—{% endif %}</td>
-                </tr>
+                {{ monitor_row(row) }}
                 {% endfor %}
                 </tbody>
             </table>
@@ -383,24 +400,15 @@
             {% if tk.n_logged %}
             <div class="insight-row">
                 <div class="ir-main">{{ tk.n_logged }} fixtures · {{ tk.n_scored_ft }} FT synced today</div>
-                {% set bp = tk.best_pick or {} %}
-                <span class="ir-pill ir-gold">W {{ bp.wins or 0 }}</span>
-                <span class="ir-pill">L {{ bp.losses or 0 }}</span>
-                <span class="ir-pill ir-warn">Pending {{ bp.pending or 0 }}</span>
             </div>
+            {% set bp = tk.best_pick or {} %}
+            {{ monitor_tally(bp) }}
             {% if tk.rows %}
             <table class="data-table" style="margin-top:10px;font-size:0.78em;width:100%;">
                 <thead><tr><th>Match</th><th>Pick</th><th>Model %</th><th>Result</th><th>Score</th><th>CLV</th></tr></thead>
                 <tbody>
                 {% for row in tk.rows %}
-                <tr>
-                    <td>{{ row.match }}</td>
-                    <td>{{ row.pick or '—' }}</td>
-                    <td>{% if row.model_pct is not none %}{{ row.model_pct }}%{% else %}—{% endif %}</td>
-                    <td>{% if row.result == 'W' %}<span class="ir-pill ir-gold">W</span>{% elif row.result == 'L' %}<span class="ir-pill">L</span>{% else %}<span class="ir-pill ir-warn">pending</span>{% endif %}</td>
-                    <td>{{ row.score or '—' }}</td>
-                    <td>{% if row.clv_pp is not none %}{{ row.clv_pp }} pp{% else %}—{% endif %}</td>
-                </tr>
+                {{ monitor_row(row) }}
                 {% endfor %}
                 </tbody>
             </table>
@@ -412,24 +420,15 @@
             {% if ts.n_logged %}
             <div class="insight-row">
                 <div class="ir-main">{{ ts.n_logged }} fixtures scored</div>
-                {% set tsb = ts.best_pick or {} %}
-                <span class="ir-pill ir-gold">W {{ tsb.wins or 0 }}</span>
-                <span class="ir-pill">L {{ tsb.losses or 0 }}</span>
-                <span class="ir-pill ir-warn">Pending {{ tsb.pending or 0 }}</span>
             </div>
+            {% set tsb = ts.best_pick or {} %}
+            {{ monitor_tally(tsb) }}
             {% if ts.rows %}
             <table class="data-table" style="margin-top:10px;font-size:0.78em;width:100%;">
                 <thead><tr><th>Match</th><th>Pick</th><th>Model %</th><th>Result</th><th>Score</th><th>CLV</th></tr></thead>
                 <tbody>
                 {% for row in ts.rows %}
-                <tr>
-                    <td>{{ row.match }}</td>
-                    <td>{{ row.pick or '—' }}</td>
-                    <td>{% if row.model_pct is not none %}{{ row.model_pct }}%{% else %}—{% endif %}</td>
-                    <td>{% if row.result == 'W' %}<span class="ir-pill ir-gold">W</span>{% elif row.result == 'L' %}<span class="ir-pill">L</span>{% else %}<span class="ir-pill ir-warn">pending</span>{% endif %}</td>
-                    <td>{{ row.score or '—' }}</td>
-                    <td>{% if row.clv_pp is not none %}{{ row.clv_pp }} pp{% else %}—{% endif %}</td>
-                </tr>
+                {{ monitor_row(row) }}
                 {% endfor %}
                 </tbody>
             </table>
@@ -503,7 +502,7 @@
 document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('.hibs-insights-acca-slip').forEach(function (btn) {
         btn.addEventListener('click', function () {
-            var card = btn.closest('.acca-rec-card');
+            var card = btn.closest('.acca-rec-card') || btn.closest('.acca-rec-brief');
             if (!card) return;
             var raw = card.getAttribute('data-acca-legs');
             if (!raw) return;

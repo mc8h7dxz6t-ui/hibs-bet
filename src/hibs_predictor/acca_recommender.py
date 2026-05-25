@@ -28,6 +28,7 @@ from hibs_predictor.assistant_recommendations import (
     is_analyzable,
 )
 from hibs_predictor.assistant_recommendations import _match_label as _packet_match_label
+from hibs_predictor.fixture_utils import is_finished_fixture
 
 _DISCLAIMER = (
     "Research-only acca suggestions from live fixture snapshots — not financial advice. "
@@ -291,6 +292,83 @@ def _format_leg(packet: Dict[str, Any], leg: Dict[str, Any]) -> Dict[str, Any]:
     return leg_slip_payload(out)
 
 
+def _fixture_goals(packet: Dict[str, Any]) -> Tuple[Optional[int], Optional[int]]:
+    """FT goals from live score fields on the packet — None when unknown."""
+    h = packet.get("live_score_home")
+    a = packet.get("live_score_away")
+    if h is not None and a is not None:
+        try:
+            return int(h), int(a)
+        except (TypeError, ValueError):
+            pass
+    ls = packet.get("live_score")
+    if ls is not None and "-" in str(ls):
+        parts = str(ls).strip().split("-", 1)
+        try:
+            return int(parts[0].strip()), int(parts[1].strip())
+        except (TypeError, ValueError):
+            pass
+    return None, None
+
+
+def market_leg_result_label(packet: Dict[str, Any], market_key: Optional[str]) -> str:
+    """
+    W / L / pending from finished fixture scores only.
+    Does not invent results — requires FT (or equivalent) status and known goals.
+    """
+    if not packet or not is_finished_fixture(packet):
+        return "pending"
+    home_g, away_g = _fixture_goals(packet)
+    if home_g is None or away_g is None:
+        return "pending"
+    mk = (market_key or "").strip().lower()
+    total = home_g + away_g
+    both_scored = home_g > 0 and away_g > 0
+    if mk == "home_win":
+        return "W" if home_g > away_g else "L"
+    if mk == "away_win":
+        return "W" if away_g > home_g else "L"
+    if mk == "draw":
+        return "W" if home_g == away_g else "L"
+    if mk == "btts_yes":
+        return "W" if both_scored else "L"
+    if mk == "btts_no":
+        return "W" if not both_scored else "L"
+    if mk == "over_25":
+        return "W" if total >= 3 else "L"
+    if mk == "over_15":
+        return "W" if total >= 2 else "L"
+    if mk == "over_35":
+        return "W" if total >= 4 else "L"
+    return "pending"
+
+
+def _annotate_acca_results(
+    accas: List[Dict[str, Any]], packets_by_id: Dict[Any, Dict[str, Any]]
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Attach per-leg and acca-level results; partition winning vs other accas."""
+    winning: List[Dict[str, Any]] = []
+    other: List[Dict[str, Any]] = []
+    for acca in accas:
+        legs = acca.get("legs") or []
+        for leg in legs:
+            pkt = packets_by_id.get(leg.get("fixture_id")) or {}
+            leg["result"] = market_leg_result_label(pkt, leg.get("market_key"))
+        results = [leg.get("result") for leg in legs]
+        settled = [r for r in results if r in ("W", "L")]
+        if settled and len(settled) == len(results) and all(r == "W" for r in settled):
+            acca["all_legs_won"] = True
+            acca["is_winning"] = True
+            winning.append(acca)
+        else:
+            acca["all_legs_won"] = False if any(r == "L" for r in results) else None
+            acca["is_winning"] = False
+            other.append(acca)
+        reasons = [str(leg.get("reasoning") or "").strip() for leg in legs]
+        acca["brief_summary"] = next((r for r in reasons if r), acca.get("name") or "")
+    return winning, other
+
+
 def _build_acca_candidate(
     name: str,
     acca_type: str,
@@ -421,9 +499,14 @@ def build_acca_recommendations(packets: List[Dict[str, Any]]) -> Dict[str, Any]:
             "Refresh when more fixtures have book prices and model support."
         )
 
+    winning_accas, other_accas = _annotate_acca_results(accas, packets_by_id)
+    ordered_accas = winning_accas + other_accas
+
     return {
         "enabled": True,
-        "accas": accas,
+        "accas": ordered_accas,
+        "winning_accas": winning_accas,
+        "other_accas": other_accas,
         "eligible_leg_count": len(pool),
         "max_legs": max_legs,
         "value_data_pct_gate": value_require_data_pct(),
