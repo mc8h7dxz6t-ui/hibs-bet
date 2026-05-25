@@ -121,6 +121,7 @@ def test_focus_env_worldcup_override(monkeypatch):
 
 
 def test_focus_env_disabled_in_window(monkeypatch):
+    """Explicit HIBS_TOURNAMENT_FOCUS=0 opt-out — rare override during auto window."""
     monkeypatch.setenv("HIBS_TOURNAMENT_FOCUS", "0")
     monkeypatch.setattr(
         "hibs_predictor.tournament_focus._today_utc",

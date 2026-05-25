@@ -1,4 +1,10 @@
-"""Tournament / international focus mode (World Cup window, env-driven).
+"""Tournament / international focus mode (World Cup window, date-driven).
+
+Default (no ``HIBS_TOURNAMENT_FOCUS``): domestic leagues outside **2026-06-01 →
+2026-07-18**; international focus ON inside that window (UTC calendar).
+
+``HIBS_TOURNAMENT_FOCUS=worldcup`` (or ``euros`` / ``international``) forces focus
+on anytime. ``HIBS_TOURNAMENT_FOCUS=0`` forces domestic even inside the window.
 
 When active, fixture fetch defaults to international competition codes only (fewer
 API calls on VPS) and the dashboard defaults to the International region filter.

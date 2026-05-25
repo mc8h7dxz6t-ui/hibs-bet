@@ -18,7 +18,7 @@ Prioritises **consistency over new features** — enables player/injury/lineup l
 | `HIBS_ENABLE_LINEUP_FETCH` | `1` | Fetch confirmed XIs from API-Football near kickoff. |
 | `HIBS_LINEUP_FETCH_MAX_HOURS` | `6` | Only call lineups API within 6h of KO (saves quota). |
 | `HIBS_SKIP_API_SQUAD_DEPTH` | `1` | **Off on VPS** — squad/roster API calls often trigger 429; injuries + lineups cover most signal. |
-| `HIBS_TOURNAMENT_FOCUS` | `0` | Force domestic leagues; ignore World Cup auto-window until you re-enable. |
+| `HIBS_TOURNAMENT_FOCUS` | *(unset)* | Date-driven: domestic outside WC window; international default **2026-06-01 → 2026-07-18**. Set `=0` only to force domestic during the window. |
 | `HIBS_PREDICTION_LOG_ENABLED` | `1` | SQLite audit trail of model picks. |
 | `HIBS_CLV_LOG_ENABLED` | `1` | Store opening odds for closing-line value tracking. |
 | `HIBS_FBREF_BLOCKED` | `1` | Skip FBref HTML (datacenter IPs usually 403). |
@@ -89,32 +89,28 @@ Check `/api/health` for API quota and enrichment errors.
 
 ## World Cup / international period
 
-**Before 1 Jun 2026 (now):** keep `HIBS_TOURNAMENT_FOCUS=0` on the VPS so domestic leagues stay in the default fetch set through season end. No cache bump needed solely for the switch — only when deploying code that changes enrich fields (fixture cache **v25**).
+**No manual switch on 1 Jun 2026.** Leave `HIBS_TOURNAMENT_FOCUS` unset on the VPS (do not set `=0` in `apply-vps-safe-production.sh`). The app turns international-default fetch on at the first dashboard load on or after **2026-06-01** (UTC), and off again after **2026-07-18**. No cache bump needed solely for the date switch — only when deploying code that changes enrich fields (fixture cache **v25**).
 
-**From 1 Jun 2026:** auto focus applies when the calendar is inside **2026-06-01 → 2026-07-18** and focus is not forced off. On the VPS, remove or comment out `HIBS_TOURNAMENT_FOCUS=0` (or set `HIBS_TOURNAMENT_FOCUS=worldcup`) to enable international-default fetch; while `=0` remains, domestic leagues stay default even inside the window. Users can still load all leagues with dashboard `?domestic=1` or region **All**.
+Override only when needed:
 
-Auto focus window: **2026-06-01 → 2026-07-18** (override with `HIBS_TOURNAMENT_FOCUS_START` / `HIBS_TOURNAMENT_FOCUS_END`). Friendlies are included when focus is on (includes `INTL_FRIENDLIES` via API-Football league 10).
+- `HIBS_TOURNAMENT_FOCUS=worldcup` — force international focus before the window (testing).
+- `HIBS_TOURNAMENT_FOCUS=0` — force domestic leagues even inside the window (rare).
+
+Auto window: **2026-06-01 → 2026-07-18** (`HIBS_TOURNAMENT_FOCUS_START` / `_END` to override). Friendlies are included when focus is on (`INTL_FRIENDLIES` via API-Football league 10).
 
 | When | `HIBS_TOURNAMENT_FOCUS` | Fetch behaviour | Dashboard default |
 |------|-------------------------|-----------------|-------------------|
-| Before 1 Jun 2026 | `0` (VPS baseline) | All domestic + international leagues | All regions |
-| 1 Jun – 18 Jul 2026 | unset (auto) or `worldcup` | International codes only (`WORLD_CUP`, `NATIONS_LEAGUE`, `EUROS`, friendlies) | International region |
+| Before 1 Jun 2026 | unset | All domestic + international leagues | All regions |
+| 1 Jun – 18 Jul 2026 | unset (auto) | International codes only (`WORLD_CUP`, `NATIONS_LEAGUE`, `EUROS`, friendlies) | International region |
 | User picks All / UK / European | any | Full domestic via `?domestic=1` | Selected region |
+| Force domestic during window | `0` | All leagues (same as outside window) | All regions |
 
 **Do not** disable prediction logging, CLV, lineup/injury features, or lower DQ thresholds during the tournament — only the default league fetch set narrows when focus is active without `?domestic=1`.
 
-Suggested env during the window (after removing baseline `HIBS_TOURNAMENT_FOCUS=0`):
+Optional explicit override during the window (auto works without this):
 
 ```bash
-# Optional explicit override (auto window works without this)
 HIBS_TOURNAMENT_FOCUS=worldcup
-# Keep API budget sane on 2GB VPS
-HIBS_FETCH_DAYS=7
-HIBS_API_SPORTS_HOURLY_LIMIT=400
-HIBS_FIXTURE_FETCH_WORKERS=2
-HIBS_PREDICTION_LOG_ENABLED=1
-HIBS_CLV_LOG_ENABLED=1
-HIBS_MONITOR_DAYS=28
 ```
 
 Install cron if missing: `sudo bash /opt/hibs-bet/deploy/cron-hibs-calibration.sh --install` (daily `pred-log-sync`, weekly `calibration-fit`).
