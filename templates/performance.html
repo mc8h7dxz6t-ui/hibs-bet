@@ -69,10 +69,24 @@
         {% from '_hibs_brand.html' import inline_crest %}{{ inline_crest(size=44, css_class='perf-crest') }}
         <h1>Performance &amp; track record</h1>
         <p class="perf-intro">
-            Logged automatically when you use the dashboard before kick-off (<code>HIBS_PREDICTION_LOG_ENABLED=1</code>).
+            <strong>Engine monitor</strong> logs picks when you load the dashboard before kick-off
+            (<code>HIBS_PREDICTION_LOG_ENABLED=1</code> — on in your launcher).
             This page does not change predictions or data quality — it only reads the audit database.
             {{ perf.primary_view_hint|safe }}
         </p>
+        {% if perf.enabled %}
+        <p class="perf-hint" style="margin-top:0;">
+            <strong>0/9 yesterday?</strong> Check <em>Results recorded</em> (when FT was synced), not <em>Kickoff yesterday</em>
+            (matches that started that calendar day — often empty in summer).
+            Your <strong>9/10 high-confidence</strong> check is under yesterday → <em>High-confidence model leans (≥55%)</em>
+            after you run sync below.
+        </p>
+        <div class="perf-monitor-actions" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px;">
+            <span class="ir-pill ir-good">Engine monitor on</span>
+            <button type="button" class="nav-btn" id="perf-sync-results-btn">Sync finished results (today)</button>
+            <span id="perf-sync-status" class="ir-meta" aria-live="polite"></span>
+        </div>
+        {% endif %}
     </div>
 
     {% if not perf.enabled %}
@@ -241,4 +255,34 @@
     </section>
     {% endif %}
 </div>
+{% endblock %}
+{% block extra_js %}
+<script>
+(function () {
+    var btn = document.getElementById('perf-sync-results-btn');
+    var status = document.getElementById('perf-sync-status');
+    if (!btn || !status) return;
+    btn.addEventListener('click', function () {
+        btn.disabled = true;
+        status.textContent = 'Syncing FT results from API-Football…';
+        fetch('/api/monitor/sync-results', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ force: true }),
+            credentials: 'same-origin'
+        })
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+            .then(function (res) {
+                status.textContent = (res.j && res.j.message) ? res.j.message : (res.ok ? 'Done.' : 'Sync failed.');
+                if (res.ok && res.j && res.j.updated > 0) {
+                    setTimeout(function () { window.location.reload(); }, 800);
+                }
+            })
+            .catch(function () {
+                status.textContent = 'Sync failed — check you are logged in and the server is running.';
+            })
+            .finally(function () { btn.disabled = false; });
+    });
+})();
+</script>
 {% endblock %}

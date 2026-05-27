@@ -2509,6 +2509,28 @@ def api_monitor_summary():
     return jsonify(monitor_summary_dict(days=days))
 
 
+@app.route("/api/monitor/sync-results", methods=["POST"])
+@login_required
+def api_monitor_sync_results():
+    """Join FT scores to logged snapshots (engine monitor / pred-log-sync)."""
+    from hibs_predictor.prediction_log import run_pred_log_sync_for_web
+
+    min_h = request.args.get("min_hours")
+    min_after: Optional[float] = None
+    if min_h is not None:
+        try:
+            min_after = max(0.0, float(min_h))
+        except ValueError:
+            return jsonify({"ok": False, "error": "invalid_min_hours"}), 400
+    body = request.get_json(silent=True) if request.is_json else {}
+    force = isinstance(body, dict) and body.get("force")
+    if force and min_after is None:
+        min_after = 0.0
+    payload = run_pred_log_sync_for_web(min_after_kickoff_hours=min_after)
+    status = 200 if payload.get("ok") else 400
+    return jsonify(payload), status
+
+
 @app.route("/api/cache/clear", methods=["POST", "GET"])
 @login_required
 def api_cache_clear():

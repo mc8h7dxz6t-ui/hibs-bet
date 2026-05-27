@@ -566,3 +566,22 @@ def test_monitor_yesterday_value_hit_rate(audit_db, today_window):
     assert row["has_value"] is True
     assert row["value_result"] == "W"
     assert row["value_market"] == "BTTS Yes"
+
+
+def test_run_pred_log_sync_for_web_disabled(monkeypatch, audit_db):
+    from hibs_predictor.prediction_log import run_pred_log_sync_for_web
+
+    monkeypatch.setenv("HIBS_PREDICTION_LOG_ENABLED", "0")
+    out = run_pred_log_sync_for_web()
+    assert out["ok"] is False
+    assert out["enabled"] is False
+    assert out["updated"] == 0
+
+
+def test_run_pred_log_sync_for_web_no_snapshots(monkeypatch, audit_db):
+    from hibs_predictor.prediction_log import run_pred_log_sync_for_web
+
+    out = run_pred_log_sync_for_web()
+    assert out["ok"] is False
+    assert out["enabled"] is True
+    assert "snapshots" in (out.get("message") or "").lower()

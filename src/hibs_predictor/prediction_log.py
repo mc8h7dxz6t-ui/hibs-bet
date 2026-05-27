@@ -529,6 +529,87 @@ def sync_finished_results(
     return updated
 
 
+def run_pred_log_sync_for_web(
+    *,
+    max_fixtures: int = 400,
+    min_after_kickoff_hours: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    Backfill FT scores for pending audit rows (same as ``pred-log-sync`` CLI).
+
+    Read-only for predictions/DQ — only updates result columns on existing snapshots.
+    """
+    if not prediction_log_enabled():
+        return {
+            "ok": False,
+            "enabled": False,
+            "updated": 0,
+            "message": (
+                "Model monitor off — set HIBS_PREDICTION_LOG_ENABLED=1 and restart the app."
+            ),
+        }
+    init_db()
+    path = _db_path()
+    try:
+        conn = sqlite3.connect(path, timeout=15)
+        try:
+            row = conn.execute("SELECT COUNT(*) FROM prediction_snapshots").fetchone()
+            n_snap = int(row[0] if row else 0)
+        finally:
+            conn.close()
+    except Exception:
+        n_snap = 0
+    if n_snap <= 0:
+        return {
+            "ok": False,
+            "enabled": True,
+            "updated": 0,
+            "message": (
+                "No snapshots yet — open the dashboard before kick-off so fixtures are logged."
+            ),
+        }
+    try:
+        from hibs_predictor.data_aggregator import DataAggregator
+
+        agg = DataAggregator()
+    except Exception as exc:
+        return {"ok": False, "enabled": True, "updated": 0, "message": str(exc)}
+    if "api_sports" not in agg.clients:
+        return {
+            "ok": False,
+            "enabled": True,
+            "updated": 0,
+            "message": "API_SPORTS_FOOTBALL_KEY is required to sync finished results.",
+        }
+    min_h = min_after_kickoff_hours
+    if min_h is None:
+        try:
+            min_h = float(os.getenv("HIBS_PRED_LOG_SYNC_MIN_HOURS", "2.5"))
+        except ValueError:
+            min_h = 2.5
+    fetch_stats = getattr(agg.clients["api_sports"], "fetch_fixture_statistics", None)
+    updated = sync_finished_results(
+        agg.clients["api_sports"].fetch_fixture,
+        fetch_odds_fn=agg.clients["api_sports"].fetch_odds,
+        fetch_statistics_fn=fetch_stats,
+        max_fixtures=int(max_fixtures),
+        min_after_kickoff_hours=float(min_h),
+    )
+    msg = (
+        f"Updated {updated} snapshot row(s) with full-time results."
+        if updated
+        else "No pending fixtures needed an update (already synced or not FT yet)."
+    )
+    return {
+        "ok": True,
+        "enabled": True,
+        "updated": int(updated),
+        "message": msg,
+        "today": monitor_today_dict(),
+        "yesterday": monitor_yesterday_dict(),
+    }
+
+
 def prune_old_rows(days: Optional[int] = None) -> int:
     """Delete snapshots older than retain policy. Returns deleted row count."""
     d = days if days is not None else _retain_days()
