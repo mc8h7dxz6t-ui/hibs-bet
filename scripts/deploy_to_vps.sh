@@ -22,25 +22,7 @@ rsync -avz --delete \
   "${REPO_ROOT}/" "${USER}@${HOST}:${APP}/"
 
 echo "==> remote install + tuning + restart"
-ssh "${USER}@${HOST}" "set -euo pipefail
-  cd '${APP}'
-  if [[ -x .venv/bin/pip ]]; then
-    .venv/bin/pip install -q -r requirements.txt
-  else
-    python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt
-  fi
-  cp deploy/hibs-bet.service /etc/systemd/system/hibs-bet.service
-  CACHE_DIR=\"\${HIBS_CACHE_DIR:-${APP}/.cache}\"
-  if grep -qE '^HIBS_CACHE_BUST=1' '${APP}/.env' 2>/dev/null; then
-    echo \"==> HIBS_CACHE_BUST=1 — clear fixture caches\"
-    rm -f \"\${CACHE_DIR}\"/all_fixtures_*.json \"\${CACHE_DIR}\"/fixtures_*.json \"\${CACHE_DIR}\"/league_*.json \"\${CACHE_DIR}\"/enriched_fixture_*.json 2>/dev/null || true
-    sed -i '/^HIBS_CACHE_BUST=1/d' '${APP}/.env'
-  else
-    echo \"==> keep fixture disk cache (set HIBS_CACHE_BUST=1 in .env once to bust)\"
-  fi
-  chown -R www-data:www-data \"\${CACHE_DIR}\" 2>/dev/null || true
-  bash deploy/apply-vps-safe-production.sh
-"
+ssh "${USER}@${HOST}" "export DEPLOY_PATH='${APP}'; bash -s" < "${REPO_ROOT}/scripts/_deploy_vps_post.sh"
 
 echo "==> smoke test"
 curl -sS --max-time 30 -o /dev/null -w 'health %{http_code}\n' "https://hibs-bet.co.uk/api/health" || true

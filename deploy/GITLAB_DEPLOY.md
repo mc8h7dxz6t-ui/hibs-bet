@@ -2,7 +2,9 @@
 
 Production lives at **`/opt/hibs-bet`** (see `deploy/hibs-bet.service`). Pushing to the **default branch** (`main`) runs tests, then SSH deploys to the VPS.
 
-**Why the site stayed old after `git push`:** deploy only runs in GitLab CI (not from your laptop). Until CI variables and server SSH are set up, pipelines fail or skip deploy. Previously deploy was **manual**; it is now **automatic** on `main` after tests pass.
+**Why the site stayed old after `git push`:** deploy only runs in GitLab CI (not from your laptop). Until CI variables and server SSH are set up, pipelines fail or skip deploy. Deploy is **automatic** on the default branch after tests pass.
+
+**hibs-bet.co.uk today:** production at `/opt/hibs-bet` is updated by **rsync** (no `git` clone on the server). GitLab CI uses the same path as `./scripts/deploy_to_vps.sh` via `scripts/deploy_ci_from_runner.sh`. You do not need `git pull` on the VPS unless you switch to a git-based layout later.
 
 ---
 
@@ -14,8 +16,10 @@ In GitLab: **Settings → CI/CD → Variables → Add variable**
 |----------|------|-----------|--------|-----------------|
 | `SSH_PRIVATE_KEY` | **File** (preferred) or Variable | Yes | No* | PEM private key for the deploy SSH user. Full key including `-----BEGIN ...-----` / `-----END ...-----`. *File type cannot be masked. |
 | `DEPLOY_HOST` | Variable | Yes | No | VPS hostname or IP serving hibs-bet.co.uk |
-| `DEPLOY_USER` | Variable | Yes | No | SSH user (e.g. `deploy` or `www-data`) |
+| `DEPLOY_USER` | Variable | Yes | No | SSH user (`root` on current VPS, or a deploy user with sudo) |
 | `DEPLOY_PATH` | Variable | Yes | No | `/opt/hibs-bet` (default in `.gitlab-ci.yml` if omitted) |
+
+Example for **hibs-bet.co.uk**: `DEPLOY_HOST` = your VPS IP, `DEPLOY_USER` = `root`, `DEPLOY_PATH` = `/opt/hibs-bet`.
 
 **Optional but recommended**
 
@@ -100,14 +104,16 @@ deploy ALL=(root) NOPASSWD: /bin/systemctl restart hibs-bet.service, /bin/system
 
 ---
 
-## 3. What happens on push to `main`
+## 3. What happens on push to default branch
 
-1. **test** — `python test_app.py` (project test runner; fast sanity check).
-2. **deploy_production** — SSH to `DEPLOY_USER@DEPLOY_HOST`, run `scripts/deploy_remote.sh`:
-   - `git pull --ff-only`
+1. **test** — `python test_app.py` (on every branch and merge request).
+2. **deploy_production** — rsync CI checkout → VPS, then `scripts/_deploy_vps_post.sh` on the server:
    - `.venv/bin/pip install -r requirements.txt`
-   - remove stale fixture cache files under `.cache/`
-   - `sudo systemctl restart hibs-bet.service`
+   - `deploy/apply-vps-safe-production.sh` (env + nginx + unit; does not overwrite `.env`)
+   - optional fixture cache bust if `HIBS_CACHE_BUST=1` in server `.env`
+   - `systemctl restart hibs-bet.service`
+
+Legacy **git on server**: use `scripts/deploy_remote.sh` instead of rsync (requires `.git` in `DEPLOY_PATH`).
 
 Check **CI/CD → Pipelines** in GitLab. A green deploy job means production was updated.
 
@@ -121,7 +127,8 @@ Check **CI/CD → Pipelines** in GitLab. A green deploy job means production was
 |---------|----------------|
 | Pipeline passes but site unchanged | Deploy job skipped (not on `main`) or failed — open job logs |
 | `Permission denied (publickey)` | Wrong `SSH_PRIVATE_KEY` or pubkey not in `authorized_keys` |
-| `git pull` fails on server | Server clone has no fetch credentials; add GitLab deploy key to project and server |
+| `git pull` fails on server | Normal if you use rsync deploy — CI does not call `git pull`; use `deploy_remote.sh` only with a git clone |
+| `rsync: connection refused` | Wrong `DEPLOY_HOST` / firewall / SSH not on port 22 |
 | `sudo: a password is required` | Missing sudoers rule for `systemctl restart` |
 | App old data after deploy | Fixture cache — deploy script clears `fixtures_*` / `all_fixtures_*`; use dashboard Refresh if needed |
 
@@ -144,5 +151,8 @@ Use this if you prefer **not** to store `SSH_PRIVATE_KEY` in GitLab. GitLab stil
 ## 6. Related files
 
 - `.gitlab-ci.yml` — pipeline definition
-- `scripts/deploy_remote.sh` — remote deploy steps
+- `scripts/deploy_ci_from_runner.sh` — GitLab CI rsync deploy (default)
+- `scripts/deploy_to_vps.sh` — same flow from your Mac
+- `scripts/deploy_remote.sh` — optional `git pull` deploy on server
+- `scripts/_deploy_vps_post.sh` — shared remote install / restart steps
 - `deploy/hibs-bet.service` — gunicorn on `:8000`

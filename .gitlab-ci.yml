@@ -11,8 +11,8 @@
 #   SSH_KNOWN_HOSTS   If set, written to ~/.ssh/known_hosts (recommended). Generate: ssh-keyscan -H your.host
 #
 # Server setup (once):
-#   - Clone this repo to DEPLOY_PATH; ensure branch tracks origin default branch.
-#   - python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+#   - mkdir -p DEPLOY_PATH; copy .env (never commit). Git clone optional — CI rsyncs the repo.
+#   - python3 -m venv DEPLOY_PATH/.venv && pip install -r requirements.txt
 #   - Copy deploy/hibs-bet.service → /etc/systemd/system/hibs-bet.service (edit paths/user), daemon-reload, enable.
 #   - Create DEPLOY_PATH/.env with API keys etc. Never commit .env (already in .gitignore).
 #   - DEPLOY_USER must be able to `git pull` in DEPLOY_PATH (deploy key or HTTPS credential on server).
@@ -53,7 +53,7 @@ deploy_production:
   needs: ["test"]
   image: python:3.12-bookworm
   before_script:
-    - apt-get update -qq && apt-get install -qqy openssh-client
+    - apt-get update -qq && apt-get install -qqy openssh-client rsync
     - mkdir -p ~/.ssh && chmod 700 ~/.ssh
     - |
       if [ -n "${SSH_KNOWN_HOSTS:-}" ]; then
@@ -65,7 +65,7 @@ deploy_production:
     - eval "$(ssh-agent -s)"
     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
   script:
-    - ssh -o StrictHostKeyChecking=yes -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" "export DEPLOY_PATH=\"${DEPLOY_PATH}\"; bash -s" < scripts/deploy_remote.sh
+    - bash scripts/deploy_ci_from_runner.sh
   environment:
     name: production
   rules:
