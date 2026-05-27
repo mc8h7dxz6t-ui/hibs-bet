@@ -102,6 +102,8 @@ FOTMOB_LEAGUE_IDS: Dict[str, set[int]] = {
     "WORLD_CUP": {77},
     "EUROS": {50},
     "NATIONS_LEAGUE": {9806, 9807, 9808, 9809},
+    # National-team friendlies (FotMob id varies; name scan in fixtures_international_friendlies).
+    "INTL_FRIENDLIES": {914609},
 }
 
 
@@ -385,8 +387,53 @@ def probe_matches_api(day: Optional[date] = None) -> Dict[str, Any]:
         return {"ok": False, "league_count": 0, "error": str(exc)[:160]}
 
 
+def _is_national_friendlies_league_name(name: str) -> bool:
+    n = (name or "").lower()
+    if "friendl" not in n:
+        return False
+    if "club" in n:
+        return False
+    return True
+
+
+def fixtures_international_friendlies(
+    start: date, end: date, *, cache: Optional[Cache] = None
+) -> List[Dict[str, Any]]:
+    """National-team friendly matches from FotMob daily feed (league name contains Friendlies)."""
+    cache = cache or Cache()
+    rows: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for day in _date_range(start, end):
+        payload = fetch_matches_for_date(day, cache=cache)
+        for league in payload.get("leagues") or []:
+            if not isinstance(league, dict):
+                continue
+            lname = str(league.get("name") or "")
+            if not _is_national_friendlies_league_name(lname):
+                continue
+            for match in league.get("matches") or []:
+                if not isinstance(match, dict):
+                    continue
+                mid = str(match.get("id") or match.get("matchId") or "")
+                key = mid or f"{match.get('home')}|{match.get('away')}|{match.get('status')}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                out = dict(match)
+                out["_fotmob_league"] = {
+                    "id": league.get("id"),
+                    "primaryId": league.get("primaryId"),
+                    "name": lname,
+                }
+                rows.append(out)
+    return rows
+
+
 def fixtures_for_league(league_code: str, start: date, end: date, *, cache: Optional[Cache] = None) -> List[Dict[str, Any]]:
     """Extract FotMob match rows for a configured league over an inclusive date range."""
+    code = (league_code or "").strip().upper()
+    if code == "INTL_FRIENDLIES":
+        return fixtures_international_friendlies(start, end, cache=cache)
     wanted = FOTMOB_LEAGUE_IDS.get(league_code) or set()
     if not wanted:
         return []

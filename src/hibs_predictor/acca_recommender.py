@@ -24,7 +24,9 @@ from hibs_predictor.assistant_recommendations import (
     _leg_score,
     _min_model_pct_for_key,
     _value_leg_from_display,
+    build_bet_builder_suggestions,
     build_detailed_leg_rationale,
+    build_win_btts_combo_suggestions,
     is_analyzable,
 )
 from hibs_predictor.assistant_recommendations import _match_label as _packet_match_label
@@ -37,6 +39,10 @@ _DISCLAIMER = (
 _INDEPENDENCE_NOTE = (
     "Combined probability treats legs as independent — correlated markets "
     "(e.g. BTTS + Over 2.5) may differ in reality."
+)
+_SAME_GAME_NOTE = (
+    "Same-game combos use real prices on each component market only. "
+    "Multiplying leg odds is indicative — use your book's bet builder for the actual quote."
 )
 
 _ALLOWED_MARKETS = frozenset(
@@ -340,6 +346,12 @@ def market_leg_result_label(packet: Dict[str, Any], market_key: Optional[str]) -
         return "W" if total >= 2 else "L"
     if mk == "over_35":
         return "W" if total >= 4 else "L"
+    if mk == "under_25":
+        return "W" if total < 3 else "L"
+    if mk == "under_15":
+        return "W" if total < 2 else "L"
+    if mk == "under_35":
+        return "W" if total < 4 else "L"
     return "pending"
 
 
@@ -367,6 +379,78 @@ def _annotate_acca_results(
         reasons = [str(leg.get("reasoning") or "").strip() for leg in legs]
         acca["brief_summary"] = next((r for r in reasons if r), acca.get("name") or "")
     return winning, other
+
+
+def _format_same_game_builder(builder: Dict[str, Any]) -> Dict[str, Any]:
+    """Template-friendly same-game combo from priced component legs."""
+    legs = []
+    for leg in builder.get("legs") or []:
+        legs.append(
+            {
+                "market_key": leg.get("market_key"),
+                "market_label": leg.get("market_label") or leg.get("market_key"),
+                "model_pct": leg.get("model_pct"),
+                "odds": leg.get("odds"),
+                "edge_pct": leg.get("edge_pct"),
+            }
+        )
+    return {
+        "fixture_id": builder.get("fixture_id"),
+        "match": builder.get("match"),
+        "league": builder.get("league_name") or builder.get("league"),
+        "kickoff_time": builder.get("kickoff_time"),
+        "title": builder.get("title"),
+        "type": builder.get("type"),
+        "legs": legs,
+        "leg_count": len(legs),
+        "estimated_independent_odds": builder.get("estimated_independent_odds"),
+        "joint_confidence_pct": builder.get("joint_confidence_pct"),
+        "bookmaker_quote_required": bool(builder.get("bookmaker_quote_required", True)),
+        "rationale": list(builder.get("rationale") or [])[:3],
+        "note": _SAME_GAME_NOTE,
+    }
+
+
+def build_same_fixture_combo_ideas(
+    packets: List[Dict[str, Any]],
+    *,
+    builder_limit: int = 8,
+    priced_combo_limit: int = 6,
+) -> Dict[str, Any]:
+    """
+    Same-fixture correlated market ideas (BTTS+O2.5, win+O2.5, win+BTTS, etc.).
+
+    Component legs must have book prices; no synthetic combo odds.
+    """
+    analyzable = [p for p in packets if is_analyzable(p)]
+    builders = build_bet_builder_suggestions(analyzable, limit=builder_limit)
+    priced_combos = build_win_btts_combo_suggestions(analyzable, limit=priced_combo_limit)
+    formatted_builders = [_format_same_game_builder(b) for b in builders]
+    formatted_priced = []
+    for leg in priced_combos:
+        formatted_priced.append(
+            {
+                "fixture_id": leg.get("fixture_id"),
+                "match": leg.get("match"),
+                "league": leg.get("league_name") or leg.get("league"),
+                "kickoff_time": leg.get("kickoff_time"),
+                "market_key": leg.get("market_key"),
+                "market_label": leg.get("market_label") or leg.get("market_key"),
+                "model_pct": leg.get("model_pct"),
+                "odds": leg.get("odds"),
+                "edge_pct": leg.get("edge_pct"),
+                "rationale": (leg.get("rationale") or [])[:3]
+                if isinstance(leg.get("rationale"), list)
+                else [str(leg.get("rationale") or "")[:220]],
+                "note": "Priced combo market from the fixture snapshot (if your book lists it).",
+            }
+        )
+    return {
+        "builders": formatted_builders,
+        "priced_combo_legs": formatted_priced,
+        "count": len(formatted_builders) + len(formatted_priced),
+        "note": _SAME_GAME_NOTE,
+    }
 
 
 def _build_acca_candidate(
@@ -410,6 +494,7 @@ def build_acca_recommendations(packets: List[Dict[str, Any]]) -> Dict[str, Any]:
         return {
             "enabled": False,
             "accas": [],
+            "same_fixture_combos": build_same_fixture_combo_ideas(packets),
             "eligible_leg_count": 0,
             "message": "Acca recommender disabled (HIBS_ACCA_RECOMMENDER=0).",
             "disclaimer": _DISCLAIMER,
@@ -507,6 +592,7 @@ def build_acca_recommendations(packets: List[Dict[str, Any]]) -> Dict[str, Any]:
         "accas": ordered_accas,
         "winning_accas": winning_accas,
         "other_accas": other_accas,
+        "same_fixture_combos": build_same_fixture_combo_ideas(packets),
         "eligible_leg_count": len(pool),
         "max_legs": max_legs,
         "value_data_pct_gate": value_require_data_pct(),

@@ -187,8 +187,15 @@
                 }
                 if (parseInt(slice.n_logged, 10) > 0) {
                     var bp = slice.best_pick || {};
-                    return label + ': ' + slice.n_logged + ' fixtures · Wins: '
-                        + (bp.wins || 0) + ' · Losses: ' + (bp.losses || 0) + ' · Pending: ' + (bp.pending || 0);
+                    var parts = [label + ': ' + slice.n_logged + ' fixtures', '1X2 W ' + (bp.wins || 0)
+                        + ' L ' + (bp.losses || 0) + ' P ' + (bp.pending || 0)];
+                    var vp = slice.value_pick || {};
+                    if (parseInt(vp.attempts, 10) > 0) {
+                        var vline = 'Value W ' + (vp.wins || 0) + ' L ' + (vp.losses || 0) + ' P ' + (vp.pending || 0);
+                        if (vp.hit_rate_pct != null) vline += ' · hit ' + vp.hit_rate_pct + '%';
+                        parts.push(vline);
+                    }
+                    return parts.join(' · ');
                 }
                 return slice.message || (label + ': none.');
             }
@@ -224,17 +231,22 @@
                 });
             }
             function monitorDayTable(rows, emptyText) {
-                var head = '<tr><th>Match</th><th>Pick</th><th>Model %</th><th>Result</th><th>Score</th><th>CLV</th></tr>';
+                var head = '<tr><th>Match</th><th>Value</th><th>Model%</th><th>Odds</th><th>Edge</th><th>V W/L</th><th>Score</th><th>1X2</th><th>CLV</th></tr>';
                 var sorted = monitorSortRows(rows);
                 var body = sorted.map(function (row) {
-                    var res = row.result === 'W' ? 'W' : (row.result === 'L' ? 'L' : 'pending');
-                    var cls = monitorRowClass(res);
-                    return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + esc(row.match) + '</td><td>' + esc(row.pick) + '</td><td>'
-                        + (row.model_pct != null ? esc(row.model_pct) + '%' : '—') + '</td><td>' + monitorResultBadge(res)
-                        + '</td><td>' + esc(row.score || '—') + '</td><td>'
+                    var res = row.value_result === 'W' ? 'W' : (row.value_result === 'L' ? 'L' : (row.result === 'W' ? 'W' : (row.result === 'L' ? 'L' : 'pending')));
+                    var cls = monitorRowClass(row.value_result === 'W' || row.value_result === 'L' ? row.value_result : res);
+                    var vres = row.has_value ? monitorResultBadge(row.value_result === 'W' ? 'W' : (row.value_result === 'L' ? 'L' : 'pending')) : '—';
+                    var lean = esc(row.pick || '—') + ' ' + monitorResultBadge(row.result === 'W' ? 'W' : (row.result === 'L' ? 'L' : 'pending'));
+                    return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + esc(row.match) + '</td><td>'
+                        + esc(row.has_value ? (row.value_market || '—') : '—') + '</td><td>'
+                        + (row.has_value && row.value_model_pct != null ? esc(row.value_model_pct) + '%' : '—') + '</td><td>'
+                        + (row.has_value && row.value_odds != null ? esc(row.value_odds) : '—') + '</td><td>'
+                        + (row.has_value && row.value_edge_pct != null ? '+' + esc(row.value_edge_pct) + '%' : '—') + '</td><td>' + vres
+                        + '</td><td>' + esc(row.score || '—') + '</td><td>' + lean + '</td><td>'
                         + (row.clv_pp != null ? esc(row.clv_pp) + ' pp' : '—') + '</td></tr>';
                 }).join('');
-                return head + (body || '<tr><td colspan="6">' + esc(emptyText) + '</td></tr>');
+                return head + (body || '<tr><td colspan="9">' + esc(emptyText) + '</td></tr>');
             }
             var ydKo = yd.kickoff || yd;
             var ydSc = yd.scored || {};

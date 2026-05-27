@@ -179,3 +179,25 @@ def test_max_legs_env(monkeypatch, rich_packets):
     accas = build_acca_recommendations(rich_packets)["accas"]
     assert accas
     assert max(a["leg_count"] for a in accas) <= 3
+
+
+def test_same_fixture_combo_ideas(rich_packets):
+    from hibs_predictor.acca_recommender import build_same_fixture_combo_ideas
+
+    pkt = rich_packets[0]
+    pkt["pick_menu"] = list(pkt.get("pick_menu") or []) + [
+        {"key": "over_25", "label": "Over 2.5", "model_pct": 62.0, "odds": 1.9, "edge_pct": 2.0},
+        {"key": "home_win", "label": "Home Win", "model_pct": 55.0, "odds": 1.8, "edge_pct": 1.0},
+    ]
+    out = build_same_fixture_combo_ideas([pkt])
+    assert "builders" in out
+    assert "priced_combo_legs" in out
+    assert out["note"]
+
+
+def test_acca_output_includes_same_fixture_combos(rich_packets):
+    from hibs_predictor.acca_recommender import build_acca_recommendations
+
+    result = build_acca_recommendations(rich_packets)
+    assert "same_fixture_combos" in result
+    assert "builders" in result["same_fixture_combos"]

@@ -22,8 +22,15 @@ from hibs_predictor.config import LEAGUES
 from hibs_predictor.cache import Cache
 from hibs_predictor.data_quality import _has_stats, compute_fixture_data_quality
 from hibs_predictor.scrapers.supplemental import collect_supplemental
-from hibs_predictor.fixture_utils import coerce_team_id, fixture_team_id, fixture_team_name, normalize_position_dict
+from hibs_predictor.fixture_utils import (
+    coerce_team_id,
+    fixture_team_id,
+    fixture_team_name,
+    is_cup_competition,
+    normalize_position_dict,
+)
 from hibs_predictor.scrapers import soccerstats_standings as soccerstats_standings
+from hibs_predictor.scrapers.fotmob_client import FOTMOB_XG_LEAGUE_FALLBACK
 
 
 def _project_root() -> str:
@@ -72,6 +79,15 @@ def _season_candidates(now: Optional[datetime] = None, league_code: Optional[str
     from hibs_predictor.season import season_candidates
 
     return season_candidates(now, league_code=league_code)
+
+
+def _cup_domestic_stats_league(league_code: str) -> Tuple[str, Optional[int]]:
+    """When cup competition stats are empty, use parent domestic league (e.g. Coupe → Ligue 1)."""
+    code = (league_code or "").strip().upper()
+    parent = FOTMOB_XG_LEAGUE_FALLBACK.get(code)
+    if not parent:
+        return code, LEAGUES.get(code, {}).get("api_sports_id")
+    return parent, LEAGUES.get(parent, {}).get("api_sports_id")
 
 
 def _norm_team_name(name: Any) -> str:
@@ -974,11 +990,16 @@ class DataAggregator:
 
         league_strength = float(league.get("strength_factor", 1.0))
 
+        stats_league_code = league_code
+        stats_league_api_id = league_api_id
+        if is_cup_competition(league_code):
+            stats_league_code, stats_league_api_id = _cup_domestic_stats_league(league_code)
+
         # API team stats before recent matches so season xG can run when ids exist.
         if home_id:
             try:
                 enriched["home_stats"] = self._fetch_team_stats(
-                    home_id, league_code, league_api_id, season, {}, fdo_comp=fdo_comp
+                    home_id, stats_league_code, stats_league_api_id, season, {}, fdo_comp=fdo_comp
                 )
             except Exception as exc:
                 print(f"[enrich home_stats] {league_code} fid={fixture_id_str}: {exc!r}")
@@ -988,7 +1009,7 @@ class DataAggregator:
         if away_id:
             try:
                 enriched["away_stats"] = self._fetch_team_stats(
-                    away_id, league_code, league_api_id, season, {}, fdo_comp=fdo_comp
+                    away_id, stats_league_code, stats_league_api_id, season, {}, fdo_comp=fdo_comp
                 )
             except Exception as exc:
                 print(f"[enrich away_stats] {league_code} fid={fixture_id_str}: {exc!r}")
@@ -1325,6 +1346,7 @@ class DataAggregator:
             enriched = maybe_deep_enrich(self, fixture, league_code, enriched)
         except Exception as exc:
             print(f"[enrich deep] {league_code} fid={fixture_id_str}: {exc!r}")
+        enriched.setdefault("league", league_code)
         try:
             enriched["data_quality"] = compute_fixture_data_quality(enriched)
         except Exception as exc:

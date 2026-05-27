@@ -25,6 +25,7 @@ def test_market_leg_result_from_ft_scores():
     assert market_leg_result_label(pkt, "away_win") == "L"
     assert market_leg_result_label(pkt, "btts_yes") == "W"
     assert market_leg_result_label(pkt, "over_25") == "W"
+    assert market_leg_result_label(pkt, "under_25") == "L"
     assert market_leg_result_label({"fixture_status": "NS"}, "home_win") == "pending"
     assert market_leg_result_label(pkt, "unknown_market") == "pending"
 
@@ -128,9 +129,9 @@ def test_monitor_rows_to_table_sorts_wins_first(audit_db):
     finally:
         conn.close()
 
-    _bp, table_rows = _monitor_rows_to_table(db_rows)
-    assert _bp["wins"] == 1
-    assert _bp["losses"] == 1
+    meta, table_rows = _monitor_rows_to_table(db_rows)
+    assert meta["best_pick"]["wins"] == 1
+    assert meta["best_pick"]["losses"] == 1
     assert table_rows[0]["result"] == "W"
     assert table_rows[-1]["result"] == "L"
 

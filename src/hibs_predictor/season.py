@@ -13,6 +13,7 @@ CALENDAR_YEAR_LEAGUES = frozenset(
     {
         "NORWAY_ELITESERIEN",
         "FINLAND_VEIKKAUSLIIGA",
+        "INTL_FRIENDLIES",
     }
 )
 

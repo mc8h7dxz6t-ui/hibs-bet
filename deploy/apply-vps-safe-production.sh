@@ -109,6 +109,7 @@ upsert_safe_env() {
 ${SAFE_MARKER}
 # Scope A end-of-season: player/injury/lineup on; squad depth off (429 budget).
 HIBS_FETCH_DAYS=7
+HIBS_FRIENDLIES_FETCH_DAYS=14
 HIBS_MAX_DATA=1
 HIBS_ENABLE_FOTMOB_XG=1
 HIBS_FETCH_FIXTURE_STATISTICS_XG=1

@@ -555,11 +555,13 @@ class OddsApiClient(BaseApiClient):
         "WORLD_CUP": "soccer_fifa_world_cup",
         "EUROS": "soccer_uefa_european_championship",
         "NATIONS_LEAGUE": "soccer_uefa_nations_league",
+        "INTL_FRIENDLIES": "soccer_international_friendlies",
     }
     # Legacy / alternate keys tried when the primary sport returns HTTP 404.
     SPORT_KEY_FALLBACKS: Dict[str, List[str]] = {
         "CHAMPIONSHIP": ["soccer_england_efl_championship"],
         "SCOTLAND": ["soccer_scotland_premiership"],
+        "INTL_FRIENDLIES": ["soccer_fifa_world_cup"],
     }
 
     def __init__(self, api_key: str) -> None:

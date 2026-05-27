@@ -557,7 +557,8 @@ def _rows_with_results(conn: sqlite3.Connection) -> List[sqlite3.Row]:
     return list(
         conn.execute(
             """
-            SELECT id, prediction_json, result_outcome, data_quality_pct
+            SELECT id, prediction_json, result_outcome, data_quality_pct,
+                   result_home, result_away, result_status
             FROM prediction_snapshots
             WHERE result_outcome IS NOT NULL AND result_outcome != ''
             """
@@ -788,6 +789,146 @@ def backfill_snapshots_from_fixtures(
     return logged
 
 
+# value_bets keys (engine) → acca market keys for FT settlement
+_VALUE_BET_TO_MARKET_KEY: Dict[str, str] = {
+    "home": "home_win",
+    "away": "away_win",
+    "draw": "draw",
+    "btts_yes": "btts_yes",
+    "btts_no": "btts_no",
+    "over15": "over_15",
+    "under15": "under_15",
+    "over25": "over_25",
+    "under25": "under_25",
+    "over35": "over_35",
+    "under35": "under_35",
+}
+
+
+def _snapshot_has_value(pred: Dict[str, Any]) -> bool:
+    """True when the logged snapshot flagged at least one value bet."""
+    if pred.get("has_any_value"):
+        return True
+    return bool(pred.get("value_bets")) or bool(pred.get("value_bets_alt"))
+
+
+def _value_bet_row(pred: Dict[str, Any], key: str) -> Optional[Dict[str, Any]]:
+    vb = pred.get("value_bets") or {}
+    row = vb.get(key) if isinstance(vb, dict) else None
+    if isinstance(row, dict):
+        return row
+    alt = pred.get("value_bets_alt") or {}
+    row = alt.get(key) if isinstance(alt, dict) else None
+    return row if isinstance(row, dict) else None
+
+
+def _value_pick_snapshot(pred: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Top logged value leg (best_bet ROI) with display + settlement keys."""
+    if not _snapshot_has_value(pred):
+        return None
+    key = pred.get("best_bet")
+    if not key:
+        merged: Dict[str, Any] = {}
+        for src in (pred.get("value_bets"), pred.get("value_bets_alt")):
+            if isinstance(src, dict):
+                merged.update(src)
+        if not merged:
+            return None
+        key = max(
+            merged.keys(),
+            key=lambda k: float((merged.get(k) or {}).get("roi_percent") or 0),
+        )
+    row = _value_bet_row(pred, str(key))
+    if not row:
+        return None
+    market_key = str(key)
+    settle_key = _VALUE_BET_TO_MARKET_KEY.get(market_key)
+    label = row.get("market_label") or market_key.replace("_", " ").title()
+    model_pct = row.get("model_probability_pct")
+    if model_pct is None:
+        try:
+            model_pct = round(float(row.get("model_probability") or 0) * 100.0, 1)
+        except (TypeError, ValueError):
+            model_pct = None
+    edge = row.get("edge_pct")
+    if edge is None:
+        edge = row.get("roi_percent")
+    odds = row.get("odds")
+    try:
+        odds_f = round(float(odds), 2) if odds is not None else None
+    except (TypeError, ValueError):
+        odds_f = None
+    try:
+        edge_f = round(float(edge), 1) if edge is not None else None
+    except (TypeError, ValueError):
+        edge_f = None
+    return {
+        "market_key": market_key,
+        "market_label": label,
+        "settle_key": settle_key,
+        "model_pct": model_pct,
+        "odds": odds_f,
+        "edge_pct": edge_f,
+    }
+
+
+def _row_result_packet(row: sqlite3.Row) -> Dict[str, Any]:
+    status = str(row["result_status"] or "").upper()
+    ft = status == "FT" or (
+        row["result_home"] is not None
+        and row["result_away"] is not None
+        and bool(row["result_outcome"])
+    )
+    return {
+        "fixture_status": "FT" if ft else "NS",
+        "live_score_home": row["result_home"],
+        "live_score_away": row["result_away"],
+    }
+
+
+def _value_pick_result_label(row: sqlite3.Row, pred: Dict[str, Any]) -> Optional[str]:
+    """W / L / pending for the logged value leg; None when snapshot had no value flag."""
+    snap = _value_pick_snapshot(pred)
+    if not snap:
+        return None
+    settle_key = snap.get("settle_key")
+    if not settle_key:
+        return "pending"
+    from hibs_predictor.acca_recommender import market_leg_result_label
+
+    return market_leg_result_label(_row_result_packet(row), settle_key)
+
+
+def _value_pick_tally(rows: List[sqlite3.Row]) -> Dict[str, Any]:
+    wins = losses = pending = attempts = 0
+    for r in rows:
+        try:
+            pred = json.loads(r["prediction_json"])
+        except Exception:
+            continue
+        if not isinstance(pred, dict) or not _value_pick_snapshot(pred):
+            continue
+        attempts += 1
+        label = _value_pick_result_label(r, pred)
+        if label == "W":
+            wins += 1
+        elif label == "L":
+            losses += 1
+        else:
+            pending += 1
+    settled = wins + losses
+    out: Dict[str, Any] = {
+        "attempts": attempts,
+        "wins": wins,
+        "losses": losses,
+        "pending": pending,
+        "settled": settled,
+    }
+    if settled:
+        out["hit_rate_pct"] = round(100.0 * wins / settled, 2)
+    return out
+
+
 def _best_pick_result_label(
     pred: Dict[str, Any],
     *,
@@ -836,7 +977,7 @@ def _clv_pp_from_enrich(enrich_raw: Any) -> Optional[float]:
         return None
 
 
-def _monitor_rows_to_table(rows: List[sqlite3.Row]) -> Tuple[Dict[str, int], List[Dict[str, Any]]]:
+def _monitor_rows_to_table(rows: List[sqlite3.Row]) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     wins = losses = pending = 0
     table_rows: List[Dict[str, Any]] = []
     for r in rows:
@@ -860,6 +1001,8 @@ def _monitor_rows_to_table(rows: List[sqlite3.Row]) -> Tuple[Dict[str, int], Lis
                 losses += 1
             else:
                 pending += 1
+        value_snap = _value_pick_snapshot(pred)
+        value_label = _value_pick_result_label(r, pred) if value_snap else None
         home_nm = str(r["home_name"] or pred.get("home") or "?")
         away_nm = str(r["away_name"] or pred.get("away") or "?")
         table_rows.append(
@@ -873,6 +1016,12 @@ def _monitor_rows_to_table(rows: List[sqlite3.Row]) -> Tuple[Dict[str, int], Lis
                 "result": label,
                 "score": _format_score(r["result_home"], r["result_away"]),
                 "clv_pp": _clv_pp_from_enrich(r["enrich_summary_json"]),
+                "has_value": bool(value_snap),
+                "value_market": (value_snap or {}).get("market_label"),
+                "value_model_pct": (value_snap or {}).get("model_pct"),
+                "value_odds": (value_snap or {}).get("odds"),
+                "value_edge_pct": (value_snap or {}).get("edge_pct"),
+                "value_result": value_label,
             }
         )
     table_rows.sort(
@@ -881,7 +1030,14 @@ def _monitor_rows_to_table(rows: List[sqlite3.Row]) -> Tuple[Dict[str, int], Lis
             (r.get("match") or "").lower(),
         )
     )
-    return {"wins": wins, "losses": losses, "pending": pending}, table_rows
+    meta = {
+        "best_pick": {"wins": wins, "losses": losses, "pending": pending},
+        "value_pick": _value_pick_tally(rows),
+    }
+    vp = meta["value_pick"]
+    if vp.get("hit_rate_pct") is not None:
+        meta["value_hit_rate_pct"] = vp["hit_rate_pct"]
+    return meta, table_rows
 
 
 def _monitor_day_dict(
@@ -936,8 +1092,17 @@ def _monitor_day_dict(
 
     out["n_logged"] = len(day_rows)
     out["n_scored_ft"] = len(scored_ft)
-    best_pick, table_rows = _monitor_rows_to_table(day_rows)
-    out["best_pick"] = best_pick
+    table_meta, table_rows = _monitor_rows_to_table(day_rows)
+    out["best_pick"] = table_meta.get("best_pick") or {"wins": 0, "losses": 0, "pending": 0}
+    out["value_pick"] = table_meta.get("value_pick") or {
+        "attempts": 0,
+        "wins": 0,
+        "losses": 0,
+        "pending": 0,
+        "settled": 0,
+    }
+    if table_meta.get("value_hit_rate_pct") is not None:
+        out["value_hit_rate_pct"] = table_meta["value_hit_rate_pct"]
     out["rows"] = table_rows
     if not day_rows:
         if mode == "scored":
@@ -968,6 +1133,9 @@ def _monitor_combined_day(*, day_offset: int, empty_label: str) -> Dict[str, Any
         "n_logged": kickoff.get("n_logged", 0),
         "n_scored_ft": kickoff.get("n_scored_ft", 0),
         "best_pick": kickoff.get("best_pick") or {"wins": 0, "losses": 0, "pending": 0},
+        "value_pick": kickoff.get("value_pick")
+        or {"attempts": 0, "wins": 0, "losses": 0, "pending": 0, "settled": 0},
+        "value_hit_rate_pct": kickoff.get("value_hit_rate_pct"),
         "rows": kickoff.get("rows") or [],
         "message": kickoff.get("message"),
     }
@@ -1201,6 +1369,8 @@ def report_summary_dict() -> Dict[str, Any]:
     logloss_sum = 0.0
     value_attempts = 0
     value_wins = 0
+    value_losses = 0
+    value_pending = 0
     n_used = 0
 
     for r in rows:
@@ -1221,11 +1391,15 @@ def report_summary_dict() -> Dict[str, Any]:
         logloss_sum += -math.log(p_correct)
         n_used += 1
 
-        vb = pred.get("best_bet")
-        if pred.get("has_any_value") and vb in ("home", "draw", "away"):
+        if _value_pick_snapshot(pred):
             value_attempts += 1
-            if str(vb).lower() == out:
+            vlabel = _value_pick_result_label(r, pred)
+            if vlabel == "W":
                 value_wins += 1
+            elif vlabel == "L":
+                value_losses += 1
+            else:
+                value_pending += 1
 
     if n_used == 0:
         return {
@@ -1247,10 +1421,14 @@ def report_summary_dict() -> Dict[str, Any]:
         "log_loss_1x2": round(logloss_sum / n_eff, 5),
         "value_flags_count": value_attempts,
         "value_best_outcome_hits": value_wins,
+        "value_losses": value_losses,
+        "value_pending": value_pending,
         "brier_by_data_quality_bucket": brier_by_data_quality_bucket(),
     }
-    if value_attempts:
-        out["value_hit_rate"] = round(100.0 * value_wins / value_attempts, 2)
+    value_settled = value_wins + value_losses
+    out["value_settled"] = value_settled
+    if value_settled:
+        out["value_hit_rate"] = round(100.0 * value_wins / value_settled, 2)
     out["clv_by_league"] = clv_beat_close_by_league()
     out["brier_by_league"] = brier_by_league()
     return out

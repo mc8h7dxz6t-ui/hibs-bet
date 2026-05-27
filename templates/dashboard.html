@@ -47,6 +47,10 @@
     <div class="tournament-focus-banner" role="status">
         <strong>{{ tournament_focus.label }}</strong>{% if tournament_focus.intl_only_fetch %} — international fixtures by default (fewer domestic API calls).{% else %} — domestic leagues included.{% endif %} Use <strong>All</strong>, <strong>UK</strong>, or <strong>European</strong> region chips to browse domestic leagues when needed.
     </div>
+    {% elif tournament_focus.friendlies_window_active %}
+    <div class="tournament-focus-banner" role="status">
+        <strong>International friendlies</strong> — fixtures through {{ tournament_focus.friendlies_window_end }}. The <strong>International</strong> region chip is selected by default; use <strong>All</strong> to see every league.
+    </div>
     {% endif %}
 
     {% if sky_dock_unavailable_note %}
@@ -76,11 +80,13 @@
                 {% endif %}
                 <div class="chip-row" id="region-chip-row" aria-label="Region filter">
                     {% for slug, label in dashboard_filter_regions %}
-                    <button type="button" class="chip chip-region{% if slug == tournament_focus.default_region %} active{% elif not slug and not tournament_focus.active %} active{% endif %}" data-region="{{ slug }}">{{ label }}</button>
+                    <button type="button" class="chip chip-region{% if slug == tournament_focus.default_region %} active{% elif not slug and not tournament_focus.default_region %} active{% endif %}" data-region="{{ slug }}">{{ label }}</button>
                     {% endfor %}
                 </div>
                 {% if tournament_focus.active and tournament_focus.intl_only_fetch %}
                 <p class="chip-hint region-filter-hint" id="region-filter-hint">Showing <strong>International</strong> by default during {{ tournament_focus.label|lower }}. Pick <strong>All</strong> or another region to load domestic leagues.</p>
+                {% elif tournament_focus.friendlies_window_active and tournament_focus.default_region == 'international' %}
+                <p class="chip-hint region-filter-hint" id="region-filter-hint">Showing <strong>International</strong> (friendlies + tournaments in window). Pick <strong>All</strong> for domestic leagues.</p>
                 {% else %}
                 <p class="chip-hint region-filter-hint" id="region-filter-hint" hidden>UEFA cup finals (e.g. Europa League) are under <strong>European</strong>, not UK — switch region or choose All.</p>
                 {% endif %}
@@ -292,6 +298,9 @@
             if (defaultRegion) activeRegion = defaultRegion;
         }
         if (!activeRegion && defaultRegion) activeRegion = defaultRegion;
+        if (defaultRegion === 'international' && activeRegion && activeRegion !== 'international' && !includeDomestic) {
+            activeRegion = 'international';
+        }
         if (activeRegion === 'uk' && !activeLeague) {
             var hint = document.getElementById('region-filter-hint');
             if (hint && hint.hidden !== false && !defaultRegion) hint.hidden = false;

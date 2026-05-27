@@ -12,6 +12,7 @@ from hibs_predictor.tournament_focus import (
     INTERNATIONAL_FOCUS_LEAGUE_CODES,
     dashboard_default_region,
     effective_dashboard_league_order,
+    friendlies_window_active,
     international_focus_league_codes,
     league_codes_for_fetch,
     prioritize_fixtures_for_focus,
@@ -27,6 +28,7 @@ def _clear_focus_env(monkeypatch):
     monkeypatch.delenv("HIBS_TOURNAMENT_FOCUS_START", raising=False)
     monkeypatch.delenv("HIBS_TOURNAMENT_FOCUS_END", raising=False)
     monkeypatch.delenv("HIBS_TOURNAMENT_INCLUDE_FRIENDLIES", raising=False)
+    monkeypatch.delenv("HIBS_FRIENDLIES_FOCUS_START", raising=False)
 
 
 def test_focus_off_outside_auto_window(monkeypatch):
@@ -176,6 +178,55 @@ def test_friendlies_off_outside_worldcup(monkeypatch):
     assert INTL_FRIENDLIES_CODE not in international_focus_league_codes()
 
 
+def test_friendlies_fixture_window_days(monkeypatch):
+    from hibs_predictor.web import _fixture_window_days_for_league
+
+    monkeypatch.setenv("HIBS_FETCH_DAYS", "7")
+    monkeypatch.setenv("HIBS_FRIENDLIES_FETCH_DAYS", "14")
+    monkeypatch.setenv("HIBS_FRIENDLIES_FOCUS_START", "2026-05-20")
+    monkeypatch.delenv("HIBS_TOURNAMENT_FOCUS", raising=False)
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc", lambda: date(2026, 5, 26)
+    )
+    assert _fixture_window_days_for_league("EPL") == 7
+    assert _fixture_window_days_for_league("INTL_FRIENDLIES") == 14
+
+
+def test_friendlies_in_window_before_worldcup_focus(monkeypatch):
+    """May 2026 international friendlies block — included in intl fetch lists."""
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 5, 26),
+    )
+    assert friendlies_window_active() is True
+    assert INTL_FRIENDLIES_CODE in international_focus_league_codes()
+    assert dashboard_default_region() == "international"
+
+
+def test_friendlies_in_international_focus_mode(monkeypatch):
+    monkeypatch.setenv("HIBS_FOCUS_INTERNATIONAL", "1")
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 5, 26),
+    )
+    codes = league_codes_for_fetch()
+    assert INTL_FRIENDLIES_CODE in codes
+
+
+def test_prioritize_friendlies_window_without_tournament_focus(monkeypatch):
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 5, 26),
+    )
+    assert tournament_focus_active() is False
+    fixtures = [
+        {"league": "EPL", "kickoff_sort": "2026-05-26T12:00:00Z"},
+        {"league": INTL_FRIENDLIES_CODE, "kickoff_sort": "2026-05-26T15:00:00Z"},
+    ]
+    ordered = prioritize_fixtures_for_focus(fixtures)
+    assert ordered[0]["league"] == INTL_FRIENDLIES_CODE
+
+
 def test_fotmob_world_cup_and_euros_mapping():
     from hibs_predictor.scrapers.fotmob_client import FOTMOB_LEAGUE_IDS
 
@@ -197,6 +248,14 @@ def test_prioritize_fixtures_for_focus():
         "NATIONS_LEAGUE",
         "EPL",
     ]
+
+
+def test_intl_friendlies_calendar_season():
+    from hibs_predictor.season import season_candidates
+
+    now = __import__("datetime").datetime(2026, 5, 26, 12, 0, tzinfo=__import__("datetime").timezone.utc)
+    seasons = season_candidates(now, league_code=INTL_FRIENDLIES_CODE)
+    assert seasons[0] == 2026
 
 
 def test_fotmob_nations_league_comp_mapping():

@@ -71,6 +71,11 @@ def test_championship_and_scotland_sport_keys():
     assert "soccer_scotland_premiership" in OddsApiClient.SPORT_KEY_FALLBACKS["SCOTLAND"]
 
 
+def test_intl_friendlies_sport_key():
+    assert OddsApiClient.SPORT_KEYS["INTL_FRIENDLIES"] == "soccer_international_friendlies"
+    assert "soccer_fifa_world_cup" in OddsApiClient.SPORT_KEY_FALLBACKS["INTL_FRIENDLIES"]
+
+
 def test_parse_odds_api_totals_and_btts():
     parsed = _parse_odds_api_event_side_markets(_sample_odds_api_event())
     assert parsed["over_2_5"] == 1.9

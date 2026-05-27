@@ -14,6 +14,7 @@ from hibs_predictor.prediction_log import (
     monitor_summary_dict,
     monitor_today_dict,
     monitor_yesterday_dict,
+    report_summary_dict,
 )
 
 
@@ -43,11 +44,14 @@ def _insert_row(
     result_away: int | None = None,
     result_status: str | None = None,
     fixture_id: int | None = None,
+    pred_extra: dict | None = None,
 ) -> None:
     pred = {
         "probabilities": probs,
         "predicted_outcome": predicted,
     }
+    if pred_extra:
+        pred.update(pred_extra)
     enrich = {}
     if clv_pp is not None:
         enrich["clv"] = {"clv_pp": clv_pp}
@@ -449,3 +453,116 @@ def test_monitor_yesterday_scored_section(audit_db, today_window):
     assert yest["scored"]["n_logged"] == 1
     assert yest["scored"]["rows"][0]["fixture_id"] == 901
     assert yest["scored"]["rows"][0]["result"] == "W"
+
+
+def test_report_value_hit_non_1x2_market(audit_db):
+    """Value hit must settle BTTS/totals, not only 1X2 best_bet keys."""
+    conn = sqlite3.connect(str(audit_db))
+    try:
+        _insert_row(
+            conn,
+            captured_at="2026-05-20T10:00:00+00:00",
+            league="EPL",
+            outcome="home",
+            predicted="home",
+            probs={"home": 0.5, "draw": 0.25, "away": 0.25},
+            result_home=2,
+            result_away=1,
+            result_status="FT",
+            pred_extra={
+                "has_any_value": True,
+                "best_bet": "btts_yes",
+                "value_bets": {
+                    "btts_yes": {
+                        "market_label": "BTTS Yes",
+                        "model_probability_pct": 62.0,
+                        "edge_pct": 4.2,
+                        "odds": 1.85,
+                        "roi_percent": 4.2,
+                    }
+                },
+            },
+        )
+        _insert_row(
+            conn,
+            captured_at="2026-05-20T11:00:00+00:00",
+            league="EPL",
+            outcome="home",
+            predicted="home",
+            probs={"home": 0.55, "draw": 0.25, "away": 0.2},
+            result_home=1,
+            result_away=0,
+            result_status="FT",
+            fixture_id=1002,
+            pred_extra={
+                "has_any_value": True,
+                "best_bet": "over25",
+                "value_bets": {
+                    "over25": {
+                        "market_label": "Over 2.5",
+                        "model_probability_pct": 58.0,
+                        "edge_pct": 3.0,
+                        "odds": 1.9,
+                        "roi_percent": 3.0,
+                    }
+                },
+            },
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    rep = report_summary_dict()
+    assert rep["value_flags_count"] == 2
+    assert rep["value_settled"] == 2
+    assert rep["value_best_outcome_hits"] == 1
+    assert rep["value_hit_rate"] == 50.0
+
+
+def test_monitor_yesterday_value_hit_rate(audit_db, today_window):
+    _start, _end, noon = today_window
+    yesterday_noon = datetime(2026, 5, 23, 15, 0, 0, tzinfo=timezone.utc)
+
+    conn = sqlite3.connect(str(audit_db))
+    try:
+        _insert_row(
+            conn,
+            captured_at=yesterday_noon.isoformat(),
+            kickoff_iso=yesterday_noon.isoformat(),
+            league="EPL",
+            outcome="home",
+            predicted="away",
+            probs={"home": 0.2, "draw": 0.25, "away": 0.55},
+            result_home=2,
+            result_away=1,
+            result_status="FT",
+            result_recorded_at=yesterday_noon.isoformat(),
+            fixture_id=801,
+            pred_extra={
+                "has_any_value": True,
+                "best_bet": "btts_yes",
+                "value_bets": {
+                    "btts_yes": {
+                        "market_label": "BTTS Yes",
+                        "model_probability_pct": 60.0,
+                        "edge_pct": 5.0,
+                        "odds": 1.8,
+                        "roi_percent": 5.0,
+                    }
+                },
+            },
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    yest = monitor_yesterday_dict()
+    vp = yest["kickoff"]["value_pick"]
+    assert vp["attempts"] == 1
+    assert vp["wins"] == 1
+    assert vp["hit_rate_pct"] == 100.0
+    assert yest["value_hit_rate_pct"] == 100.0
+    row = yest["kickoff"]["rows"][0]
+    assert row["has_value"] is True
+    assert row["value_result"] == "W"
+    assert row["value_market"] == "BTTS Yes"

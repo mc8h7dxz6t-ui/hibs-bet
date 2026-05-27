@@ -503,6 +503,46 @@ def build_bet_builder_suggestions(
                     combo_key="away_and_btts",
                 )
             )
+        if pct("draw") >= 28 and pct("btts_yes") >= 58:
+            add(
+                _build_same_game_builder(
+                    pkt,
+                    "Draw + BTTS",
+                    "draw_btts",
+                    ("draw", "btts_yes"),
+                    [
+                        "Shared game script: stalemate with both teams scoring.",
+                        "Use your book's bet builder — component odds multiply for reference only.",
+                    ],
+                    combo_key="draw_and_btts",
+                )
+            )
+        if pct("home_win") >= 45 and pct("over_25") >= 58:
+            add(
+                _build_same_game_builder(
+                    pkt,
+                    "Home result + Over 2.5",
+                    "home_over25",
+                    ("home_win", "over_25"),
+                    [
+                        "Favourite win profile paired with a higher goals line.",
+                        "Correlated — book quote will differ from multiplying leg prices.",
+                    ],
+                )
+            )
+        if pct("away_win") >= 45 and pct("over_25") >= 58:
+            add(
+                _build_same_game_builder(
+                    pkt,
+                    "Away result + Over 2.5",
+                    "away_over25",
+                    ("away_win", "over_25"),
+                    [
+                        "Away win edge with enough goal expectation for three or more.",
+                        "Correlated — confirm price in bet builder before staking.",
+                    ],
+                )
+            )
 
     out.sort(key=lambda x: -float(x.get("score") or 0))
     return out[:limit]

@@ -222,6 +222,10 @@ def _audit_snapshot() -> Dict[str, Any]:
         "brier_score_1x2": report.get("brier_score_1x2"),
         "log_loss_1x2": report.get("log_loss_1x2"),
         "value_hit_rate": report.get("value_hit_rate"),
+        "value_flags_count": report.get("value_flags_count"),
+        "value_settled": report.get("value_settled"),
+        "value_pending": report.get("value_pending"),
+        "value_best_outcome_hits": report.get("value_best_outcome_hits"),
         "brier_by_data_quality_bucket": report.get("brier_by_data_quality_bucket") or [],
         "clv_by_league": report.get("clv_by_league"),
     }

@@ -131,8 +131,8 @@ def _api_football_season_year(now: datetime) -> int:
 
 _FDO_CALENDAR_COMPS = frozenset({"WC", "EC", "UNL", "CL", "EL", "UECL"})
 # UEFA club cups: API-Football season id is Jul-based; FDO often 403/429 on finals week.
-_API_FIRST_FIXTURE_LEAGUES = frozenset({"UCL", "EUROPA_LEAGUE", "UECL"})
-_FIXTURE_CACHE_VERSION = "v29"
+_API_FIRST_FIXTURE_LEAGUES = frozenset({"UCL", "EUROPA_LEAGUE", "UECL", "INTL_FRIENDLIES"})
+_FIXTURE_CACHE_VERSION = "v36"
 _EMPTY_FIXTURE_CACHE_TTL_HOURS = 0.2  # short negative cache — avoid hour-long empty poison
 
 
@@ -191,9 +191,16 @@ def _dashboard_league_order(*, include_domestic: bool = False) -> List[str]:
 
 
 def _league_codes_for_fetch(*, include_domestic: bool = False) -> List[str]:
-    from hibs_predictor.tournament_focus import league_codes_for_fetch
+    from hibs_predictor.tournament_focus import (
+        INTL_FRIENDLIES_CODE,
+        friendlies_window_active,
+        league_codes_for_fetch,
+    )
 
-    return league_codes_for_fetch(include_domestic=include_domestic)
+    codes = league_codes_for_fetch(include_domestic=include_domestic)
+    if friendlies_window_active() and INTL_FRIENDLIES_CODE in codes:
+        codes = [INTL_FRIENDLIES_CODE] + [c for c in codes if c != INTL_FRIENDLIES_CODE]
+    return codes
 
 
 def _tournament_focus_context(*, include_domestic: bool = False) -> Dict[str, Any]:
@@ -274,6 +281,23 @@ def _normalize_fetch_days(raw: Any, *, default: int = _FETCH_DAYS_DEFAULT) -> in
 
 def _fetch_days_from_env() -> int:
     return _normalize_fetch_days(os.getenv("HIBS_FETCH_DAYS", str(_FETCH_DAYS_DEFAULT)))
+
+
+def _fixture_window_days_for_league(league_code: str) -> int:
+    """Wider window for international friendlies during the friendlies calendar block."""
+    from hibs_predictor.tournament_focus import INTL_FRIENDLIES_CODE, friendlies_window_active
+
+    days = _fetch_window_days()
+    if (league_code or "").strip().upper() != INTL_FRIENDLIES_CODE:
+        return days
+    if not friendlies_window_active():
+        return days
+    try:
+        want = int(os.getenv("HIBS_FRIENDLIES_FETCH_DAYS", "14"))
+    except ValueError:
+        want = 14
+    want = max(7, min(21, want))
+    return max(days, want)
 
 
 def _fetch_window_days() -> int:
@@ -493,9 +517,20 @@ def _league_codes_enrich_priority_order(codes: List[str]) -> List[str]:
 
 def _fetch_all_league_fixtures_parallel(*, include_domestic: bool = False) -> List[Dict]:
     """Fetch per-league fixture rows concurrently (each league uses its own disk cache)."""
+    from hibs_predictor.tournament_focus import INTL_FRIENDLIES_CODE, friendlies_window_active
+
     codes = _league_codes_enrich_priority_order(_league_codes_for_fetch(include_domestic=include_domestic))
-    workers = min(_fixture_fetch_workers(), len(codes))
     out: List[Dict] = []
+    if friendlies_window_active() and INTL_FRIENDLIES_CODE in codes:
+        try:
+            out.extend(fetch_next_48h_fixtures(INTL_FRIENDLIES_CODE))
+            print(f"[AllFixtures] priority {INTL_FRIENDLIES_CODE}: {len(out)} rows")
+        except Exception as exc:
+            print(f"[AllFixtures] priority {INTL_FRIENDLIES_CODE}: {exc!r}")
+        codes = [c for c in codes if c != INTL_FRIENDLIES_CODE]
+    if not codes:
+        return out
+    workers = min(_fixture_fetch_workers(), len(codes))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(fetch_next_48h_fixtures, code): code for code in codes}
         for fut in as_completed(futures):
@@ -759,7 +794,7 @@ def _normalize_fotmob(match: Dict, league_code: str) -> Optional[Dict]:
 
 
 def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
-    days = _fetch_window_days()
+    days = _fixture_window_days_for_league(league_code)
     cache = Cache()
     prefer_fdo = _env_truthy("HIBS_PREFER_FOOTBALL_DATA_FIXTURES")
     skip_as_fx = _env_truthy("HIBS_SKIP_API_SPORTS_FIXTURES")
@@ -782,6 +817,9 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     season_candidates = _fixture_fetch_season_candidates(
         fdo_comp, date_from, date_to, now, league_code=league_code
     )
+    if league_code == "INTL_FRIENDLIES":
+        y = now.year
+        season_candidates = [y, y - 1] + [s for s in season_candidates if s not in (y, y - 1)]
 
     def add(candidate: Dict) -> None:
         key = _fixture_key(candidate)
@@ -972,6 +1010,12 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
             "prediction": prediction,
             "home_last10": home_last10,
             "away_last10": away_last10,
+            "home_recent_n": _safe_int_value(
+                enriched.get("home_recent_n") or len(home_last10) or len(enriched.get("home_recent") or [])
+            ),
+            "away_recent_n": _safe_int_value(
+                enriched.get("away_recent_n") or len(away_last10) or len(enriched.get("away_recent") or [])
+            ),
             "home_position": enriched.get("home_position", {}),
             "away_position": enriched.get("away_position", {}),
             "home_stats": enriched.get("home_stats"),
@@ -1032,6 +1076,8 @@ def _data_quality_for_enriched(enriched: Dict[str, Any], prediction: Dict[str, A
     from hibs_predictor.data_quality import compute_fixture_data_quality
 
     scoring = dict(enriched)
+    if enriched.get("league"):
+        scoring.setdefault("league", enriched.get("league"))
     scoring["prediction"] = prediction
     lo = prediction.get("line_odds") or {}
     if lo:
@@ -1049,15 +1095,28 @@ def _data_quality_for_enriched(enriched: Dict[str, Any], prediction: Dict[str, A
 
 
 def _ensure_fixture_data_quality(all_fixtures: List[Dict[str, Any]]) -> None:
-    """Re-score slim cached rows so xG/form/line-odds fallbacks apply without full re-enrich."""
+    """Backfill data_quality on legacy cache rows only — never replace enrich-time scores."""
     from hibs_predictor.data_quality import compute_fixture_data_quality_from_row
     from hibs_predictor.xg_source_display import attach_xg_display_fields
 
     for f in all_fixtures:
+        existing = f.get("data_quality") if isinstance(f.get("data_quality"), dict) else {}
         if not f.get("xg_source_hint"):
             attach_xg_display_fields(f)
         try:
-            f["data_quality"] = compute_fixture_data_quality_from_row(f)
+            new_dq = compute_fixture_data_quality_from_row(f)
+            if f.get("enriched_at") and existing.get("score_pct") is not None:
+                try:
+                    old_pct = float(existing["score_pct"])
+                    new_pct = float(new_dq.get("score_pct") or 0)
+                    if new_pct >= old_pct:
+                        f["data_quality"] = new_dq
+                    else:
+                        f["data_quality"] = existing
+                except (TypeError, ValueError):
+                    f["data_quality"] = new_dq
+            else:
+                f["data_quality"] = new_dq
         except Exception as exc:
             print(f"[Data quality] {f.get('home')} v {f.get('away')}: {exc!r}")
 
@@ -1695,7 +1754,8 @@ def _fixture_coverage_summary(
             f"in the next {days} days."
         )
         reason = (
-            "International focus mode is active — only World Cup, Nations League and Euros are fetched by default. "
+            "International focus mode is active — World Cup, Nations League, Euros"
+            " and international friendlies (when in the friendlies window or enabled) are fetched by default. "
             "Filter chips reflect leagues with fixtures in the current window. "
             "Use All / UK / European region chips on the dashboard for domestic leagues when needed."
         )

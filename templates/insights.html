@@ -1,17 +1,25 @@
 {% extends "base.html" %}
-{% macro monitor_tally(bp) %}
-<p class="monitor-tally">Wins: <strong class="tally-w">{{ bp.wins or 0 }}</strong> · Losses: <strong class="tally-l">{{ bp.losses or 0 }}</strong> · Pending: <strong class="tally-p">{{ bp.pending or 0 }}</strong></p>
+{% macro monitor_tally(bp, label='Model 1X2 pick') %}
+<p class="monitor-tally"><span class="tally-label">{{ label }}:</span> Wins <strong class="tally-w">{{ bp.wins or 0 }}</strong> · Losses <strong class="tally-l">{{ bp.losses or 0 }}</strong> · Pending <strong class="tally-p">{{ bp.pending or 0 }}</strong></p>
+{% endmacro %}
+{% macro value_tally(vp) %}
+{% if vp.attempts %}
+<p class="monitor-tally monitor-tally-value"><span class="tally-label">Value bet (top edge at log):</span> Wins <strong class="tally-w">{{ vp.wins or 0 }}</strong> · Losses <strong class="tally-l">{{ vp.losses or 0 }}</strong> · Pending <strong class="tally-p">{{ vp.pending or 0 }}</strong>{% if vp.hit_rate_pct is not none %} · Hit <strong class="tally-w">{{ vp.hit_rate_pct }}%</strong> <span class="tally-hint">(settled only)</span>{% elif vp.attempts and not vp.settled %} · <span class="tally-hint">awaiting FT</span>{% endif %}</p>
+{% endif %}
 {% endmacro %}
 {% macro result_badge(res) %}
 {% if res == 'W' %}<span class="result-badge result-badge-w" title="Won">W</span>{% elif res == 'L' %}<span class="result-badge result-badge-l" title="Lost">L</span>{% else %}<span class="result-badge result-badge-pending" title="Awaiting full-time result">pending</span>{% endif %}
 {% endmacro %}
 {% macro monitor_row(row) %}
-<tr class="{% if row.result == 'W' %}monitor-win{% elif row.result == 'L' %}monitor-loss{% endif %}">
-    <td>{{ row.match }}</td>
-    <td>{{ row.pick or '—' }}</td>
-    <td>{% if row.model_pct is not none %}{{ row.model_pct }}%{% else %}—{% endif %}</td>
-    <td>{{ result_badge(row.result) }}</td>
+<tr class="{% if row.value_result == 'W' %}monitor-win{% elif row.value_result == 'L' %}monitor-loss{% elif row.result == 'W' %}monitor-win{% elif row.result == 'L' %}monitor-loss{% endif %}">
+    <td>{{ row.match }}{% if row.league %}<span class="ir-meta" style="display:block;font-weight:400;">{{ row.league }}</span>{% endif %}</td>
+    <td>{% if row.has_value %}{{ row.value_market or '—' }}{% else %}<span class="tally-hint">no value</span>{% endif %}</td>
+    <td>{% if row.has_value and row.value_model_pct is not none %}{{ row.value_model_pct }}%{% else %}—{% endif %}</td>
+    <td>{% if row.has_value and row.value_odds %}{{ "%.2f"|format(row.value_odds) }}{% else %}—{% endif %}</td>
+    <td>{% if row.has_value and row.value_edge_pct is not none %}+{{ row.value_edge_pct }}%{% else %}—{% endif %}</td>
+    <td>{% if row.has_value %}{{ result_badge(row.value_result) }}{% else %}—{% endif %}</td>
     <td>{{ row.score or '—' }}</td>
+    <td title="Model 1X2 lean: {{ row.pick or '—' }}">{{ row.pick or '—' }} {{ result_badge(row.result) }}</td>
     <td>{% if row.clv_pp is not none %}{{ row.clv_pp }} pp{% else %}—{% endif %}</td>
 </tr>
 {% endmacro %}
@@ -57,6 +65,10 @@
 .insights-intro{font-size:0.78em;color:var(--muted);line-height:1.5;margin:0 0 12px;max-width:52rem;}
 .insights-intro strong{color:var(--text);}
 .monitor-glossary{font-size:0.72em;color:var(--muted);line-height:1.45;margin:0 0 10px;padding:8px 10px;border-radius:8px;border:1px solid rgba(167,243,208,0.18);background:rgba(0,122,51,0.06);}
+.monitor-tally .tally-label{color:var(--muted);font-weight:600;margin-right:4px;}
+.monitor-tally-value{border-left:2px solid rgba(255,215,0,0.35);padding-left:8px;margin-top:4px;}
+.tally-hint{font-weight:500;color:var(--muted);font-size:0.92em;}
+.monitor-table-hint{font-size:0.72em;color:var(--muted);margin:0 0 8px;line-height:1.4;}
 .acca-rec-foot{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px;}
 .btn-acca-slip{background:rgba(255,215,0,0.12);border:1px solid rgba(255,215,0,0.35);color:var(--gold);padding:6px 12px;border-radius:8px;font-size:0.72em;font-weight:800;cursor:pointer;font-family:'Inter',sans-serif;}
 .btn-acca-slip:hover{background:rgba(255,215,0,0.2);}
@@ -199,6 +211,32 @@
         {% else %}
         <div class="empty-mini">{{ acca_rec.message or "No acca legs cleared the model/value gates in this window." }}</div>
         {% endif %}
+        {% set sfc = acca_rec.same_fixture_combos %}
+        {% if sfc and (sfc.builders or sfc.priced_combo_legs) %}
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(148,163,184,0.15);">
+            <h3 style="font-size:0.78em;color:var(--hibs-neon);text-transform:uppercase;letter-spacing:0.1em;margin:0 0 8px;">Same-game combo ideas</h3>
+            <p class="ir-meta" style="margin:0 0 10px;">Correlated markets on one fixture (e.g. BTTS + O2.5, win + O2.5). Each component needs a real book price — multiply for reference; use bet builder for the actual quote.</p>
+            {% for row in sfc.builders %}
+            <div class="insight-row">
+                <div class="ir-meta">{{ row.league }}{% if row.kickoff_time %} · {{ row.kickoff_time }}{% endif %}</div>
+                <div class="ir-main"><a href="/#fix-{{ row.fixture_id }}">{{ row.match }}</a> — {{ row.title }}</div>
+                {% for leg in row.legs %}
+                <span class="ir-pill"{% if leg.odds %} data-odds-dec="{{ leg.odds }}" data-odds-template="{{ leg.market_label|e }} {odds}"{% endif %}>{{ leg.market_label }}{% if leg.odds %} {{ "%.2f"|format(leg.odds) }}{% endif %}{% if leg.model_pct is not none %} · {{ leg.model_pct }}%{% endif %}</span>
+                {% endfor %}
+                {% if row.estimated_independent_odds %}<span class="ir-pill ir-gold" data-odds-dec="{{ row.estimated_independent_odds }}" data-odds-template="Ref. ~{odds}">Ref. ~{{ "%.2f"|format(row.estimated_independent_odds) }}</span>{% endif %}
+            </div>
+            {% endfor %}
+            {% for row in sfc.priced_combo_legs %}
+            <div class="insight-row">
+                <div class="ir-meta">{{ row.league }}{% if row.kickoff_time %} · {{ row.kickoff_time }}{% endif %}</div>
+                <div class="ir-main"><a href="/#fix-{{ row.fixture_id }}">{{ row.match }}</a> — {{ row.market_label }}</div>
+                {% if row.odds %}<span class="ir-pill ir-gold" data-odds-dec="{{ row.odds }}" data-odds-template="{odds}">{{ "%.2f"|format(row.odds) }}</span>{% endif %}
+                {% if row.model_pct is not none %}<span class="ir-pill ir-good">Model {{ row.model_pct }}%</span>{% endif %}
+            </div>
+            {% endfor %}
+            {% if sfc.note %}<p class="ir-meta" style="margin:8px 0 0;">{{ sfc.note }}</p>{% endif %}
+        </div>
+        {% endif %}
     </section>
     {% endif %}
 
@@ -339,7 +377,7 @@
 
         <section class="insight-card" id="model-monitor">
             <h2>Model monitor</h2>
-            <p class="monitor-glossary"><strong>Brier</strong> — lower is better; measures how close predicted probabilities were to actual results. <strong>CLV</strong> (closing line value) — positive means you beat the price the market settled on before kick-off (in percentage points).</p>
+            <p class="monitor-glossary"><strong>Value bet</strong> — the highest-edge market we logged before kick-off (1X2, BTTS, goals, etc.), settled on the real score. <strong>Model 1X2 pick</strong> — our home/draw/away lean (may differ from the value row). <strong>Brier</strong> — lower is better; probability accuracy. <strong>CLV</strong> — positive means you beat the closing price (percentage points).</p>
             {% set m = insights.monitor %}
             {% set y = m.yesterday or {} %}
             {% set t = m.today or {} %}
@@ -357,10 +395,13 @@
                 <div class="ir-main">{{ yk.n_logged }} fixtures · {{ yk.n_scored_ft }} FT synced</div>
             </div>
             {% set ybp = yk.best_pick or {} %}
+            {% set yvp = yk.value_pick or {} %}
             {{ monitor_tally(ybp) }}
+            {{ value_tally(yvp) }}
             {% if yk.rows %}
-            <table class="data-table" style="margin-top:10px;font-size:0.78em;width:100%;">
-                <thead><tr><th>Match</th><th>Pick</th><th>Model %</th><th>Result</th><th>Score</th><th>CLV</th></tr></thead>
+            <p class="monitor-table-hint">Rows sorted with wins first. Highlight follows the <strong>value bet</strong> result when one was logged.</p>
+            <table class="data-table monitor-detail-table" style="margin-top:10px;font-size:0.78em;width:100%;">
+                <thead><tr><th>Match</th><th>Value market</th><th>Model %</th><th>Odds</th><th>Edge</th><th>Value W/L</th><th>Score</th><th>1X2 lean</th><th>CLV</th></tr></thead>
                 <tbody>
                 {% for row in yk.rows %}
                 {{ monitor_row(row) }}
@@ -377,10 +418,13 @@
                 <div class="ir-main">{{ ys.n_logged }} fixtures scored</div>
             </div>
             {% set ysb = ys.best_pick or {} %}
+            {% set ysvp = ys.value_pick or {} %}
             {{ monitor_tally(ysb) }}
+            {{ value_tally(ysvp) }}
             {% if ys.rows %}
-            <table class="data-table" style="margin-top:10px;font-size:0.78em;width:100%;">
-                <thead><tr><th>Match</th><th>Pick</th><th>Model %</th><th>Result</th><th>Score</th><th>CLV</th></tr></thead>
+            <p class="monitor-table-hint">Fixtures whose full-time result was synced yesterday (kickoff may be earlier).</p>
+            <table class="data-table monitor-detail-table" style="margin-top:10px;font-size:0.78em;width:100%;">
+                <thead><tr><th>Match</th><th>Value market</th><th>Model %</th><th>Odds</th><th>Edge</th><th>Value W/L</th><th>Score</th><th>1X2 lean</th><th>CLV</th></tr></thead>
                 <tbody>
                 {% for row in ys.rows %}
                 {{ monitor_row(row) }}
@@ -402,10 +446,13 @@
                 <div class="ir-main">{{ tk.n_logged }} fixtures · {{ tk.n_scored_ft }} FT synced today</div>
             </div>
             {% set bp = tk.best_pick or {} %}
+            {% set tvp = tk.value_pick or {} %}
             {{ monitor_tally(bp) }}
+            {{ value_tally(tvp) }}
             {% if tk.rows %}
-            <table class="data-table" style="margin-top:10px;font-size:0.78em;width:100%;">
-                <thead><tr><th>Match</th><th>Pick</th><th>Model %</th><th>Result</th><th>Score</th><th>CLV</th></tr></thead>
+            <p class="monitor-table-hint">Snapshots taken before kick-off today. Pending until pred-log-sync records FT.</p>
+            <table class="data-table monitor-detail-table" style="margin-top:10px;font-size:0.78em;width:100%;">
+                <thead><tr><th>Match</th><th>Value market</th><th>Model %</th><th>Odds</th><th>Edge</th><th>Value W/L</th><th>Score</th><th>1X2 lean</th><th>CLV</th></tr></thead>
                 <tbody>
                 {% for row in tk.rows %}
                 {{ monitor_row(row) }}
@@ -422,10 +469,12 @@
                 <div class="ir-main">{{ ts.n_logged }} fixtures scored</div>
             </div>
             {% set tsb = ts.best_pick or {} %}
+            {% set tsvp = ts.value_pick or {} %}
             {{ monitor_tally(tsb) }}
+            {{ value_tally(tsvp) }}
             {% if ts.rows %}
-            <table class="data-table" style="margin-top:10px;font-size:0.78em;width:100%;">
-                <thead><tr><th>Match</th><th>Pick</th><th>Model %</th><th>Result</th><th>Score</th><th>CLV</th></tr></thead>
+            <table class="data-table monitor-detail-table" style="margin-top:10px;font-size:0.78em;width:100%;">
+                <thead><tr><th>Match</th><th>Value market</th><th>Model %</th><th>Odds</th><th>Edge</th><th>Value W/L</th><th>Score</th><th>1X2 lean</th><th>CLV</th></tr></thead>
                 <tbody>
                 {% for row in ts.rows %}
                 {{ monitor_row(row) }}
@@ -481,7 +530,7 @@
                 <div class="ir-main">{{ insights.audit.n_used_metrics }} scored prediction rows</div>
                 <span class="ir-pill">Brier {{ insights.audit.brier_score_1x2 }}</span>
                 <span class="ir-pill">Log loss {{ insights.audit.log_loss_1x2 }}</span>
-                {% if insights.audit.value_hit_rate is not none %}<span class="ir-pill ir-gold">Value hit {{ insights.audit.value_hit_rate }}%</span>{% endif %}
+                {% if insights.audit.value_hit_rate is not none %}<span class="ir-pill ir-gold" title="Settled value legs only (BTTS, goals, 1X2, etc.)">Value hit {{ insights.audit.value_hit_rate }}% ({{ insights.audit.value_best_outcome_hits or 0 }}/{{ insights.audit.value_settled or 0 }} settled)</span>{% elif insights.audit.value_flags_count %}<span class="ir-pill ir-warn">{{ insights.audit.value_flags_count }} value legs · awaiting FT</span>{% endif %}
             </div>
             {% else %}
             <div class="empty-mini">{{ insights.audit.message }}</div>

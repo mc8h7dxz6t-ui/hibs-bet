@@ -32,6 +32,8 @@ INTL_FRIENDLIES_CODE = "INTL_FRIENDLIES"
 
 _DEFAULT_AUTO_START = date(2026, 6, 1)
 _DEFAULT_AUTO_END = date(2026, 7, 18)
+# International friendlies window (pre-World Cup block through tournament end).
+_DEFAULT_FRIENDLIES_AUTO_START = date(2026, 5, 20)
 
 
 def _env_truthy(name: str) -> bool:
@@ -56,6 +58,24 @@ def _auto_window() -> tuple[date, date]:
     return start, end
 
 
+def _friendlies_window() -> tuple[date, date]:
+    """Calendar range when INTL_FRIENDLIES are included in international focus fetch."""
+    start = (
+        _parse_date(os.getenv("HIBS_FRIENDLIES_FOCUS_START", ""))
+        or _DEFAULT_FRIENDLIES_AUTO_START
+    )
+    _, end = _auto_window()
+    if end < start:
+        start, end = end, start
+    return start, end
+
+
+def friendlies_window_active(*, today: Optional[date] = None) -> bool:
+    cur = today if today is not None else _today_utc()
+    start, end = _friendlies_window()
+    return start <= cur <= end
+
+
 def _today_utc() -> date:
     return datetime.now(timezone.utc).date()
 
@@ -78,8 +98,10 @@ def _mode_from_env_raw(raw: str) -> Optional[str]:
 
 
 def _friendlies_in_focus(*, today: Optional[date] = None) -> bool:
-    """Include international friendlies in focus fetch when env or World Cup auto window."""
+    """Include international friendlies in international focus fetch lists."""
     if _env_truthy("HIBS_TOURNAMENT_INCLUDE_FRIENDLIES"):
+        return True
+    if friendlies_window_active(today=today):
         return True
     return tournament_focus_mode(today=today) == "worldcup"
 
@@ -130,7 +152,9 @@ def tournament_focus_label(*, today: Optional[date] = None) -> str:
 
 
 def dashboard_default_region(*, today: Optional[date] = None) -> str:
-    return "international" if tournament_focus_active(today=today) else ""
+    if tournament_focus_active(today=today) or friendlies_window_active(today=today):
+        return "international"
+    return ""
 
 
 def league_codes_for_fetch(
@@ -158,8 +182,8 @@ def prioritize_fixtures_for_focus(
     *,
     today: Optional[date] = None,
 ) -> List[Dict[str, Any]]:
-    """International fixtures first for assistant / summaries when focus is on."""
-    if not tournament_focus_active(today=today):
+    """International fixtures first for assistant / summaries when focus or friendlies window is on."""
+    if not tournament_focus_active(today=today) and not friendlies_window_active(today=today):
         return list(fixtures or [])
     intl = set(international_focus_league_codes(today=today))
     primary: List[Dict[str, Any]] = []
@@ -188,6 +212,7 @@ def tournament_focus_context(
     active = tournament_focus_active(today=today)
     mode = tournament_focus_mode(today=today) or ""
     start, end = _auto_window()
+    fr_start, fr_end = _friendlies_window()
     intl_only = active and not include_domestic
     return {
         "active": active,
@@ -196,7 +221,10 @@ def tournament_focus_context(
         "default_region": dashboard_default_region(today=today),
         "fetch_leagues": list(league_codes_for_fetch(today=today, include_domestic=include_domestic)),
         "include_friendlies": _friendlies_in_focus(today=today),
+        "friendlies_window_active": friendlies_window_active(today=today),
         "intl_only_fetch": intl_only,
         "auto_window_start": start.isoformat(),
         "auto_window_end": end.isoformat(),
+        "friendlies_window_start": fr_start.isoformat(),
+        "friendlies_window_end": fr_end.isoformat(),
     }

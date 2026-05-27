@@ -2,6 +2,32 @@
 
 from typing import Any, Dict, List, Optional
 
+from hibs_predictor.season import CALENDAR_YEAR_LEAGUES
+
+_SHOWPIECE_LEAGUES = frozenset(
+    {
+        "UCL",
+        "EUROPA_LEAGUE",
+        "UECL",
+        "WORLD_CUP",
+        "EUROS",
+        "NATIONS_LEAGUE",
+        "INTL_FRIENDLIES",
+    }
+)
+_INTERNATIONAL_LEAGUES = frozenset(
+    {
+        "WORLD_CUP",
+        "EUROS",
+        "NATIONS_LEAGUE",
+        "INTL_FRIENDLIES",
+    }
+)
+_SHOWPIECE_DQ_FLOOR = 85.0
+_CORE_DQ_FLOOR = 88.0
+_CALENDAR_DQ_FLOOR = 85.0
+_INTL_DQ_FLOOR = 85.0
+
 
 def _has_stats(stats: Optional[Dict[str, Any]]) -> bool:
     if not stats:
@@ -74,6 +100,122 @@ def _core_api_rich_ready(enriched: Dict[str, Any]) -> bool:
     if n_h < 5.0 or n_a < 5.0:
         return False
     return _book_odds_ready(enriched)
+
+
+def _knockout_round_meta(enriched: Dict[str, Any]) -> bool:
+    meta = enriched.get("competition_meta") if isinstance(enriched.get("competition_meta"), dict) else {}
+    rnd = str(meta.get("api_round") or meta.get("round") or "").lower()
+    if not rnd or "regular season" in rnd:
+        return False
+    markers = (
+        "final",
+        "semi",
+        "quarter",
+        "round of",
+        "play-off",
+        "playoff",
+        "knockout",
+        "qualif",
+        "relegation",
+        "promotion",
+        "leg",
+    )
+    return any(m in rnd for m in markers)
+
+
+def _cup_competition_code(league_code: str) -> bool:
+    from hibs_predictor.fixture_utils import is_cup_competition
+
+    return is_cup_competition(league_code)
+
+
+def _showpiece_context(enriched: Dict[str, Any], *, league_code: Optional[str] = None) -> bool:
+    lc = str(league_code or enriched.get("league") or "").strip().upper()
+    if lc in _SHOWPIECE_LEAGUES or _cup_competition_code(lc):
+        return True
+    return _knockout_round_meta(enriched)
+
+
+def _team_ids_ready(enriched: Dict[str, Any]) -> bool:
+    hid = (enriched.get("teams", {}) or {}).get("home", {}).get("id")
+    aid = (enriched.get("teams", {}) or {}).get("away", {}).get("id")
+    if not hid and enriched.get("home_id"):
+        hid = enriched.get("home_id")
+    if not aid and enriched.get("away_id"):
+        aid = enriched.get("away_id")
+    return bool(hid and aid)
+
+
+def _showpiece_ready(enriched: Dict[str, Any], *, league_code: Optional[str] = None) -> bool:
+    """Cup / UEFA / international showpieces: odds + meaningful form without league-table fiction."""
+    if not _showpiece_context(enriched, league_code=league_code):
+        return False
+    if not _team_ids_ready(enriched):
+        return False
+    if not _book_odds_ready(enriched):
+        return False
+    n_h, n_a = _recent_n(enriched)
+    hs = enriched.get("home_stats") or {}
+    aws = enriched.get("away_stats") or {}
+    form_ok = (n_h >= 3.0 and n_a >= 3.0) or (_has_stats(hs) and _has_stats(aws))
+    if not form_ok:
+        return False
+    src = _effective_xg_source(enriched)
+    if src in ("unknown", "", "goals_proxy") and n_h < 4.0 and n_a < 4.0:
+        if not (_has_stats(hs) and _has_stats(aws)):
+            return False
+    return True
+
+
+def _calendar_league_ready(enriched: Dict[str, Any], *, league_code: Optional[str] = None) -> bool:
+    """Spring-start leagues (Nordics, friendlies): slightly lower recency bar when core inputs exist."""
+    lc = str(league_code or enriched.get("league") or "").strip().upper()
+    if lc not in CALENDAR_YEAR_LEAGUES:
+        return False
+    if not _team_ids_ready(enriched) or not _book_odds_ready(enriched):
+        return False
+    if not _has_stats(enriched.get("home_stats")) or not _has_stats(enriched.get("away_stats")):
+        return False
+    n_h, n_a = _recent_n(enriched)
+    return n_h >= 3.0 and n_a >= 3.0
+
+
+def _international_match_ready(enriched: Dict[str, Any], *, league_code: Optional[str] = None) -> bool:
+    """
+    World Cup / Euros / Nations / friendlies: stats + form + measured xG tier.
+    Book odds optional (many friendlies lack Odds API keys); floor still 85% when core story holds.
+    """
+    lc = str(league_code or enriched.get("league") or "").strip().upper()
+    if lc not in _INTERNATIONAL_LEAGUES:
+        return False
+    if not _team_ids_ready(enriched):
+        return False
+    n_h, n_a = _recent_n(enriched)
+    hs = enriched.get("home_stats") or {}
+    aws = enriched.get("away_stats") or {}
+    form_ok = (n_h >= 3.0 and n_a >= 3.0) or (_has_stats(hs) and _has_stats(aws))
+    if not form_ok:
+        return False
+    src = _effective_xg_source(enriched)
+    if src in ("unknown", ""):
+        return n_h >= 4.0 and n_a >= 4.0 and _has_stats(hs) and _has_stats(aws)
+    return True
+
+
+def _international_dq_floor_pct(enriched: Dict[str, Any], *, league_code: Optional[str] = None) -> Optional[float]:
+    """Target floor for international competitions (85%+ UI band when enrich is solid)."""
+    if not _international_match_ready(enriched, league_code=league_code):
+        return None
+    if _book_odds_ready(enriched):
+        n_h, n_a = _recent_n(enriched)
+        if (
+            n_h >= 3.0
+            and n_a >= 3.0
+            and _has_stats(enriched.get("home_stats"))
+            and _has_stats(enriched.get("away_stats"))
+        ):
+            return _CORE_DQ_FLOOR
+    return _INTL_DQ_FLOOR
 
 
 def _season_xg_source_tag(src: str) -> bool:
@@ -372,19 +514,47 @@ def compute_fixture_data_quality(enriched: Dict[str, Any]) -> Dict[str, Any]:
     add("Injury feed", "injuries", 3.0, inj_pts)
 
     pct = max(0.0, min(100.0, round(score, 1)))
-    if core_ready and pct < 88.0:
-        pct = 88.0
+    league_code = str(enriched.get("league") or "").strip().upper()
+    showpiece_ready = _showpiece_ready(enriched, league_code=league_code or None)
+    calendar_ready = _calendar_league_ready(enriched, league_code=league_code or None)
+    intl_floor = _international_dq_floor_pct(enriched, league_code=league_code or None)
+    if core_ready and pct < _CORE_DQ_FLOOR:
+        pct = _CORE_DQ_FLOOR
+    elif intl_floor is not None and pct < intl_floor:
+        pct = intl_floor
+    elif showpiece_ready and pct < _SHOWPIECE_DQ_FLOOR:
+        pct = _SHOWPIECE_DQ_FLOOR
+    elif calendar_ready and pct < _CALENDAR_DQ_FLOOR:
+        pct = _CALENDAR_DQ_FLOOR
     field_scores = _field_quality_from_blocks(blocks)
     weak_fields = [
         row["label"]
         for row in field_scores.values()
         if row.get("status") in ("thin", "missing")
     ]
-    if core_ready and pct >= 88.0:
+    _table_weak = frozenset(
+        {"League table", "Home league position", "Away league position"}
+    )
+    xg_row = field_scores.get("xg") or {}
+    src = _effective_xg_source(enriched)
+    if core_ready and pct >= _CORE_DQ_FLOOR:
         weak_fields = [w for w in weak_fields if w == "Expected goals"]
-        xg_row = field_scores.get("xg") or {}
-        if _season_xg_source_tag(_effective_xg_source(enriched)) and xg_row.get("status") == "usable":
+        if _season_xg_source_tag(src) and xg_row.get("status") == "usable":
             weak_fields = []
+    elif showpiece_ready and pct >= _SHOWPIECE_DQ_FLOOR:
+        weak_fields = [w for w in weak_fields if w not in _table_weak]
+        if _season_xg_source_tag(src) and xg_row.get("status") in ("usable", "strong"):
+            weak_fields = [w for w in weak_fields if w != "Expected goals"]
+    elif calendar_ready and pct >= _CALENDAR_DQ_FLOOR:
+        weak_fields = [w for w in weak_fields if w not in _table_weak]
+        if _season_xg_source_tag(src) and xg_row.get("status") == "usable":
+            weak_fields = [w for w in weak_fields if w != "Expected goals"]
+    elif intl_floor is not None and pct >= _INTL_DQ_FLOOR:
+        weak_fields = [w for w in weak_fields if w not in _table_weak]
+        if _season_xg_source_tag(src) and xg_row.get("status") in ("usable", "strong"):
+            weak_fields = [w for w in weak_fields if w != "Expected goals"]
+        if not _book_odds_ready(enriched) and "Odds markets" not in weak_fields:
+            weak_fields = (weak_fields + ["Odds markets"])[:5]
     if pct >= 85 and not weak_fields:
         trust_label = "Strong data"
     elif pct >= 80:
@@ -402,6 +572,23 @@ def compute_fixture_data_quality(enriched: Dict[str, Any]) -> Dict[str, Any]:
         "full_scope": pct >= 85.0,
         "strong_scope": pct >= 80.0,
     }
+
+
+def _recent_n_from_row(fixture_row: Dict[str, Any]) -> tuple[float, float]:
+    """Prefer enrich-time recency counts; fall back to parsed last-10 length on slim rows."""
+    try:
+        n_h = float(fixture_row.get("home_recent_n") or 0)
+    except (TypeError, ValueError):
+        n_h = 0.0
+    try:
+        n_a = float(fixture_row.get("away_recent_n") or 0)
+    except (TypeError, ValueError):
+        n_a = 0.0
+    if n_h <= 0:
+        n_h = float(len(fixture_row.get("home_last10") or []))
+    if n_a <= 0:
+        n_a = float(len(fixture_row.get("away_last10") or []))
+    return n_h, n_a
 
 
 def _stats_from_last10(rows: List[Any]) -> Dict[str, Any]:
@@ -428,6 +615,9 @@ def compute_fixture_data_quality_from_row(fixture_row: Dict[str, Any]) -> Dict[s
     pred = fixture_row.get("prediction") or {}
     bo = pred.get("bookmaker_odds") or {}
     lo = pred.get("line_odds") or {}
+    n_h, n_a = _recent_n_from_row(fixture_row)
+    league_code = str(fixture_row.get("league") or "").strip().upper()
+    comp_meta = fixture_row.get("competition_meta")
     enriched: Dict[str, Any] = {
         "id": fixture_row.get("id"),
         "fixture": {"id": fixture_row.get("id")},
@@ -437,8 +627,8 @@ def compute_fixture_data_quality_from_row(fixture_row: Dict[str, Any]) -> Dict[s
         },
         "home_id": fixture_row.get("home_id"),
         "away_id": fixture_row.get("away_id"),
-        "home_recent_n": len(fixture_row.get("home_last10") or []),
-        "away_recent_n": len(fixture_row.get("away_last10") or []),
+        "home_recent_n": n_h,
+        "away_recent_n": n_a,
         "home_position": fixture_row.get("home_position") or {},
         "away_position": fixture_row.get("away_position") or {},
         "xg_source": fixture_row.get("xg_source"),
@@ -455,6 +645,18 @@ def compute_fixture_data_quality_from_row(fixture_row: Dict[str, Any]) -> Dict[s
         "away_over25_rate": pred.get("away_over25_rate"),
         "supplemental": fixture_row.get("supplemental") or {},
     }
+    if league_code:
+        enriched["league"] = league_code
+    if isinstance(comp_meta, dict) and comp_meta:
+        enriched["competition_meta"] = comp_meta
+    if fixture_row.get("home_recent"):
+        enriched["home_recent"] = fixture_row.get("home_recent")
+    elif fixture_row.get("home_last10"):
+        enriched["home_recent"] = fixture_row.get("home_last10")
+    if fixture_row.get("away_recent"):
+        enriched["away_recent"] = fixture_row.get("away_recent")
+    elif fixture_row.get("away_last10"):
+        enriched["away_recent"] = fixture_row.get("away_last10")
     hs = fixture_row.get("home_stats")
     aws = fixture_row.get("away_stats")
     if hs:
@@ -473,13 +675,13 @@ def compute_fixture_data_quality_from_row(fixture_row: Dict[str, Any]) -> Dict[s
     if mo:
         enriched["market_odds"] = mo
     sup = enriched.get("supplemental") or {}
-    meta: Dict[str, Any] = {}
+    row_meta = fixture_row.get("scraped_xg_meta")
+    meta: Dict[str, Any] = dict(row_meta) if isinstance(row_meta, dict) else {}
     if sup.get("understat_light_home_n") is not None or sup.get("understat_light_away_n") is not None:
-        meta = {
-            "home_n": sup.get("understat_light_home_n"),
-            "away_n": sup.get("understat_light_away_n"),
-            "team_rolling": bool(sup.get("understat_light_team_rolling")),
-        }
+        meta.setdefault("home_n", sup.get("understat_light_home_n"))
+        meta.setdefault("away_n", sup.get("understat_light_away_n"))
+        if sup.get("understat_light_team_rolling"):
+            meta["team_rolling"] = True
     for st in (enriched.get("home_stats"), enriched.get("away_stats")):
         if isinstance(st, dict) and st.get("api_season_xg_measured"):
             meta["api_season_xg_measured"] = True
