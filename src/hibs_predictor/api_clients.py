@@ -29,7 +29,9 @@ def _http_get_with_backoff(
     timeout: float,
     service_label: str,
     max_retries: int = 3,
+    max_rate_limit_wait: Optional[float] = None,
 ) -> requests.Response:
+    """HTTP GET with retries. ``max_rate_limit_wait=0`` skips long sleeps (optional enrich paths)."""
     last_exc: Optional[Exception] = None
     for attempt in range(max_retries):
         try:
@@ -42,6 +44,14 @@ def _http_get_with_backoff(
             continue
         if response.status_code in (429, 503):
             wait = _retry_after_seconds(response, attempt)
+            if max_rate_limit_wait is not None:
+                if max_rate_limit_wait <= 0:
+                    print(
+                        f"[{service_label} HTTP {response.status_code}] soft-fail (no backoff) "
+                        f"{url.rsplit('/', 1)[-1] if url else 'request'}"
+                    )
+                    return response
+                wait = min(wait, float(max_rate_limit_wait))
             print(f"[{service_label} HTTP {response.status_code}] backoff {wait:.1f}s (attempt {attempt + 1}/{max_retries})")
             if attempt + 1 >= max_retries:
                 response.raise_for_status()
@@ -302,7 +312,14 @@ class ApiSportsFootballClient(BaseApiClient):
     def __init__(self, api_key: str) -> None:
         super().__init__(api_key, "https://v3.football.api-sports.io", "x-apisports-key", "api_sports")
 
-    def _get_json(self, endpoint: str, params: Optional[Dict[str, Any]] = None, use_cache: bool = True) -> Dict[str, Any]:
+    def _get_json(
+        self,
+        endpoint: str,
+        params: Optional[Dict[str, Any]] = None,
+        use_cache: bool = True,
+        *,
+        soft_rate_limit: bool = False,
+    ) -> Dict[str, Any]:
         """API-Football: validate body, avoid caching hard errors, surface rate/token issues."""
         cache_key = f"{self.service_name}_{endpoint}_{str(params)}"
         if use_cache:
@@ -321,7 +338,11 @@ class ApiSportsFootballClient(BaseApiClient):
                 params=params,
                 timeout=25,
                 service_label="API-Sports",
+                max_retries=1 if soft_rate_limit else 3,
+                max_rate_limit_wait=0.0 if soft_rate_limit else None,
             )
+            if soft_rate_limit and response.status_code in (429, 503):
+                return {"response": [], "errors": {"rate_limit": response.status_code}}
             response.raise_for_status()
             data = response.json()
         except requests.RequestException as exc:
@@ -357,10 +378,15 @@ class ApiSportsFootballClient(BaseApiClient):
         return data
 
     def fetch_injuries(self, fixture_id: int) -> List[Dict[str, Any]]:
-        """Injuries / absences for a fixture (API-Football)."""
+        """Injuries / absences for a fixture (API-Football). Soft-fail on 429 so dashboard does not 500."""
         endpoint = "injuries"
         params = {"fixture": fixture_id}
-        data = self._get_json(endpoint, params=params)
+        data = self._get_json(endpoint, params=params, soft_rate_limit=True)
+        errs = data.get("errors")
+        if _api_football_rate_limited(errs) or (
+            isinstance(errs, dict) and errs.get("rate_limit") is not None
+        ):
+            return []
         return data.get("response", []) if isinstance(data.get("response"), list) else []
 
     def fetch_fixture_lineups(
