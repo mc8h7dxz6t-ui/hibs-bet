@@ -86,7 +86,8 @@ def test_unknown_xg_floors_when_core_rich():
     assert dq["weak_fields"] == ["Expected goals"]
 
 
-def test_ucl_showpiece_floor_without_league_table():
+def test_ucl_showpiece_normalized_without_league_table():
+    """FotMob league xG + form: high cup-normalized DQ, not a blind 95%% floor on thin blocks."""
     enriched = _rich_enriched(
         league="UCL",
         xg_source="fotmob_league_xg",
@@ -98,9 +99,26 @@ def test_ucl_showpiece_floor_without_league_table():
     )
     assert _showpiece_ready(enriched, league_code="UCL")
     dq = compute_fixture_data_quality(enriched)
+    assert dq["score_pct"] >= 90.0
+    assert dq["score_pct"] < 95.0
+    assert dq.get("premium_scope") is False
+    assert dq.get("showpiece_normalized_pct") is not None
+    assert "League table" not in dq["weak_fields"]
+
+
+def test_ucl_premium_95_with_measured_fixture_xg():
+    enriched = _rich_enriched(
+        league="UCL",
+        xg_source="api_statistics_xg",
+        home_position={},
+        away_position={},
+        home_recent_n=8,
+        away_recent_n=8,
+        market_odds={"btts": {"yes": 1.75}, "totals_2_5": {"over": 1.85}},
+    )
+    dq = compute_fixture_data_quality(enriched)
     assert dq["score_pct"] >= 95.0
     assert dq.get("premium_scope") is True
-    assert "League table" not in dq["weak_fields"]
 
 
 def test_coupe_showpiece_floor_domestic_stats_shape():

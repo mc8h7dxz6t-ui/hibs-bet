@@ -16,8 +16,9 @@ _SHOWPIECE_LEAGUES = frozenset(
         "INTL_FRIENDLIES",
     }
 )
-# UEFA club finals — 95% band when measured xG + odds + form are in (no league-table fiction).
-_UEFA_SHOWPIECE_PREMIUM_LEAGUES = frozenset({"UCL", "EUROPA_LEAGUE", "UECL"})
+# UEFA club knockouts — DQ normalized without league-table blocks (cups have no standings).
+_UEFA_SHOWPIECE_NORMALIZED_LEAGUES = frozenset({"UCL", "EUROPA_LEAGUE", "UECL"})
+_STANDINGS_BLOCK_KEYS = frozenset({"stand_home", "stand_away"})
 _INTERNATIONAL_LEAGUES = frozenset(
     {
         "WORLD_CUP",
@@ -172,30 +173,6 @@ def _showpiece_ready(enriched: Dict[str, Any], *, league_code: Optional[str] = N
     if src in ("unknown", "", "goals_proxy") and n_h < 4.0 and n_a < 4.0:
         if not (_has_stats(hs) and _has_stats(aws)):
             return False
-    return True
-
-
-def _showpiece_premium_ready(enriched: Dict[str, Any], *, league_code: Optional[str] = None) -> bool:
-    """
-    Champions League / Europa / Conference finals: 95% UI band when enrich is match-ready.
-
-    Slightly relaxed vs domestic premium (4+ recent, xG tier >= 13 pts) — no standings required.
-    """
-    lc = str(league_code or enriched.get("league") or "").strip().upper()
-    if lc not in _UEFA_SHOWPIECE_PREMIUM_LEAGUES:
-        return False
-    if not _showpiece_ready(enriched, league_code=lc):
-        return False
-    if not _has_stats(enriched.get("home_stats")) or not _has_stats(enriched.get("away_stats")):
-        return False
-    n_h, n_a = _recent_n(enriched)
-    if n_h < 4.0 or n_a < 4.0:
-        return False
-    src = _effective_xg_source(enriched)
-    if not _strong_xg_tier(src):
-        return False
-    if _xg_points(src, n_h, n_a, enriched) < 13.0:
-        return False
     return True
 
 
@@ -459,6 +436,22 @@ def _xg_points(src: str, n_h: float, n_a: float, enriched: Optional[Dict[str, An
     return 6.0
 
 
+def _showpiece_earnable_pct(score: float, blocks: List[Dict[str, Any]]) -> float:
+    """
+    Cup / UEFA coverage as %% of blocks that apply (excludes league-table slots).
+
+    Same block weights and earned points — only the denominator drops irrelevant standings.
+    """
+    max_pts = sum(
+        float(b.get("max") or 0.0)
+        for b in blocks
+        if isinstance(b, dict) and str(b.get("key") or "") not in _STANDINGS_BLOCK_KEYS
+    )
+    if max_pts <= 0:
+        return 0.0
+    return min(100.0, round((score / max_pts) * 100.0, 1))
+
+
 def _side_markets_pts(enriched: Dict[str, Any]) -> float:
     mo = enriched.get("market_odds") or {}
     if bool((mo.get("btts") or {}).get("yes")) or bool((mo.get("totals_2_5") or {}).get("over")):
@@ -611,12 +604,20 @@ def compute_fixture_data_quality(enriched: Dict[str, Any]) -> Dict[str, Any]:
     pct = max(0.0, min(100.0, round(score, 1)))
     league_code = str(enriched.get("league") or "").strip().upper()
     showpiece_ready = _showpiece_ready(enriched, league_code=league_code or None)
-    showpiece_premium_ready = _showpiece_premium_ready(enriched, league_code=league_code or None)
     domestic_standard_ready = _domestic_standard_ready(enriched, league_code=league_code or None)
     intl_floor = _international_dq_floor_pct(enriched, league_code=league_code or None)
     strong_xg = _strong_xg_tier(src)
     premium_ready = _premium_ready(enriched, league_code=league_code or None)
-    if (premium_ready or showpiece_premium_ready) and pct < _PREMIUM_DQ_FLOOR:
+    cup_premium = premium_ready and _cup_competition_code(league_code)
+    uefa_normalized = league_code in _UEFA_SHOWPIECE_NORMALIZED_LEAGUES and cup_premium
+    showpiece_norm_pct: Optional[float] = None
+    if uefa_normalized:
+        showpiece_norm_pct = _showpiece_earnable_pct(score, blocks)
+        if showpiece_norm_pct > pct:
+            pct = showpiece_norm_pct
+    if premium_ready and not cup_premium and pct < _PREMIUM_DQ_FLOOR:
+        pct = _PREMIUM_DQ_FLOOR
+    elif cup_premium and not uefa_normalized and pct < _PREMIUM_DQ_FLOOR:
         pct = _PREMIUM_DQ_FLOOR
     elif core_ready and strong_xg and pct < _MEASURED_DQ_FLOOR:
         pct = _MEASURED_DQ_FLOOR
@@ -653,7 +654,7 @@ def compute_fixture_data_quality(enriched: Dict[str, Any]) -> Dict[str, Any]:
         weak_fields = [w for w in weak_fields if w not in _table_weak]
         if strong_xg and xg_row.get("status") in ("usable", "strong"):
             weak_fields = [w for w in weak_fields if w != "Expected goals"]
-    elif (premium_ready or showpiece_premium_ready) and pct >= _PREMIUM_DQ_FLOOR:
+    elif premium_ready and pct >= _PREMIUM_DQ_FLOOR:
         weak_fields = [
             w
             for w in weak_fields
@@ -683,7 +684,8 @@ def compute_fixture_data_quality(enriched: Dict[str, Any]) -> Dict[str, Any]:
         "trust_label": trust_label,
         "full_scope": pct >= 85.0,
         "strong_scope": pct >= 80.0,
-        "premium_scope": pct >= _PREMIUM_DQ_FLOOR,
+        "premium_scope": pct >= _PREMIUM_DQ_FLOOR and premium_ready,
+        "showpiece_normalized_pct": showpiece_norm_pct,
     }
 
 
