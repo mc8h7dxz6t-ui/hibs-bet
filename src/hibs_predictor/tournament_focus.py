@@ -1,9 +1,9 @@
 """Tournament / international focus mode (World Cup window, date-driven).
 
 Default summer (**2026-05-20 → 2026-08-01**, before **26/27** domestic seasons): **World Cup**
-is the main target (**2026-06-01 → 2026-07-18** tournament focus on the dashboard),
+is the main target (**2026-06-11 → 2026-07-18** tournament focus on the dashboard),
 plus **international friendlies** (wider fixture window through the summer break),
-**cup / UEFA finals**, and **League of Ireland + Nordics** as peer **5-day** daily options
+**cup / UEFA finals**, and **Nordics** as peer **5-day** daily options (LOI season ended — omitted)
 (same fixture window as the dashboard — not extended friendlies horizon).
 No SPL, EPL, or European league calendars until the offseason ends.
 
@@ -39,7 +39,6 @@ INTL_FRIENDLIES_CODE = "INTL_FRIENDLIES"
 # Knockout / final-stage cups only (no EPL, La Liga, etc.).
 # In-season through UK/European summer — use dashboard fetch window only (typically 5 days).
 _SUMMER_DAILY_LEAGUE_CODES: tuple[str, ...] = (
-    "IRELAND_PREMIER",
     "NORWAY_ELITESERIEN",
     "FINLAND_VEIKKAUSLIIGA",
     "DENMARK_SL",
@@ -58,7 +57,7 @@ _CUP_FINAL_LEAGUE_CODES: tuple[str, ...] = (
     "COUPE_DE_FRANCE",
 )
 
-_DEFAULT_AUTO_START = date(2026, 6, 1)
+_DEFAULT_AUTO_START = date(2026, 6, 11)
 _DEFAULT_AUTO_END = date(2026, 7, 18)
 # International friendlies window (pre-World Cup block through tournament end).
 _DEFAULT_FRIENDLIES_AUTO_START = date(2026, 5, 20)
@@ -146,12 +145,12 @@ def domestic_offseason_active(*, today: Optional[date] = None) -> bool:
 
 
 def summer_daily_league_codes() -> tuple[str, ...]:
-    """LOI + Nordics: peer daily options on the 5-day dashboard window (not friendlies horizon)."""
+    """Nordics: peer daily options on the 5-day dashboard window (not friendlies horizon)."""
     return _SUMMER_DAILY_LEAGUE_CODES
 
 
 def is_summer_daily_league(league_code: str) -> bool:
-    """True for League of Ireland and Nordic codes (summer peer daily leagues)."""
+    """True for Nordic codes (summer peer daily leagues)."""
     return (league_code or "").strip().upper() in _SUMMER_DAILY_LEAGUE_CODES
 
 
@@ -192,7 +191,7 @@ def post_wc_domestic_european_league_codes() -> List[str]:
 
 def active_competition_league_codes(*, today: Optional[date] = None) -> List[str]:
     """
-    Summer / focus fetch list: World Cup first, then friendlies, LOI/Nordics (5-day), cups.
+    Summer / focus fetch list: World Cup first, then friendlies, Nordics (5-day), cups.
     Post-WC gap (Jul–Aug): UK + European domestic calendars instead of international-only.
     """
     if post_wc_domestic_european_active(today=today):

@@ -329,45 +329,33 @@ class TeamStrengthCalculator:
     def calculate_form_strength(
         recent_results: List[Dict[str, Any]],
         team_id: Optional[int] = None,
+        *,
+        team_name: str = "",
     ) -> float:
         if not recent_results:
             return 0.5
-        from hibs_predictor.fixture_utils import coerce_team_id
+        from hibs_predictor.data_aggregator import _match_goals_for_team
 
-        tid = coerce_team_id(team_id)
         points = 0
         xg_diff = 0.0
         used = 0
         for match in recent_results[:10]:
-            goals = match.get("goals", {}) or {}
-            home_g = goals.get("home")
-            away_g = goals.get("away")
-            if home_g is None or away_g is None:
+            scored = _match_goals_for_team(match, team_id, team_name=team_name)
+            if not scored:
                 continue
-            try:
-                hg = int(home_g)
-                ag = int(away_g)
-            except (TypeError, ValueError):
-                continue
+            gf, ga = scored
             teams = match.get("teams", {}) or {}
+            from hibs_predictor.fixture_utils import coerce_team_id
+
             hid = coerce_team_id((teams.get("home") or {}).get("id"))
-            aid = coerce_team_id((teams.get("away") or {}).get("id"))
-            if tid is not None:
-                if hid == tid:
-                    gf, ga = hg, ag
-                elif aid == tid:
-                    gf, ga = ag, hg
-                else:
-                    continue
-            else:
-                gf, ga = hg, ag
+            tid = coerce_team_id(team_id)
             if gf > ga:
                 points += 3
             elif gf == ga:
                 points += 1
             xgf = TeamStrengthCalculator._team_xg_from_fixture_statistics(match, tid or hid or 0)
             if xgf is not None:
-                xg_diff += float(xgf) - max(0.04, (hg + ag) / 10.0)
+                xg_diff += float(xgf) - max(0.04, (gf + ga) / 10.0)
             used += 1
         if used == 0:
             return 0.5
@@ -376,12 +364,33 @@ class TeamStrengthCalculator:
         return max(0.0, min(1.0, form_score + xg_bonus))
 
     @staticmethod
-    def calculate_home_away_factor(team_id: int, matches: List[Dict[str, Any]], is_home: bool) -> float:
-        relevant = [
-            m for m in matches
-            if (is_home and m.get("teams", {}).get("home", {}).get("id") == team_id)
-            or (not is_home and m.get("teams", {}).get("away", {}).get("id") == team_id)
-        ]
+    def calculate_home_away_factor(
+        team_id: int,
+        matches: List[Dict[str, Any]],
+        is_home: bool,
+        *,
+        team_name: str = "",
+    ) -> float:
+        from hibs_predictor.fixture_utils import coerce_team_id
+        from hibs_predictor.live_scores import _team_names_match
+
+        tid = coerce_team_id(team_id)
+
+        def _relevant(m: Dict[str, Any]) -> bool:
+            teams = m.get("teams", {}) or {}
+            th = teams.get("home") or {}
+            ta = teams.get("away") or {}
+            hid = coerce_team_id(th.get("id"))
+            aid = coerce_team_id(ta.get("id"))
+            if is_home:
+                if tid is not None and hid == tid:
+                    return True
+                return bool(team_name and _team_names_match(team_name, str(th.get("name") or "")))
+            if tid is not None and aid == tid:
+                return True
+            return bool(team_name and _team_names_match(team_name, str(ta.get("name") or "")))
+
+        relevant = [m for m in matches if _relevant(m)]
         if not relevant:
             return 1.0
         points = 0

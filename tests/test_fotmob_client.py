@@ -104,6 +104,24 @@ def test_fixture_xg_from_league_table():
     assert 0.35 <= xa <= 3.2
 
 
+def test_fotmob_xg_enabled_intl_friendlies_default():
+    import os
+
+    old = os.environ.pop("HIBS_ENABLE_FOTMOB_XG", None)
+    old_md = os.environ.pop("HIBS_MAX_DATA", None)
+    try:
+        assert fm.fotmob_xg_enabled("INTL_FRIENDLIES") is True
+    finally:
+        if old is not None:
+            os.environ["HIBS_ENABLE_FOTMOB_XG"] = old
+        else:
+            os.environ.pop("HIBS_ENABLE_FOTMOB_XG", None)
+        if old_md is not None:
+            os.environ["HIBS_MAX_DATA"] = old_md
+        else:
+            os.environ.pop("HIBS_MAX_DATA", None)
+
+
 def test_fotmob_xg_enabled_cups_default():
     import os
 

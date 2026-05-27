@@ -5,7 +5,7 @@
 <div class="settings-page">
     <header class="site-top">
         <div class="site-top-left">
-            <img src="{{ url_for('static', filename='badge_harp_shield.png') }}" alt="Hibernian FC" class="site-crest" width="38" height="38">
+            {% from '_hibs_brand.html' import inline_crest %}{{ inline_crest() }}
             <span class="site-wordmark">hibs-bet</span>
             <nav class="site-links" aria-label="Primary">
                 <a href="/" class="site-link">Dashboard</a>

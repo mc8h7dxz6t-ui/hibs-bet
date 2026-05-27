@@ -66,7 +66,7 @@
             <a href="/acca" class="nav-btn">Acca Builder</a>
             <a href="/status" class="nav-btn">API status</a>
         </div>
-        <img src="{{ url_for('static', filename='badge_harp_shield.png') }}" alt="" class="perf-crest" width="44" height="44" aria-hidden="true">
+        {% from '_hibs_brand.html' import inline_crest %}{{ inline_crest(size=44, css_class='perf-crest') }}
         <h1>Performance &amp; track record</h1>
         <p class="perf-intro">
             Logged automatically when you use the dashboard before kick-off (<code>HIBS_PREDICTION_LOG_ENABLED=1</code>).

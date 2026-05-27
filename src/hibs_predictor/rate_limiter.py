@@ -10,9 +10,15 @@ from typing import Dict
 class RateLimiter:
     def __init__(self, state_file: str = ".rate_limit_state.json") -> None:
         self.state_file = Path(state_file)
+        api_default = "1200" if (os.getenv("HIBS_DEV_FULL_DQ") or "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        ) else "400"
         self.limits = {
             "football_data_org": 100,
-            "api_sports": int(os.getenv("HIBS_API_SPORTS_HOURLY_LIMIT", "400")),
+            "api_sports": int(os.getenv("HIBS_API_SPORTS_HOURLY_LIMIT", api_default)),
             "sportsmonk": 150,
             "odds_api": 500,
             "stats_api": 150,
@@ -70,3 +76,17 @@ class RateLimiter:
             "limit": self.limits.get(service, 0),
             "reset_at": entry.get("reset_at"),
         }
+
+    def reset_service(self, service: str) -> None:
+        """Clear hourly counter for one provider (e.g. after fixture cache clear)."""
+        if service in self.limits:
+            self.state[service] = {"count": 0, "reset_at": None}
+            self._save_state()
+
+    def reset_all(self) -> None:
+        """Clear all provider counters."""
+        self.state = {key: {"count": 0, "reset_at": None} for key in self.limits}
+        self._save_state()
+
+    def is_blocked(self, service: str) -> bool:
+        return not self.check_rate_limit(service)

@@ -61,6 +61,18 @@ class Cache:
 
         return data.get("value")
 
+    def peek(self, key: str) -> Optional[Any]:
+        """Return cached value ignoring TTL (for stale dashboard paint while refresh runs)."""
+        path = self._get_cache_path(key)
+        if not path.exists():
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError, TypeError):
+            return None
+        return data.get("value") if isinstance(data, dict) else None
+
     def set(self, key: str, value: Any, ttl_hours: float = 4.0) -> None:
         path = self._get_cache_path(key)
         data = {

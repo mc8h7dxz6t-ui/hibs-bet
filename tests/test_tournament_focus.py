@@ -49,7 +49,7 @@ def test_focus_off_outside_auto_window(monkeypatch):
 
 
 def test_focus_off_before_world_cup_starts(monkeypatch):
-    """Late May 2026: WC + friendlies + LOI/Nordics + cup finals; no UK/Euro leagues."""
+    """Late May 2026: WC + friendlies + Nordics + cup finals; no UK/Euro leagues; LOI omitted."""
     monkeypatch.setattr(
         "hibs_predictor.tournament_focus._today_utc",
         lambda: date(2026, 5, 31),
@@ -67,15 +67,25 @@ def test_focus_off_before_world_cup_starts(monkeypatch):
     assert codes[0] == "WORLD_CUP"
     assert "UCL" in codes
     assert "FA_CUP" in codes
-    assert "IRELAND_PREMIER" in codes
+    assert "IRELAND_PREMIER" not in codes
     assert codes == active_competition_league_codes()
 
 
-def test_focus_auto_on_early_june(monkeypatch):
-    """From 1 Jun: upcoming WC fixtures visible before opening match day."""
+def test_focus_off_before_opening_match_day(monkeypatch):
+    """1–10 Jun: friendlies + Nordics; tournament focus starts 11 Jun (opening match)."""
     monkeypatch.setattr(
         "hibs_predictor.tournament_focus._today_utc",
-        lambda: date(2026, 6, 5),
+        lambda: date(2026, 6, 10),
+    )
+    assert tournament_focus_active() is False
+    assert domestic_offseason_active() is True
+    assert "WORLD_CUP" in league_codes_for_fetch()
+
+
+def test_focus_auto_on_at_opening_match(monkeypatch):
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 6, 11),
     )
     assert tournament_focus_mode() == "worldcup"
     assert tournament_focus_active() is True
@@ -106,7 +116,7 @@ def test_domestic_returns_august(monkeypatch):
 def test_focus_auto_on_at_window_start(monkeypatch):
     monkeypatch.setattr(
         "hibs_predictor.tournament_focus._today_utc",
-        lambda: date(2026, 6, 1),
+        lambda: date(2026, 6, 11),
     )
     assert tournament_focus_mode() == "worldcup"
     assert tournament_focus_active() is True
@@ -244,7 +254,6 @@ def test_friendlies_fixture_window_days(monkeypatch):
     assert _fixture_window_days_for_league("EPL") == 7
     assert _fixture_window_days_for_league("INTL_FRIENDLIES") == 14
     assert _fixture_window_days_for_league("DENMARK_SL") == 7
-    assert _fixture_window_days_for_league("IRELAND_PREMIER") == 7
 
 
 def test_post_wc_domestic_european_fetch_after_world_cup(monkeypatch):

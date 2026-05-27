@@ -7,9 +7,11 @@ from hibs_predictor.web import (
     _attach_table_snapshots,
     _build_league_tables,
     _dedupe_table_rows,
+    _merge_scottish_split_standings,
     _normalize_table_row,
     _table_row_from_api_entry,
     _table_row_from_fdo_entry,
+    _tables_league_order_index,
 )
 
 
@@ -199,3 +201,43 @@ def test_parse_last_10_falls_back_to_team_name_when_id_mismatch():
     assert len(rows) == 1
     assert rows[0]["result"] == "W"
     assert rows[0]["score"] == "2-0"
+
+
+def _spl_entry(team_id: int, name: str, rank: int, played: int, points: int) -> dict:
+    return {
+        "rank": rank,
+        "team": {"id": team_id, "name": name},
+        "points": points,
+        "goalsDiff": 10,
+        "all": {
+            "played": played,
+            "win": played // 2,
+            "draw": 2,
+            "lose": 1,
+            "goals": {"for": 50, "against": 40},
+        },
+    }
+
+
+def test_merge_scottish_split_prefers_38_game_phase():
+    """SPFL: merge regular (33) + split groups into one table with 38 games played."""
+    regular = [_spl_entry(i, f"Team {i}", i, 33, 60 - i) for i in range(1, 13)]
+    champ = [_spl_entry(1, "Celtic", 1, 38, 95), _spl_entry(2, "Rangers", 2, 38, 88)]
+    rel = [_spl_entry(11, "Hibs", 11, 38, 45), _spl_entry(12, "Hearts", 12, 38, 44)]
+    rows = _merge_scottish_split_standings([regular, champ, rel])
+    assert len(rows) == 12
+    celtic = next(r for r in rows if r["team"] == "Celtic")
+    assert celtic["played"] == 38
+    assert celtic["points"] == 95
+
+
+def test_tables_league_order_world_cup_first_during_focus(monkeypatch):
+    from datetime import date
+
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 6, 15),
+    )
+    idx = _tables_league_order_index(include_domestic=True)
+    assert idx["WORLD_CUP"] < idx["SCOTLAND"]
+    assert idx["WORLD_CUP"] < idx["EPL"]

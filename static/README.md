@@ -1,8 +1,24 @@
 # Static assets
 
-## Badge assets
+## Hibernian heritage badges (UI only)
 
-Use `badge_harp_shield.png` for all user-facing crest/badge UI (headers, favicon, launch overlay, watermarks). `hibs_badge.svg` is deprecated and must not be used — it is not an official Hibernian crest.
+These crests are **branding assets** for hibs-bet — they are **not** scraped and do not feed the prediction engine.
+
+| File | Era / use |
+|------|-----------|
+| `badge_2000_present.png` | Current crest — **primary** (favicon, launch, footer, headers) |
+| `badge_harp_embroidered.png` | Harp shield — secondary header + pattern tile |
+| `badge_1979_circle.png` | 1979 circular crest — empty states, accents |
+| `badge_1979_shield_green.png` | Green shield (1979) — watermark corner |
+| `badge_1989_2000_oval.png` | Oval sash crest (1989–2000) — watermark |
+
+`badge_harp_shield.png` is an alias of `badge_harp_embroidered.png` for older links.
+
+Templates use macros in `templates/_hibs_brand.html`; config in `src/hibs_predictor/hibs_brand.py`.
+
+**Do not use** `hibs_badge.svg` — not an official crest.
+
+Legacy files (`crest_*.png`, `badges_heritage_montage.png`) may remain for reference; new UI uses the five badges above.
 
 ## Optional launch video (`launch-wait.mp4`)
 

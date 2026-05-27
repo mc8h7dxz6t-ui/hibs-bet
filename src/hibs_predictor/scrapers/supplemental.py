@@ -184,7 +184,19 @@ def collect_supplemental(fixture: Dict[str, Any], league_code: str, enriched: Di
             return True
         return os.getenv("HIBS_MAX_DATA", "").strip().lower() in ("1", "true", "yes", "on")
 
-    sb_matches = _statsbomb_team_proxy_on(league_code)
+    try:
+        from hibs_predictor.fixture_utils import fixture_team_id
+        from hibs_predictor.scrapers.thin_data_rescue import enriched_needs_thin_rescue, thin_data_scrape_enabled
+
+        thin_boost = thin_data_scrape_enabled() and enriched_needs_thin_rescue(
+            enriched,
+            fixture_team_id(fixture, "home") or fixture_team_id(enriched, "home"),
+            fixture_team_id(fixture, "away") or fixture_team_id(enriched, "away"),
+        )
+    except Exception:
+        thin_boost = False
+
+    sb_matches = _statsbomb_team_proxy_on(league_code) or thin_boost
     if sb_matches:
         try:
             from hibs_predictor.data_source_policy import fixture_in_policy_window, policy_window_utc

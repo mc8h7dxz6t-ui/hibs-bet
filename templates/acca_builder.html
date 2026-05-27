@@ -128,7 +128,7 @@
     <!-- BET SLIP -->
     <div class="slip">
         <div class="slip-title">
-            <span class="slip-brand"><img src="{{ url_for('static', filename='badge_harp_shield.png') }}" alt="">Bet Slip</span>
+            <span class="slip-brand">{% from '_hibs_brand.html' import inline_crest %}{{ inline_crest(size=22, css_class='slip-crest') }} Bet Slip</span>
             <span class="slip-count" id="sc">0</span>
         </div>
 

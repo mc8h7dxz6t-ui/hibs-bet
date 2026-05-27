@@ -4,7 +4,11 @@
 
 **Double-click `Run-hibs-streamlit.command`** in this folder to start the app instantly.
 
-For the Flask web dashboard instead, double-click **`Run-hibs-bet.command`** in this folder.
+For the Flask web dashboard instead, double-click **`Run-hibs-bet.command`** or **`HibsBet.command`** in this folder (same script). If port 5000 or 5002 is busy, the launcher picks the next free port (5000 → 5001 → 5002 → …) and opens the correct URL.
+
+Desktop shortcut: **`~/Desktop/HibsBet.command`** runs the same launcher (no longer hard-coded to 5002).
+
+**Logs:** `logs/hibs-bet.log` (rotating, 5×5MB) plus prediction audit DB at `data/prediction_audit.sqlite` when `HIBS_PREDICTION_LOG_ENABLED=1` (on by default in the launcher).
 - Check for your `.env` file
 - Activate the virtual environment
 - Install Streamlit if needed

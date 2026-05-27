@@ -93,7 +93,7 @@ def test_priority_league_uses_reserved_budget(monkeypatch):
             home_team_id=1,
             away_team_id=2,
             current_source="goals_proxy",
-            league_code="IRELAND_PREMIER",
+            league_code="DENMARK_SL",
         )
     assert api.fetch_fixture_statistics.call_count == 2
 

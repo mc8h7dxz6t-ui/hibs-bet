@@ -80,9 +80,11 @@
 <div class="insights-page">
     <header class="site-top">
         <div class="site-top-left">
-            <div class="site-crest-wrap">
-                <img src="{{ url_for('static', filename='badge_harp_shield.png') }}" alt="Hibernian FC harp shield" class="site-crest" width="38" height="38">
-                <img src="{{ url_for('static', filename='hibs_badge.svg') }}" alt="" class="site-crest site-crest-alt" width="32" height="32" aria-hidden="true">
+            {% from '_hibs_brand.html' import site_crests %}
+            <div>
+                {{ site_crests() }}
+                {% from '_hibs_brand.html' import heritage_strip %}
+                {{ heritage_strip() }}
             </div>
             <span class="site-wordmark">hibs-bet</span>
             <nav class="site-links" aria-label="Primary">

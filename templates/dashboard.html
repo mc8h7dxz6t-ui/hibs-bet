@@ -6,9 +6,11 @@
 <div class="ref-page">
     <header class="site-top">
         <div class="site-top-left">
-            <div class="site-crest-wrap">
-                <img src="{{ url_for('static', filename='badge_harp_shield.png') }}" alt="Hibernian FC harp shield" class="site-crest" width="38" height="38">
-                <img src="{{ url_for('static', filename='hibs_badge.svg') }}" alt="" class="site-crest site-crest-alt" width="32" height="32" aria-hidden="true">
+            {% from '_hibs_brand.html' import site_crests %}
+            <div>
+                {{ site_crests() }}
+                {% from '_hibs_brand.html' import heritage_strip %}
+                {{ heritage_strip() }}
             </div>
             <span class="site-wordmark">hibs-bet</span>
             <nav class="site-links" aria-label="Primary">
@@ -41,6 +43,13 @@
         </div>
     </header>
 
+    {% if cold_start %}
+    <div class="api-missing-banner" role="status">
+        <strong>Loading fixtures…</strong> First load can take a minute while data is fetched. This page will refresh automatically, or click <strong>Refresh</strong> above.
+    </div>
+    <meta http-equiv="refresh" content="20">
+    {% endif %}
+
     {% if not has_api_clients %}
     <div class="api-missing-banner" role="alert">
         <strong>No fixture API keys loaded.</strong> Add a real key (not the <code>your_*_here</code> placeholders) to <code>.env</code> in the project root: <code>API_SPORTS_FOOTBALL_KEY</code> and/or <code>FOOTBALL_DATA_ORG_KEY</code>. Restart after saving.
@@ -57,11 +66,11 @@
     </div>
     {% elif tournament_focus.domestic_offseason_active %}
     <div class="tournament-focus-banner" role="status">
-        <strong>World Cup</strong> first (Jun–Jul 2026), then <strong>friendlies</strong> (wider window), cup finals, and <strong>Ireland</strong> + <strong>Nordic</strong> as full daily options on your <strong>{{ fetch_days }}-day</strong> list until {{ tournament_focus.domestic_offseason_end }}. No SPL, EPL, or European league calendars. Use <strong>All</strong> to load everything.
+        <strong>World Cup</strong> first (11 Jun–18 Jul 2026), then <strong>friendlies</strong> (wider window), cup finals, and <strong>Nordic</strong> leagues on your <strong>{{ fetch_days }}-day</strong> list until {{ tournament_focus.domestic_offseason_end }}. No SPL, EPL, or European league calendars. Use <strong>All</strong> to load everything.
     </div>
     {% elif tournament_focus.friendlies_window_active %}
     <div class="tournament-focus-banner" role="status">
-        <strong>Pre–World Cup friendlies</strong> through {{ tournament_focus.friendlies_window_end }} — <strong>International</strong> filter on by default; <strong>Ireland</strong> and <strong>Nordic</strong> chips for LOI + Nordics on your <strong>{{ fetch_days }}-day</strong> window. World Cup fixtures load from 1 Jun.
+        <strong>Pre–World Cup friendlies</strong> through {{ tournament_focus.friendlies_window_end }} — <strong>International</strong> filter on by default; <strong>Nordic</strong> chip for summer leagues on your <strong>{{ fetch_days }}-day</strong> window. World Cup focus from 11 Jun.
     </div>
     {% endif %}
 
@@ -98,9 +107,9 @@
                     {% endfor %}
                 </div>
                 {% if tournament_focus.active and tournament_focus.intl_only_fetch %}
-                <p class="chip-hint region-filter-hint" id="region-filter-hint">Showing <strong>International</strong> by default during {{ tournament_focus.label|lower }}. <strong>Ireland</strong> and <strong>Nordic</strong> are full daily options on the {{ fetch_days }}-day window — pick another region for UK/European leagues.</p>
+                <p class="chip-hint region-filter-hint" id="region-filter-hint">Showing <strong>International</strong> by default during {{ tournament_focus.label|lower }}. <strong>Nordic</strong> leagues are on the {{ fetch_days }}-day window — pick another region for UK/European leagues.</p>
                 {% elif tournament_focus.intl_only_fetch and not tournament_focus.active %}
-                <p class="chip-hint region-filter-hint" id="region-filter-hint"><strong>All</strong> is the default. <strong>UEFA finals</strong> (Conference League, Europa, Champions) are under <strong>European</strong> — not International. Friendlies use <strong>International</strong>; LOI/Nordics use their chips.</p>
+                <p class="chip-hint region-filter-hint" id="region-filter-hint"><strong>All</strong> is the default. <strong>UEFA finals</strong> (Conference League, Europa, Champions) are under <strong>European</strong> — not International. Friendlies use <strong>International</strong>; Nordics use the <strong>Nordic</strong> chip.</p>
                 {% elif tournament_focus.friendlies_window_active and not tournament_focus.intl_only_fetch %}
                 <p class="chip-hint region-filter-hint" id="region-filter-hint">Pick <strong>All</strong>, <strong>UK</strong>, or <strong>European</strong> to filter — international friendlies are included in every view.</p>
                 {% else %}
@@ -196,7 +205,7 @@
 
             <div id="dash-fixture-root" class="fixtures-full-list" data-dq-min="{{ data_quality_ui_min }}" data-default-region="{{ tournament_focus.default_region }}" data-include-domestic="{{ '1' if include_domestic else '0' }}" data-intl-only-fetch="{{ '1' if tournament_focus.intl_only_fetch else '0' }}">
                 {% if total == 0 %}
-                <div class="empty-state"><img src="{{ url_for('static', filename='crest_official_circle.png') }}" alt="" class="empty-crest" width="56" height="56" aria-hidden="true">
+                <div class="empty-state">{% from '_hibs_brand.html' import empty_crest %}{{ empty_crest() }}
                     <p>No fixtures in the next {{ fetch_days }} days. Check API keys and <a href="/status">status</a>, then Refresh. Scrapers add stats to fixtures after a provider returns them; they do not create league calendars.</p>
                 </div>
                 {% else %}

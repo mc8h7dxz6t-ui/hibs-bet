@@ -8,7 +8,7 @@
     </div>
     {% endif %}
     <div class="hibs-launch-panel">
-        <img class="hibs-launch-crest" src="{{ url_for('static', filename='badge_harp_shield.png') }}" alt="Harp shield crest" width="92" height="92" decoding="async">
+        {% from '_hibs_brand.html' import launch_crest %}{{ launch_crest() }}
         <p class="hibs-launch-brand">hibs-bet</p>
         <p class="hibs-launch-tagline">Edinburgh Betting Intelligence</p>
         <div class="hibs-launch-tip-wrap">

@@ -242,9 +242,51 @@ def _extract_goals_totals_from_api_stats(team_stats: Dict[str, Any]) -> Tuple[in
     return out_for, out_against
 
 
-def _recent_match_rates(matches: List[Dict[str, Any]], team_id: int) -> Dict[str, float]:
+def _match_goals_for_team(
+    match: Dict[str, Any],
+    team_id: Optional[int],
+    *,
+    team_name: str = "",
+) -> Optional[tuple[int, int]]:
+    """Return (gf, ga) for the focal team in a finished match row."""
+    from hibs_predictor.live_scores import _team_names_match
+
+    teams = match.get("teams", {}) or {}
+    goals = match.get("goals", {}) or {}
+    home_g = goals.get("home")
+    away_g = goals.get("away")
+    if home_g is None or away_g is None:
+        return None
+    try:
+        hg = int(home_g)
+        ag = int(away_g)
+    except (TypeError, ValueError):
+        return None
+    hid = coerce_team_id((teams.get("home") or {}).get("id"))
+    aid = coerce_team_id((teams.get("away") or {}).get("id"))
+    tid = coerce_team_id(team_id)
+    if tid is not None:
+        if hid == tid:
+            return hg, ag
+        if aid == tid:
+            return ag, hg
+    hn = str((teams.get("home") or {}).get("name") or "")
+    an = str((teams.get("away") or {}).get("name") or "")
+    if team_name and _team_names_match(team_name, hn):
+        return hg, ag
+    if team_name and _team_names_match(team_name, an):
+        return ag, hg
+    return None
+
+
+def _recent_match_rates(
+    matches: List[Dict[str, Any]],
+    team_id: int,
+    *,
+    team_name: str = "",
+) -> Dict[str, float]:
     """BTTS / over rates and per-game goals from the team's last finished matches."""
-    if not team_id or not matches:
+    if not matches:
         return {
             "btts_rate": 0.0,
             "over15_rate": 0.0,
@@ -257,30 +299,14 @@ def _recent_match_rates(matches: List[Dict[str, Any]], team_id: int) -> Dict[str
     tgf = tga = 0.0
     n = 0
     for match in matches[:10]:
-        teams = match.get("teams", {})
-        goals = match.get("goals", {}) or {}
-        hid = coerce_team_id((teams.get("home") or {}).get("id"))
-        aid = coerce_team_id((teams.get("away") or {}).get("id"))
-        tid = coerce_team_id(team_id)
-        home_g = goals.get("home")
-        away_g = goals.get("away")
-        if home_g is None or away_g is None:
+        scored = _match_goals_for_team(match, team_id, team_name=team_name)
+        if not scored:
             continue
-        try:
-            hg = int(home_g)
-            ag = int(away_g)
-        except (TypeError, ValueError):
-            continue
-        if tid is not None and hid == tid:
-            gf, ga = hg, ag
-        elif tid is not None and aid == tid:
-            gf, ga = ag, hg
-        else:
-            continue
+        gf, ga = scored
         n += 1
         tgf += gf
         tga += ga
-        if gf > 0 and ag > 0:
+        if gf > 0 and ga > 0:
             btts += 1
         if gf + ga > 1:
             o15 += 1
@@ -1081,6 +1107,7 @@ class DataAggregator:
                 fdo_comp=fdo_comp,
                 team_name=hk,
                 prefer_name_resolution=prefer_name_ids,
+                league_code=league_code,
             )
         except Exception as exc:
             print(f"[enrich home_recent] {league_code} fid={fixture_id_str}: {exc!r}")
@@ -1091,6 +1118,7 @@ class DataAggregator:
                 fdo_comp=fdo_comp,
                 team_name=ak,
                 prefer_name_resolution=prefer_name_ids,
+                league_code=league_code,
             )
         except Exception as exc:
             print(f"[enrich away_recent] {league_code} fid={fixture_id_str}: {exc!r}")
@@ -1393,6 +1421,19 @@ class DataAggregator:
         except Exception as exc:
             print(f"[enrich supplemental] {league_code} fid={fixture_id_str}: {exc!r}")
             enriched["supplemental"] = {}
+        try:
+            from hibs_predictor.scrapers.thin_data_rescue import apply_thin_data_rescue
+
+            enriched = apply_thin_data_rescue(
+                enriched,
+                fixture,
+                league_code,
+                home_id=home_id,
+                away_id=away_id,
+                supplemental=enriched.get("supplemental"),
+            )
+        except Exception as exc:
+            print(f"[enrich thin_rescue] {league_code} fid={fixture_id_str}: {exc!r}")
         try:
             from hibs_predictor.scraped_xg import apply_scraped_xg_to_enriched
 
@@ -1734,6 +1775,7 @@ class DataAggregator:
         *,
         team_name: Optional[str] = None,
         prefer_name_resolution: bool = False,
+        league_code: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Last finished matches: API-Sports first (resolve id by name when needed); FDO fallback."""
         ids_to_try = self._recent_team_ids_to_try(
@@ -1787,7 +1829,27 @@ class DataAggregator:
                     except Exception:
                         pass
 
-                cache_key = f"team_recent_{provider}_{try_id}"
+                if not matches and team_name:
+                    try:
+                        from hibs_predictor.scrapers.thin_data_rescue import fotmob_recent_enabled
+
+                        if fotmob_recent_enabled():
+                            from hibs_predictor.scrapers import fotmob_client as fm
+
+                            lc = str(league_code or "").strip().upper()
+                            if lc:
+                                matches = fm.team_recent_from_fotmob_calendar(
+                                    lc, team_name, limit=limit
+                                )
+                                if matches:
+                                    provider = "fotmob"
+                    except Exception:
+                        pass
+
+                if provider == "fotmob" and team_name and league_code:
+                    cache_key = f"team_recent_fotmob_{league_code}_{_norm_team_name(team_name)}"
+                else:
+                    cache_key = f"team_recent_{provider}_{try_id}"
                 if matches:
                     self.cache.set(cache_key, matches, ttl_hours=4)
                     self._team_recent_mem_set(cache_key, matches)

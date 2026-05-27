@@ -3,6 +3,7 @@
 import hashlib
 import os
 import sys
+import threading
 import time as _time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone, date
@@ -15,6 +16,13 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 load_dotenv(os.path.join(BASE_DIR, ".env.local"))
+
+from hibs_predictor.app_logging import configure_app_logging, get_logger
+
+_log_path = configure_app_logging(BASE_DIR)
+log = get_logger("web")
+if _log_path:
+    log.info("Log file: %s", _log_path)
 
 try:
     from hibs_predictor.m5_optimization import setup_optimizations
@@ -253,10 +261,13 @@ def _sky_dock_context() -> Dict[str, Any]:
 
 @app.context_processor
 def inject_sky_dock():
+    from hibs_predictor.hibs_brand import hibs_brand_context
+
     ctx = _sky_dock_context()
     ctx["launch_media_enabled"] = _launch_media_enabled()
     ctx["hibs_auth_enabled"] = auth_enabled()
     ctx["hibs_logged_in"] = is_logged_in()
+    ctx.update(hibs_brand_context())
     return ctx
 
 
@@ -576,7 +587,7 @@ def _league_fixture_cache_fresh(rows: List[Dict[str, Any]]) -> bool:
 
 
 def _league_codes_enrich_priority_order(codes: List[str]) -> List[str]:
-    """Summer/offseason: LOI + Nordics ahead; optional today-first when HIBS_ENRICH_PRIORITY_TODAY=1."""
+    """Summer/offseason: Nordics ahead; optional today-first when HIBS_ENRICH_PRIORITY_TODAY=1."""
     from hibs_predictor.deep_enrich import league_codes_priority_today, league_codes_priority_xg_gaps
     from hibs_predictor.tournament_focus import domestic_offseason_active
 
@@ -682,10 +693,23 @@ def _all_fixtures_bundle_fresh(bundle: Dict[str, Any]) -> bool:
     return _league_fixture_cache_fresh(bundle.get("all") or [])
 
 
+def _reset_provider_rate_limits() -> None:
+    """Fixture cache clear should not leave API-Sports locally blocked (403/400 guard)."""
+    try:
+        from hibs_predictor.rate_limiter import RateLimiter
+
+        RateLimiter().reset_all()
+        print("[Cache clear] reset API rate-limit counters")
+    except Exception as exc:
+        print(f"[Cache clear] rate-limit reset failed: {exc!r}")
+
+
 def clear_application_caches(*, all_disk: bool = False) -> int:
     """Clear in-memory health cache and on-disk fixture caches (or all JSON when all_disk)."""
     _clear_health_cache()
     _clear_dashboard_page_cache()
+    clear_assistant_bundle_cache()
+    _reset_provider_rate_limits()
     cache = Cache()
     if all_disk:
         return cache.clear_all()
@@ -1350,21 +1374,95 @@ def _table_row_dedupe_key(row: Dict[str, Any]) -> str:
     return f"n:{key}" if key else ""
 
 
-def _pick_largest_standings_group(groups: Any) -> List[Any]:
-    """Use the fullest standings group (avoids duplicate home/away split tables)."""
-    best: List[Any] = []
+_SCOTLAND_SPLIT_LEAGUES = frozenset({"SCOTLAND"})
+
+
+def _iter_total_standings_entry_lists(groups: Any):
+    """Yield flat team-entry lists from API-Sports / Football-Data standings payloads."""
     for group in groups or []:
         if isinstance(group, dict):
             if str(group.get("type") or "").upper() not in ("TOTAL", ""):
                 continue
             entries = group.get("table") or []
+            if entries:
+                yield entries
         elif isinstance(group, list):
-            entries = group
-        else:
+            if not group:
+                continue
+            if isinstance(group[0], dict) and ("rank" in group[0] or "team" in group[0]):
+                yield group
+            else:
+                for sub in group:
+                    if isinstance(sub, list) and sub and isinstance(sub[0], dict):
+                        yield sub
+
+
+def _entry_max_played(entry: Dict[str, Any]) -> int:
+    all_stats = entry.get("all") or {}
+    return _safe_int_value(all_stats.get("played"), 0)
+
+
+def _merge_scottish_split_standings(groups: Any) -> List[Dict[str, Any]]:
+    """Merge SPFL regular season + championship/relegation splits into one 38-game table."""
+    rows_by_key: Dict[str, Dict[str, Any]] = {}
+    for entries in _iter_total_standings_entry_lists(groups):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            row = _table_row_from_api_entry(entry)
+            if not row:
+                continue
+            key = _table_row_dedupe_key(row)
+            if not key or key == "n:":
+                name_key = _canonical_team_key(row.get("team"))
+                if not name_key:
+                    continue
+                key = f"n:{name_key}"
+            existing = rows_by_key.get(key)
+            if existing is None or (row.get("played") or 0) > (existing.get("played") or 0):
+                rows_by_key[key] = row
+    if len(rows_by_key) < 10:
+        return []
+    return sorted(
+        rows_by_key.values(),
+        key=lambda r: (_safe_int_value(r.get("position"), 999), str(r.get("team") or "")),
+    )
+
+
+def _pick_best_standings_group(groups: Any, league_code: str = "") -> List[Any]:
+    """Pick standings with the most games played (38-game split > 33-game regular)."""
+    best_entries: List[Any] = []
+    best_max_played = -1
+    best_len = 0
+    for entries in _iter_total_standings_entry_lists(groups):
+        if not entries:
             continue
-        if len(entries) > len(best):
-            best = list(entries)
-    return best
+        max_played = max((_entry_max_played(e) for e in entries if isinstance(e, dict)), default=0)
+        n = len(entries)
+        if max_played > best_max_played or (max_played == best_max_played and n > best_len):
+            best_max_played = max_played
+            best_len = n
+            best_entries = list(entries)
+    return best_entries
+
+
+def _standings_rows_from_groups(groups: Any, league_code: str) -> List[Dict[str, Any]]:
+    if league_code in _SCOTLAND_SPLIT_LEAGUES:
+        merged = _merge_scottish_split_standings(groups)
+        if merged:
+            return merged
+    entries = _pick_best_standings_group(groups, league_code)
+    return [
+        row
+        for entry in entries
+        for row in [_table_row_from_api_entry(entry)]
+        if row
+    ]
+
+
+def _pick_largest_standings_group(groups: Any) -> List[Any]:
+    """Legacy helper — prefer ``_pick_best_standings_group`` / ``_standings_rows_from_groups``."""
+    return _pick_best_standings_group(groups, "")
 
 
 def _find_table_row_index(
@@ -1516,13 +1614,7 @@ def _fetch_full_table_rows(league_code: str, *, live_fetch: Optional[bool] = Non
                     groups = aggregator.clients["api_sports"].fetch_standings(int(league_api_id), int(season))
                 else:
                     groups = []
-                entries = _pick_largest_standings_group(groups)
-                rows = [
-                    row
-                    for entry in entries
-                    for row in [_table_row_from_api_entry(entry)]
-                    if row
-                ]
+                rows = _standings_rows_from_groups(groups, league_code)
                 if rows:
                     return _season_status_for_rows(rows, season, primary_season)
             except Exception as exc:
@@ -1541,7 +1633,7 @@ def _fetch_full_table_rows(league_code: str, *, live_fetch: Optional[bool] = Non
                     groups = aggregator.clients["football_data_org"].fetch_standings(str(fdo_comp), int(season))
                 else:
                     groups = []
-                entries = _pick_largest_standings_group(groups)
+                entries = _pick_best_standings_group(groups, league_code)
                 rows = [
                     row
                     for entry in entries
@@ -1594,6 +1686,12 @@ def _dedupe_table_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             return True
         if candidate.get("team_id") and not existing.get("team_id"):
             return True
+        cand_played = _safe_int_value(candidate.get("played"), 0)
+        exist_played = _safe_int_value(existing.get("played"), 0)
+        if cand_played > exist_played:
+            return True
+        if exist_played > cand_played:
+            return False
         return False
 
     for row in normalized:
@@ -1622,6 +1720,21 @@ def _dedupe_table_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(unique, key=lambda r: (_safe_int_value(r.get("position"), 999), str(r.get("team") or "")))
 
 
+def _tables_league_order_index(*, include_domestic: bool = False) -> Dict[str, int]:
+    """League block order on /tables — World Cup first when tournament focus is on."""
+    from hibs_predictor.config import DASHBOARD_LEAGUE_ORDER
+    from hibs_predictor.tournament_focus import active_competition_league_codes, tournament_focus_active
+
+    if tournament_focus_active():
+        focus = active_competition_league_codes()
+        if include_domestic:
+            order = focus + [c for c in DASHBOARD_LEAGUE_ORDER if c not in focus]
+        else:
+            order = focus
+        return {c: i for i, c in enumerate(order)}
+    return {c: i for i, c in enumerate(_dashboard_league_order(include_domestic=include_domestic))}
+
+
 def _build_league_tables(
     fixtures: List[Dict[str, Any]], *, include_live: bool = False, include_domestic: bool = False
 ) -> List[Dict[str, Any]]:
@@ -1630,7 +1743,7 @@ def _build_league_tables(
     league_codes.update(str(f.get("league") or "") for f in fixtures if f.get("league"))
     if include_live:
         league_codes.update(_dashboard_league_order())
-    order_index = {c: i for i, c in enumerate(_dashboard_league_order(include_domestic=include_domestic))}
+    order_index = _tables_league_order_index(include_domestic=include_domestic)
     tables: List[Dict[str, Any]] = []
     for league_code in sorted(league_codes, key=lambda c: (order_index.get(c, 999), c)):
         rows: List[Dict[str, Any]] = []
@@ -2115,6 +2228,62 @@ def _assistant_bundle(fixtures: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+_assistant_bundle_cache: Dict[str, Any] = {"key": "", "t": 0.0, "bundle": None}
+_assistant_bundle_cache_lock = threading.Lock()
+
+
+def _assistant_bundle_cache_ttl_sec() -> float:
+    try:
+        return max(30.0, float(os.getenv("HIBS_ASSISTANT_CACHE_SEC", "120")))
+    except ValueError:
+        return 120.0
+
+
+def _cached_assistant_bundle(
+    *,
+    attach_live: bool = False,
+    allow_stale: bool = True,
+    include_domestic: bool = False,
+) -> Dict[str, Any]:
+    """Reuse a short-lived assistant bundle so chat/snapshot do not block on full refetch each request."""
+    cache_key = f"a:{int(attach_live)}:s:{int(allow_stale)}:d:{int(include_domestic)}"
+    now = _time.monotonic()
+    ttl = _assistant_bundle_cache_ttl_sec()
+    with _assistant_bundle_cache_lock:
+        hit = _assistant_bundle_cache.get("bundle")
+        if (
+            hit
+            and _assistant_bundle_cache.get("key") == cache_key
+            and (now - float(_assistant_bundle_cache.get("t") or 0)) < ttl
+        ):
+            return hit
+
+    data = fetch_all_fixtures(
+        attach_live=attach_live,
+        allow_stale=allow_stale,
+        include_domestic=include_domestic,
+    )
+    bundle = _assistant_bundle(_bundle_fixtures(data))
+    with _assistant_bundle_cache_lock:
+        _assistant_bundle_cache["key"] = cache_key
+        _assistant_bundle_cache["t"] = now
+        _assistant_bundle_cache["bundle"] = bundle
+    return bundle
+
+
+def clear_assistant_bundle_cache() -> None:
+    with _assistant_bundle_cache_lock:
+        _assistant_bundle_cache["bundle"] = None
+        _assistant_bundle_cache["t"] = 0.0
+        _assistant_bundle_cache["key"] = ""
+
+
+@app.route("/api/ping")
+def api_ping():
+    """Fast readiness probe for local launchers (no auth, no external I/O)."""
+    return jsonify({"ok": True, "service": "hibs-bet"})
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if not auth_enabled():
@@ -2161,11 +2330,23 @@ def index():
 
     # Never block the HTML dashboard on live-score + xG enrich (avoids nginx 502 on cold cache).
     progressive = _progressive_load_enabled()
-    data = fetch_all_fixtures(
-        attach_live=False,
-        include_domestic=include_domestic,
-        allow_stale=True,
-    )
+    ck = _all_fixtures_cache_key(include_domestic=include_domestic)
+    disk_bundle = Cache().peek(ck)
+    if (
+        progressive
+        and request.args.get("refresh") != "1"
+        and not isinstance(disk_bundle, dict)
+    ):
+        _schedule_dashboard_refresh()
+        data = _finalize_fixture_bundle([], include_domestic=include_domestic)
+        data["cache_stale"] = True
+        data["cold_start"] = True
+    else:
+        data = fetch_all_fixtures(
+            attach_live=False,
+            include_domestic=include_domestic,
+            allow_stale=True,
+        )
     if data.get("cache_stale"):
         _schedule_dashboard_refresh()
     upcoming = _bundle_fixtures(data)
@@ -2221,6 +2402,7 @@ def index():
         recent_results_days_groups=recent_results.get("days", []),
         display_tz_label=display_tz_label(),
         progressive_load=progressive,
+        cold_start=bool(data.get("cold_start")),
     )
     body = html.encode("utf-8")
     etag = _dashboard_page_cache_set(body)
@@ -2235,9 +2417,12 @@ def index():
 @login_required
 def api_assistant_snapshot():
     """Structured insight packets + acca/market recommendations for the Betting Assistant."""
-    data = fetch_all_fixtures(attach_live=True)
-    upcoming = _bundle_fixtures(data)
-    bundle = _assistant_bundle(upcoming)
+    include_domestic = request.args.get("domestic") == "1"
+    bundle = _cached_assistant_bundle(
+        attach_live=True,
+        allow_stale=True,
+        include_domestic=include_domestic,
+    )
     return jsonify(bundle)
 
 
@@ -2245,8 +2430,7 @@ def api_assistant_snapshot():
 @login_required
 def api_assistant_recommendations():
     """Acca and market recommendations only (packets omitted for lighter payload)."""
-    data = fetch_all_fixtures()
-    bundle = _assistant_bundle(_bundle_fixtures(data))
+    bundle = _cached_assistant_bundle(attach_live=False, allow_stale=True)
     return jsonify(
         {
             "recommendations": bundle.get("recommendations"),
@@ -2266,8 +2450,9 @@ def api_assistant_chat():
     if not question:
         return jsonify({"error": "question required"}), 400
     fixture_id = payload.get("fixture_id")
-    data = fetch_all_fixtures(attach_live=True)
-    bundle = _assistant_bundle(_bundle_fixtures(data))
+    q_lower = question.lower()
+    want_live = "live" in q_lower or "in play" in q_lower or "in-play" in q_lower
+    bundle = _cached_assistant_bundle(attach_live=want_live, allow_stale=True)
     legs = payload.get("legs")
     if legs is not None and not isinstance(legs, list):
         legs = None
@@ -2291,8 +2476,8 @@ def api_assistant_acca_review():
     legs = payload.get("legs")
     if not isinstance(legs, list) or not legs:
         return jsonify({"error": "legs array required"}), 400
-    data = fetch_all_fixtures(attach_live=True)
-    packets = _assistant_packets_from_fixtures(_bundle_fixtures(data))
+    bundle = _cached_assistant_bundle(attach_live=False, allow_stale=True)
+    packets = bundle.get("packets") or []
     return jsonify(review_acca_legs(legs, packets))
 
 
@@ -2629,8 +2814,19 @@ _maybe_warm_fixture_cache()
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
+    log.info("Starting hibs-bet on http://127.0.0.1:%s", port)
     print("\n\U0001f7e2\U0001f49a hibs-bet \u2014 Starting...")
     print(f"   Open http://127.0.0.1:{port}\n")
+    if _log_path:
+        print(f"   Log file: {_log_path}\n")
     # threaded=True: first dashboard load can take a long time (fixtures + enrichment);
     # without threads the dev server would ignore other tabs/requests until that finishes.
-    app.run(debug=False, port=port, host="127.0.0.1", threaded=True, use_reloader=False)
+    try:
+        app.run(debug=False, port=port, host="127.0.0.1", threaded=True, use_reloader=False)
+    except OSError as exc:
+        if getattr(exc, "errno", None) in (48, 98) or "Address already in use" in str(exc):
+            print(
+                f"\nPort {port} is already in use. Stop the other process, or use launch/HibsBet.command "
+                f"(picks a free port). Example: lsof -nP -iTCP:{port} -sTCP:LISTEN\n"
+            )
+        raise

@@ -58,6 +58,27 @@
         if (inputEl) inputEl.disabled = on;
     }
 
+    function parseJsonResponse(r) {
+        return r.text().then(function (text) {
+            var data = null;
+            try {
+                data = text ? JSON.parse(text) : null;
+            } catch (e) {
+                data = null;
+            }
+            if (!r.ok) {
+                var msg = (data && data.error) ? data.error : ('HTTP ' + r.status);
+                if (r.status === 401) {
+                    msg = 'Session expired — refresh the page and log in again.';
+                } else if (r.status >= 502) {
+                    msg = 'Server is still loading fixtures — wait for the dashboard, then try again.';
+                }
+                throw new Error(msg);
+            }
+            return data || {};
+        });
+    }
+
     function submitQuestion() {
         if (busy || !inputEl) return;
         var q = (inputEl.value || '').trim();
@@ -65,28 +86,38 @@
         inputEl.value = '';
         appendUser(q);
         setBusy(true);
+        appendBot('<p class="ac-line" style="color:var(--muted);">Thinking…</p>');
         var fid = fixtureContext && fixtureContext.value ? fixtureContext.value : null;
         var payload = { question: q, fixture_id: fid };
         if (window.HIBS_ACCA_LEGS && window.HIBS_ACCA_LEGS.length) {
             payload.legs = window.HIBS_ACCA_LEGS;
         }
-        fetch('/api/assistant/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        })
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                if (data.error) {
-                    appendBot(esc(data.error));
-                    return;
-                }
-                renderReply(data);
+        var runChat = function () {
+            fetch('/api/assistant/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
             })
-            .catch(function () {
-                appendBot('Could not reach the assistant API. Check the server is running and refresh the dashboard.');
-            })
-            .finally(function () { setBusy(false); });
+                .then(parseJsonResponse)
+                .then(function (data) {
+                    if (body && body.lastChild) body.removeChild(body.lastChild);
+                    if (data.error) {
+                        appendBot(esc(data.error));
+                        return;
+                    }
+                    renderReply(data);
+                })
+                .catch(function (err) {
+                    if (body && body.lastChild) body.removeChild(body.lastChild);
+                    appendBot(esc(err && err.message ? err.message : 'Could not reach the assistant. Check the server and refresh the dashboard.'));
+                })
+                .finally(function () { setBusy(false); });
+        };
+        if (!packets.length) {
+            refreshFromApi(runChat);
+            return;
+        }
+        runChat();
     }
 
     function renderReply(data) {
@@ -601,13 +632,19 @@
         return d.innerHTML;
     }
 
-    function refreshFromApi() {
+    function refreshFromApi(done) {
         fetch('/api/assistant/snapshot')
-            .then(function (r) { return r.json(); })
+            .then(parseJsonResponse)
             .then(function (data) {
                 loadSnapshot(data);
+                if (typeof done === 'function') done();
             })
-            .catch(function () { /* keep embedded snapshot */ });
+            .catch(function () {
+                if (typeof done === 'function') {
+                    appendBot('Fixture data still loading — wait for the dashboard to finish, then ask again.');
+                    setBusy(false);
+                }
+            });
     }
 
     document.addEventListener('DOMContentLoaded', function () {

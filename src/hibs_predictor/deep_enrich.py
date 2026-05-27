@@ -103,7 +103,7 @@ def deep_enrich_applies_to_fixture(fixture: Dict[str, Any]) -> bool:
 
 
 def summer_daily_deep_target_pct(league_code: str) -> Optional[float]:
-    """Realistic deep-enrich target for LOI + Nordics during domestic offseason (not inflated)."""
+    """Realistic deep-enrich target for Nordics during domestic offseason (not inflated)."""
     from hibs_predictor.tournament_focus import domestic_offseason_active, is_summer_daily_league
 
     if not domestic_offseason_active() or not is_summer_daily_league(league_code):
@@ -254,8 +254,9 @@ def _fill_recent_if_needed(
                 fdo_comp=fdo_comp,
                 team_name=home_nm,
                 prefer_name_resolution=prefer_name_ids,
+                league_code=league_code,
             )
-            rates = _recent_match_rates(enriched["home_recent"], home_id)
+            rates = _recent_match_rates(enriched["home_recent"], home_id, team_name=home_nm or "")
             enriched["home_recent_n"] = int(rates["n"])
             enriched["home_btts_rate"] = rates["btts_rate"]
             enriched["home_over25_rate"] = rates["over25_rate"]
@@ -269,8 +270,9 @@ def _fill_recent_if_needed(
                 fdo_comp=fdo_comp,
                 team_name=away_nm,
                 prefer_name_resolution=prefer_name_ids,
+                league_code=league_code,
             )
-            rates = _recent_match_rates(enriched["away_recent"], away_id)
+            rates = _recent_match_rates(enriched["away_recent"], away_id, team_name=away_nm or "")
             enriched["away_recent_n"] = int(rates["n"])
             enriched["away_btts_rate"] = rates["btts_rate"]
             enriched["away_over25_rate"] = rates["over25_rate"]
@@ -621,11 +623,10 @@ def maybe_deep_enrich(
 
 
 # Leagues without Understat slug — spend API statistics-xG budget here before top-5 leagues.
-# Summer daily (LOI + Nordics) immediately after WC / friendlies during domestic offseason.
+# Summer daily (Nordics) immediately after WC / friendlies during domestic offseason.
 _XG_GAP_LEAGUE_PRIORITY: tuple[str, ...] = (
     "WORLD_CUP",
     "INTL_FRIENDLIES",
-    "IRELAND_PREMIER",
     "NORWAY_ELITESERIEN",
     "FINLAND_VEIKKAUSLIIGA",
     "DENMARK_SL",

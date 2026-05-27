@@ -787,3 +787,50 @@ def test_acca_review_flags_thin_data(monkeypatch):
     )
     assert out["legs"][0]["thin_data"] is True
     assert "thin data" in out["legs"][0]["paragraph"].lower()
+
+
+def test_assistant_chat_reuses_bundle_cache(monkeypatch):
+    """Chat must not call fetch_all_fixtures on every message (was causing hangs)."""
+    import sys
+
+    if str(_ROOT / "src") not in sys.path:
+        sys.path.insert(0, str(_ROOT / "src"))
+    from hibs_predictor.web import app, clear_assistant_bundle_cache
+
+    calls = {"n": 0}
+
+    def fake_fetch(**kwargs):
+        calls["n"] += 1
+        row = {
+            "id": 1,
+            "home": "Hibs",
+            "away": "Hearts",
+            "league": "SCOTLAND",
+            "date": "2099-06-01T15:00:00+00:00",
+            "kickoff_sort": "2099-06-01T15:00:00+00:00",
+            "home_id": 1,
+            "away_id": 2,
+            "data_quality": {"score_pct": 88.0},
+            "home_recent_n": 8,
+            "away_recent_n": 8,
+            "prediction": {"best_bet_roi": 0.05},
+        }
+        return {
+            "all": [row],
+            "upcoming": [row],
+            "by_region": {},
+            "by_league": {"SCOTLAND": [row]},
+            "dashboard_days": [],
+            "value_bets": [],
+            "total": 1,
+            "has_api_clients": True,
+        }
+
+    monkeypatch.setattr("hibs_predictor.web.fetch_all_fixtures", fake_fetch)
+    clear_assistant_bundle_cache()
+    client = app.test_client()
+    r1 = client.post("/api/assistant/chat", json={"question": "help"})
+    r2 = client.post("/api/assistant/chat", json={"question": "value bets"})
+    assert r1.status_code == 200
+    assert r2.status_code == 200
+    assert calls["n"] == 1

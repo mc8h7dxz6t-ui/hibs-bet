@@ -23,10 +23,9 @@ SEASON_XG_SOURCES = frozenset(
     }
 )
 
-# Reserved calls per refresh for active / thin-xG leagues (summer LOI, cups, friendlies).
+# Reserved calls per refresh for active / thin-xG leagues (summer Nordics, cups, friendlies).
 _PRIORITY_XG_LEAGUE_CODES = frozenset(
     {
-        "IRELAND_PREMIER",
         "NORWAY_ELITESERIEN",
         "FINLAND_VEIKKAUSLIIGA",
         "DENMARK_SL",
@@ -59,6 +58,21 @@ def fixture_statistics_xg_enabled() -> bool:
         "true",
         "yes",
         "on",
+    )
+
+
+def fixture_statistics_xg_enabled_for_league(league_code: Optional[str]) -> bool:
+    """International competitions use the statistics-xG budget when global flag is off (optional)."""
+    if fixture_statistics_xg_enabled():
+        return True
+    code = (league_code or "").strip().upper()
+    if code not in _PRIORITY_XG_LEAGUE_CODES:
+        return False
+    return (os.getenv("HIBS_FETCH_FIXTURE_STATISTICS_XG_INTL", "1") or "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
     )
 
 
@@ -111,7 +125,7 @@ def fetch_fixture_statistics_xg(
     One API ``fixtures/statistics`` call when the fixture still lacks measured xG.
     Returns (xg_home, xg_away, ``api_statistics_xg``) or None.
     """
-    if not fixture_statistics_xg_enabled():
+    if not fixture_statistics_xg_enabled_for_league(league_code):
         return None
     if not needs_statistics_xg_fetch(current_source):
         return None
