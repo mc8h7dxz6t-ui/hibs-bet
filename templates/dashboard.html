@@ -51,6 +51,10 @@
     <div class="tournament-focus-banner" role="status">
         <strong>{{ tournament_focus.label }}</strong> first{% if tournament_focus.intl_only_fetch %} — international fixtures by default (fewer domestic API calls){% else %} — domestic leagues included{% endif %}. <strong>Friendlies</strong> use a wider window; <strong>Ireland</strong> and <strong>Nordic</strong> region chips are full daily options on your <strong>{{ fetch_days }}-day</strong> list. Use <strong>All</strong>, <strong>UK</strong>, or <strong>European</strong> for other domestic leagues when needed.
     </div>
+    {% elif tournament_focus.post_wc_domestic_european_active %}
+    <div class="tournament-focus-banner" role="status">
+        <strong>Post–World Cup</strong> — default fetch is <strong>UK + European</strong> leagues on your <strong>{{ fetch_days }}-day</strong> list until domestic seasons resume ({{ tournament_focus.domestic_offseason_end }}). Live scores poll faster near kick-off. Use <strong>All</strong> to load every configured league.
+    </div>
     {% elif tournament_focus.domestic_offseason_active %}
     <div class="tournament-focus-banner" role="status">
         <strong>World Cup</strong> first (Jun–Jul 2026), then <strong>friendlies</strong> (wider window), cup finals, and <strong>Ireland</strong> + <strong>Nordic</strong> as full daily options on your <strong>{{ fetch_days }}-day</strong> list until {{ tournament_focus.domestic_offseason_end }}. No SPL, EPL, or European league calendars. Use <strong>All</strong> to load everything.
@@ -664,28 +668,44 @@
     function wireLivePoll() {
         var cards = document.querySelectorAll('.fixture-card[data-fid]');
         if (!cards.length) return;
-        var ids = [];
+        var nowMs = Date.now();
+        var priority = [];
+        var other = [];
         cards.forEach(function (c) {
             var id = c.getAttribute('data-fid');
-            if (id) ids.push(id);
+            if (!id) return;
+            var koRaw = c.getAttribute('data-kickoff-utc');
+            var near = false;
+            if (c.getAttribute('data-is-live') === '1') {
+                near = true;
+            } else if (koRaw) {
+                var koMs = Date.parse(koRaw);
+                if (!isNaN(koMs)) {
+                    var diffH = (koMs - nowMs) / 3600000;
+                    near = diffH <= 0.5 && diffH >= -3.5;
+                }
+            }
+            (near ? priority : other).push(id);
         });
+        var ids = priority.concat(other).slice(0, 160);
         if (!ids.length) return;
         var pollMs = 60000;
         var timer = null;
+        var domesticQ = window.location.search.indexOf('domestic=1') >= 0 ? '&domestic=1' : '';
         function poll() {
-            var q = ids.slice(0, 120).join(',');
-            fetch('/api/fixtures/live?ids=' + encodeURIComponent(q) + '&stats=1')
+            var q = ids.join(',');
+            fetch('/api/fixtures/live?ids=' + encodeURIComponent(q) + '&stats=1' + domesticQ)
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     applyLivePayload(data);
-                    if (data && data.poll_after_sec) pollMs = Math.max(30000, data.poll_after_sec * 1000);
+                    if (data && data.poll_after_sec) pollMs = Math.max(20000, data.poll_after_sec * 1000);
                     if (timer) clearInterval(timer);
                     timer = setInterval(poll, pollMs);
                 })
                 .catch(function () {});
         }
-        var anyLive = document.querySelector('.fixture-card[data-is-live="1"]');
-        setTimeout(poll, anyLive ? 5000 : 15000);
+        var anyLive = priority.length > 0 || document.querySelector('.fixture-card[data-is-live="1"]');
+        setTimeout(poll, anyLive ? 2500 : 8000);
         timer = setInterval(poll, pollMs);
     }
 

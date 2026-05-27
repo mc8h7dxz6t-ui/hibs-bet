@@ -1003,9 +1003,9 @@ class DataAggregator:
         fixture_id_str = str(raw_fid).strip() if raw_fid not in (None, "", 0, "0") else ""
         dt = str(fixture.get("date", ""))
         if fixture_id_str:
-            cache_key = f"enriched_fixture_{fixture_id_str}_{league_code}_dq8"
+            cache_key = f"enriched_fixture_{fixture_id_str}_{league_code}_dq9"
         else:
-            cache_key = f"enriched_fixture_teams_{league_code}_{hk}|{ak}|{dt}_dq8"
+            cache_key = f"enriched_fixture_teams_{league_code}_{hk}|{ak}|{dt}_dq9"
 
         try:
             fixture_id_for_xg = int(raw_fid) if raw_fid not in (None, "", "0", 0) else None

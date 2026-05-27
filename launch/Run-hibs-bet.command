@@ -10,6 +10,9 @@ if [ ! -f ".env" ]; then
   exit 1
 fi
 
+# Optional: uncomment in .env for local 90%+ DQ across the fixture window after cache clears:
+#   HIBS_DEV_FULL_DQ=1
+
 PYTHON=${PYTHON:-python3}
 if [ -f ".venv/bin/activate" ]; then
   source ".venv/bin/activate"

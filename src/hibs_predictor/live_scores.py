@@ -41,6 +41,48 @@ _STAT_ROW_LABELS = (
 _API_LEAGUE_ID_TO_CODE: Optional[Dict[int, str]] = None
 
 
+def dashboard_fixture_id(row: Dict[str, Any]) -> str:
+    """Stable dashboard row id (numeric API id or ``fotmob_*`` slug)."""
+    fid = row.get("id")
+    if fid is None:
+        return ""
+    return str(fid).strip()
+
+
+def parse_fixture_id_int(raw: Any) -> Optional[int]:
+    """Parse API-Football fixture id; bare integers only (not ``fotmob_`` slugs)."""
+    if raw is None:
+        return None
+    if isinstance(raw, int):
+        return raw
+    text = str(raw).strip()
+    if text.isdigit():
+        return int(text)
+    return None
+
+
+def api_fixture_id_for_row(row: Dict[str, Any]) -> Optional[int]:
+    """Numeric API-Football fixture id when known."""
+    aid = parse_fixture_id_int(row.get("api_fixture_id"))
+    if aid is not None:
+        return aid
+    return parse_fixture_id_int(row.get("id"))
+
+
+def stamp_api_fixture_id(row: Dict[str, Any], live: Optional[Dict[str, Any]] = None) -> None:
+    """Persist API fixture id on a dashboard row for live polling."""
+    if live:
+        try:
+            fid = int(live.get("fixture_id"))
+            row["api_fixture_id"] = fid
+            return
+        except (TypeError, ValueError):
+            pass
+    existing = api_fixture_id_for_row(row)
+    if existing is not None:
+        row["api_fixture_id"] = existing
+
+
 def live_cache_ttl_hours() -> float:
     try:
         sec = int(os.getenv("HIBS_LIVE_CACHE_SEC", "45"))
@@ -318,11 +360,7 @@ def _resolve_live_for_fixture(
     team_index: Dict[Tuple[str, str, str], Dict[str, Any]],
     team_only_index: Dict[Tuple[str, str], Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
-    fid = row.get("id")
-    try:
-        fid_int = int(fid)
-    except (TypeError, ValueError):
-        fid_int = None
+    fid_int = api_fixture_id_for_row(row)
     if fid_int is not None and fid_int in live_by_id:
         return live_by_id[fid_int]
     home = _normalize_team(str(row.get("home") or ""))
@@ -391,10 +429,9 @@ def _enrich_live_statistics(
     row_by_id: Dict[int, Dict[str, Any]] = {}
     if fixture_rows:
         for row in fixture_rows:
-            try:
-                row_by_id[int(row["id"])] = row
-            except (TypeError, ValueError, KeyError):
-                pass
+            api_id = api_fixture_id_for_row(row)
+            if api_id is not None:
+                row_by_id[api_id] = row
 
     ids = [fid for fid, live in live_by_id.items() if live.get("is_live")]
     if row_by_id:
@@ -453,6 +490,7 @@ def merge_live_into_fixtures(
             row.setdefault("is_live", False)
             continue
         _copy_live_fields(row, live)
+        stamp_api_fixture_id(row, live)
         if live.get("is_live"):
             merged += 1
     return merged
@@ -495,6 +533,140 @@ _LIVE_PAYLOAD_KEYS = (
 )
 
 
+def _fixture_kickoff_utc(row: Dict[str, Any]) -> Optional[datetime]:
+    raw = row.get("kickoff_sort") or row.get("date")
+    if not raw:
+        return None
+    try:
+        ko = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (TypeError, ValueError, OSError):
+        return None
+    if ko.tzinfo is None:
+        ko = ko.replace(tzinfo=timezone.utc)
+    return ko
+
+
+def kickoff_poll_window_hours() -> Tuple[float, float]:
+    """Hours before/after kickoff for lightweight live attach + priority polling."""
+    try:
+        before = float(os.getenv("HIBS_LIVE_KICKOFF_BEFORE_H", "0.25"))
+    except ValueError:
+        before = 0.25
+    try:
+        after = float(os.getenv("HIBS_LIVE_KICKOFF_AFTER_H", "3"))
+    except ValueError:
+        after = 3.0
+    before = max(0.0, min(2.0, before))
+    after = max(1.0, min(6.0, after))
+    return before, after
+
+
+def fixture_in_kickoff_poll_window(
+    row: Dict[str, Any],
+    *,
+    now: Optional[datetime] = None,
+) -> bool:
+    """True when a row should get live snapshot on load or fast polling."""
+    now = now or datetime.now(timezone.utc)
+    if row.get("is_live"):
+        return True
+    status = str(row.get("live_status") or row.get("fixture_status") or "").upper()
+    if status in IN_PLAY_STATUSES:
+        return True
+    if status in FINISHED_STATUSES:
+        return False
+    ko = _fixture_kickoff_utc(row)
+    if not ko:
+        return False
+    before_h, after_h = kickoff_poll_window_hours()
+    return (ko - timedelta(hours=before_h)) <= now <= (ko + timedelta(hours=after_h))
+
+
+def fixtures_in_kickoff_poll_window(
+    fixtures: List[Dict[str, Any]],
+    *,
+    now: Optional[datetime] = None,
+) -> List[Dict[str, Any]]:
+    return [row for row in fixtures or [] if fixture_in_kickoff_poll_window(row, now=now)]
+
+
+def _include_in_live_poll_response(row: Dict[str, Any], live: Dict[str, Any]) -> bool:
+    if live.get("is_live"):
+        return True
+    short = str(live.get("live_status") or "").upper()
+    if short in IN_PLAY_STATUSES:
+        return True
+    if live.get("live_score"):
+        return True
+    return fixture_in_kickoff_poll_window(row)
+
+
+def live_payload_for_dashboard_rows(
+    aggregator: Any,
+    dashboard_ids: List[str],
+    fixture_rows: List[Dict[str, Any]],
+    *,
+    include_events: bool = True,
+    include_stats: bool = True,
+) -> Dict[str, Any]:
+    """JSON live slice keyed by dashboard fixture id (supports ``fotmob_*`` ids)."""
+    client = (getattr(aggregator, "clients", None) or {}).get("api_sports")
+    default_poll = int(os.getenv("HIBS_LIVE_POLL_SEC", "60"))
+    if not client:
+        return {"fixtures": {}, "poll_after_sec": default_poll}
+
+    cache = Cache()
+    live_by_id = fetch_live_by_id(client, cache=cache)
+    rows_by_dashboard_id: Dict[str, Dict[str, Any]] = {}
+    for row in fixture_rows or []:
+        did = dashboard_fixture_id(row)
+        if did:
+            rows_by_dashboard_id[did] = row
+
+    want_ids = [str(i).strip() for i in dashboard_ids if str(i).strip()]
+    if not want_ids and rows_by_dashboard_id:
+        want_ids = list(rows_by_dashboard_id.keys())
+
+    team_index = _build_team_league_index(live_by_id)
+    team_only_index = _build_team_only_index(live_by_id)
+
+    by_dashboard_id: Dict[str, Dict[str, Any]] = {}
+    api_rows_by_id: Dict[int, Dict[str, Any]] = {}
+    for did in want_ids:
+        dash_row = rows_by_dashboard_id.get(did)
+        if not dash_row:
+            continue
+        live = _resolve_live_for_fixture(dash_row, live_by_id, team_index, team_only_index)
+        if not live or not _include_in_live_poll_response(dash_row, live):
+            continue
+        live_copy = dict(live)
+        stamp_api_fixture_id(dash_row, live_copy)
+        by_dashboard_id[did] = live_copy
+        try:
+            api_fid = int(live_copy.get("fixture_id") or api_fixture_id_for_row(dash_row))
+        except (TypeError, ValueError):
+            continue
+        api_rows_by_id[api_fid] = live_copy
+
+    if include_events and api_rows_by_id:
+        _enrich_live_events(client, api_rows_by_id, cache, fixture_ids=list(api_rows_by_id.keys()))
+
+    if include_stats and api_rows_by_id:
+        _enrich_live_statistics(client, api_rows_by_id, cache, fixture_rows=fixture_rows)
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for did, row in by_dashboard_id.items():
+        out[did] = {k: row.get(k) for k in _LIVE_PAYLOAD_KEYS if row.get(k) is not None}
+    try:
+        poll_sec = int(os.getenv("HIBS_LIVE_POLL_SEC", "60"))
+    except ValueError:
+        poll_sec = default_poll
+    poll_sec = max(20, min(120, poll_sec))
+    if any(row.get("is_live") for row in by_dashboard_id.values()):
+        poll_sec = min(poll_sec, int(os.getenv("HIBS_LIVE_POLL_SEC_INPLAY", "30")))
+    return {"fixtures": out, "poll_after_sec": poll_sec, "live_count": len(by_dashboard_id)}
+
+
 def live_payload_for_ids(
     aggregator: Any,
     fixture_ids: List[int],
@@ -503,87 +675,32 @@ def live_payload_for_ids(
     include_stats: bool = True,
     fixture_rows: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """JSON-serializable live slice for ``/api/fixtures/live`` polling."""
-    client = (getattr(aggregator, "clients", None) or {}).get("api_sports")
-    if not client:
-        return {"fixtures": {}, "poll_after_sec": int(os.getenv("HIBS_LIVE_POLL_SEC", "60"))}
-
-    cache = Cache()
-    live_by_id = fetch_live_by_id(client, cache=cache)
-    want = {int(i) for i in fixture_ids if i is not None}
-    rows_by_id: Dict[int, Dict[str, Any]] = {}
-    for r in fixture_rows or []:
-        try:
-            rows_by_id[int(r["id"])] = r
-        except (TypeError, ValueError, KeyError):
-            continue
-    team_index = _build_team_league_index(live_by_id)
-    team_only_index = _build_team_only_index(live_by_id)
-
-    by_dashboard_id: Dict[int, Dict[str, Any]] = {}
-    api_rows_by_id: Dict[int, Dict[str, Any]] = {}
-    for fid_int in want:
-        dash_row = rows_by_id.get(fid_int)
-        live = None
-        if fid_int in live_by_id and live_by_id[fid_int].get("is_live"):
-            live = live_by_id[fid_int]
-        elif dash_row:
-            live = _resolve_live_for_fixture(dash_row, live_by_id, team_index, team_only_index)
-        if not live or not live.get("is_live"):
-            continue
-        live_copy = dict(live)
-        by_dashboard_id[fid_int] = live_copy
-        try:
-            api_fid = int(live_copy.get("fixture_id") or fid_int)
-        except (TypeError, ValueError):
-            api_fid = fid_int
-        api_rows_by_id[api_fid] = live_copy
-
-    if include_events and api_rows_by_id:
-        _enrich_live_events(client, api_rows_by_id, cache, fixture_ids=list(api_rows_by_id.keys()))
-
-    if include_stats and api_rows_by_id:
-        rows_for_stats = fixture_rows if fixture_rows else [{"id": fid} for fid in by_dashboard_id]
-        _enrich_live_statistics(client, api_rows_by_id, cache, fixture_rows=rows_for_stats)
-
-    out: Dict[str, Dict[str, Any]] = {}
-    for fid, row in by_dashboard_id.items():
-        out[str(fid)] = {k: row.get(k) for k in _LIVE_PAYLOAD_KEYS if row.get(k) is not None}
-    try:
-        poll_sec = int(os.getenv("HIBS_LIVE_POLL_SEC", "60"))
-    except ValueError:
-        poll_sec = 60
-    poll_sec = max(30, min(120, poll_sec))
-    return {"fixtures": out, "poll_after_sec": poll_sec, "live_count": len(by_dashboard_id)}
+    """Backward-compatible wrapper: numeric ids as dashboard keys."""
+    dash_ids = [str(i) for i in fixture_ids if i is not None]
+    rows = fixture_rows or []
+    if not rows and dash_ids:
+        rows = [{"id": i} for i in fixture_ids]
+    return live_payload_for_dashboard_rows(
+        aggregator,
+        dash_ids,
+        rows,
+        include_events=include_events,
+        include_stats=include_stats,
+    )
 
 
-def fixture_ids_likely_in_play(fixtures: List[Dict[str, Any]], *, now: Optional[datetime] = None) -> List[int]:
-    """Fixture ids that may need polling (started within lookback, not clearly finished)."""
+def fixture_ids_likely_in_play(fixtures: List[Dict[str, Any]], *, now: Optional[datetime] = None) -> List[str]:
+    """Dashboard fixture ids that may need polling (kickoff window or in-play)."""
     now = now or datetime.now(timezone.utc)
-    lookback = timedelta(hours=3)
-    ids: List[int] = []
-    for row in fixtures:
-        if row.get("is_live"):
-            try:
-                ids.append(int(row["id"]))
-            except (TypeError, ValueError):
-                pass
-            continue
-        status = str(row.get("live_status") or "").upper()
-        if status in FINISHED_STATUSES:
-            continue
-        raw = row.get("kickoff_sort") or row.get("date")
-        if not raw:
-            continue
-        try:
-            ko = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-        except (TypeError, ValueError, OSError):
-            continue
-        if ko.tzinfo is None:
-            ko = ko.replace(tzinfo=timezone.utc)
-        if ko <= now <= ko + lookback:
-            try:
-                ids.append(int(row["id"]))
-            except (TypeError, ValueError):
-                pass
+    ids: List[str] = []
+    seen: set[str] = set()
+    for row in fixtures or []:
+        if not fixture_in_kickoff_poll_window(row, now=now) and not row.get("is_live"):
+            status = str(row.get("live_status") or row.get("fixture_status") or "").upper()
+            if status not in IN_PLAY_STATUSES:
+                continue
+        did = dashboard_fixture_id(row)
+        if did and did not in seen:
+            seen.add(did)
+            ids.append(did)
     return ids

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from hibs_predictor.data_quality import (
@@ -32,6 +32,8 @@ def is_showpiece_league(league_code: Optional[str]) -> bool:
 
 def deep_band_min(league_code: Optional[str]) -> float:
     """Minimum raw DQ before deep pass runs; showpieces allow rescue from any score."""
+    if deep_enrich_rescue_low_enabled():
+        return SHOWPIECE_DEEP_BAND_MIN
     return SHOWPIECE_DEEP_BAND_MIN if is_showpiece_league(league_code) else DEEP_BAND_MIN
 
 
@@ -39,9 +41,65 @@ def _env_truthy(name: str) -> bool:
     return (os.getenv(name) or "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def dev_full_dq_enabled() -> bool:
+    """Local developer profile: 90%% target across the fixture window, rescue thin rows."""
+    if _env_truthy("HIBS_DEV_FULL_DQ"):
+        return True
+    return (os.getenv("HIBS_ENV") or "").strip().lower() in ("dev", "development", "local")
+
+
+def deep_enrich_rescue_low_enabled() -> bool:
+    """Allow deep pass when first-pass DQ is below the usual 75%% band (e.g. after cache clear)."""
+    if dev_full_dq_enabled():
+        return True
+    return _env_truthy("HIBS_DEEP_ENRICH_RESCUE_LOW")
+
+
 def deep_enrich_today_only() -> bool:
     """When set, second-pass enrich runs only for kickoffs today (saves API on the rest of the window)."""
+    if dev_full_dq_enabled():
+        return False
     return _env_truthy("HIBS_DEEP_ENRICH_TODAY_ONLY")
+
+
+def deep_enrich_window_days() -> int:
+    """Kickoffs within this many days (UTC) may get deep enrich when today-only is off."""
+    if dev_full_dq_enabled():
+        try:
+            return max(1, min(14, int(os.getenv("HIBS_DEEP_ENRICH_WINDOW_DAYS", "7"))))
+        except ValueError:
+            return 7
+    raw = (os.getenv("HIBS_DEEP_ENRICH_WINDOW_DAYS") or "").strip()
+    if not raw:
+        return 0
+    try:
+        return max(0, min(14, int(raw)))
+    except ValueError:
+        return 0
+
+
+def fixture_within_deep_window(fixture: Dict[str, Any], *, days: int) -> bool:
+    kick = _fixture_kickoff_utc(fixture)
+    if not kick or days <= 0:
+        return False
+    now = datetime.now(timezone.utc)
+    end = now + timedelta(days=days)
+    return now - timedelta(hours=6) <= kick <= end
+
+
+def deep_enrich_applies_to_fixture(fixture: Dict[str, Any]) -> bool:
+    """Whether this kickoff is eligible for a second-pass enrich."""
+    if fixture_is_today(fixture):
+        return True
+    if not deep_enrich_today_only():
+        window = deep_enrich_window_days()
+        if window <= 0:
+            return True
+        return fixture_within_deep_window(fixture, days=window)
+    window = deep_enrich_window_days()
+    if window > 0:
+        return fixture_within_deep_window(fixture, days=window)
+    return False
 
 
 def summer_daily_deep_target_pct(league_code: str) -> Optional[float]:
@@ -55,6 +113,14 @@ def summer_daily_deep_target_pct(league_code: str) -> Optional[float]:
 
 def deep_enrich_target_pct(league_code: Optional[str] = None) -> float:
     """Return target DQ %% when deep pass is enabled; 0 disables."""
+    if dev_full_dq_enabled() and not (os.getenv("HIBS_TARGET_DQ_PCT") or "").strip():
+        if league_code:
+            summer = summer_daily_deep_target_pct(league_code)
+            if summer is not None:
+                return summer
+            if is_showpiece_league(league_code):
+                return SHOWPIECE_DEEP_TARGET
+        return 90.0
     raw = (os.getenv("HIBS_TARGET_DQ_PCT") or "").strip()
     if raw:
         try:
@@ -521,7 +587,7 @@ def deep_enrich_plan(
         target = SHOWPIECE_DEEP_TARGET
     if target <= 0:
         return None
-    if deep_enrich_today_only() and not fixture_is_today(fixture):
+    if not deep_enrich_applies_to_fixture(fixture):
         return None
     dq = enriched.get("data_quality") or compute_fixture_data_quality(enriched)
     pct = float(dq.get("score_pct") or 0)
@@ -585,6 +651,101 @@ def league_codes_priority_xg_gaps(codes: List[str]) -> List[str]:
     head = [c for c in _XG_GAP_LEAGUE_PRIORITY if c in codes]
     tail = [c for c in codes if c not in head]
     return head + tail
+
+
+def _dashboard_row_as_enrich_fixture(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Rebuild minimal fixture dict for deep enrich from a dashboard row."""
+    return {
+        "fixture": {"id": row.get("id"), "date": row.get("date")},
+        "date": row.get("date"),
+        "source": row.get("source"),
+        "teams": {
+            "home": {"id": row.get("home_id"), "name": row.get("home")},
+            "away": {"id": row.get("away_id"), "name": row.get("away")},
+        },
+        "competition_meta": row.get("competition_meta") if isinstance(row.get("competition_meta"), dict) else {},
+    }
+
+
+def _merge_enrich_into_dashboard_row(row: Dict[str, Any], enriched: Dict[str, Any]) -> None:
+    """Copy enrich fields back without clobbering prediction / display labels."""
+    preserve = frozenset(
+        {
+            "prediction",
+            "home",
+            "away",
+            "league_name",
+            "league_flag",
+            "home_last10",
+            "away_last10",
+            "has_value_bet",
+            "compact_xg_home",
+            "compact_xg_away",
+            "dashboard_region",
+            "kickoff_time",
+            "kickoff_sort",
+        }
+    )
+    for key, val in enriched.items():
+        if key in preserve:
+            continue
+        row[key] = val
+
+
+def reboost_dashboard_data_quality(
+    aggregator: "DataAggregator",
+    rows: List[Dict[str, Any]],
+    *,
+    max_rows: Optional[int] = None,
+) -> int:
+    """
+    Second-pass deep enrich on dashboard rows still below target (cold-cache recovery).
+
+    Runs when ``HIBS_DEV_FULL_DQ=1`` or ``HIBS_BUNDLE_DQ_REBOOST=1``.
+    """
+    if deep_enrich_target_pct() <= 0:
+        return 0
+    if not dev_full_dq_enabled() and not _env_truthy("HIBS_BUNDLE_DQ_REBOOST"):
+        return 0
+
+    limit = max_rows
+    if limit is None:
+        try:
+            limit = int(os.getenv("HIBS_BUNDLE_DQ_REBOOST_MAX", "0"))
+        except ValueError:
+            limit = 0
+    if dev_full_dq_enabled() and limit <= 0:
+        limit = 250
+
+    boosted = 0
+    for row in rows or []:
+        if limit > 0 and boosted >= limit:
+            break
+        league = str(row.get("league") or "")
+        if not league:
+            continue
+        fixture = _dashboard_row_as_enrich_fixture(row)
+        if not deep_enrich_applies_to_fixture(fixture):
+            continue
+        dq = row.get("data_quality") if isinstance(row.get("data_quality"), dict) else {}
+        try:
+            pct = float(dq.get("score_pct") or 0)
+        except (TypeError, ValueError):
+            pct = 0.0
+        target = deep_enrich_target_pct(league)
+        if target <= 0 or pct >= target:
+            continue
+        enriched = dict(row)
+        enriched.setdefault("teams", fixture.get("teams"))
+        enriched.setdefault("fixture", fixture.get("fixture"))
+        try:
+            out = maybe_deep_enrich(aggregator, fixture, league, enriched)
+        except Exception as exc:
+            print(f"[DQ reboost] {league} {row.get('id')}: {exc!r}")
+            continue
+        _merge_enrich_into_dashboard_row(row, out)
+        boosted += 1
+    return boosted
 
 
 def league_codes_priority_today(codes: List[str], fixtures_by_code: Dict[str, List[Dict[str, Any]]]) -> List[str]:

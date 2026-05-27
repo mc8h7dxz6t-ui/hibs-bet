@@ -39,6 +39,7 @@
 {% set win_value = (vb.get('home') if win_lean == 'H' else (vb.get('draw') if win_lean == 'D' else vb.get('away'))) if vb and win_lean else false %}
 <details class="fixture-card fr-compact {% if fixture.has_value_bet %}value-card value-multi{% if vb_multi %} value-multi-many{% endif %}{% endif %}{% if fixture.is_live %} fr-in-play{% endif %}"
      data-fid="{{ fixture.id }}"
+     data-kickoff-utc="{{ fixture.kickoff_sort or fixture.date or '' }}"
      data-home="{{ fixture.home }}"
      data-away="{{ fixture.away }}"
      data-league="{{ fixture.league }}"

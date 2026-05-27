@@ -22,7 +22,12 @@ import os
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from hibs_predictor.config import ALL_LEAGUE_CODES, DASHBOARD_LEAGUE_ORDER
+from hibs_predictor.config import (
+    ALL_LEAGUE_CODES,
+    DASHBOARD_LEAGUE_ORDER,
+    _DASHBOARD_REGION_EUROPEAN,
+    _DASHBOARD_REGION_UK,
+)
 
 # Core international tournament (always in active summer / WC fetch lists).
 INTERNATIONAL_FOCUS_LEAGUE_CODES = [
@@ -60,6 +65,17 @@ _DEFAULT_FRIENDLIES_AUTO_START = date(2026, 5, 20)
 # UK + most European domestic leagues are between seasons until ~August (Nordics keep playing).
 _DEFAULT_DOMESTIC_OFFSEASON_START = date(2026, 5, 20)
 _DEFAULT_DOMESTIC_OFFSEASON_END = date(2026, 8, 1)
+
+# After the World Cup window ends, still between UK/EU domestic seasons: fetch UK + European
+# league calendars (not international-only summer trim).
+_POST_WC_DOMESTIC_EUROPEAN_CODES: tuple[str, ...] = tuple(
+    sorted(
+        set(_DASHBOARD_REGION_UK)
+        | set(_DASHBOARD_REGION_EUROPEAN)
+        | set(_SUMMER_DAILY_LEAGUE_CODES)
+        | set(_CUP_FINAL_LEAGUE_CODES)
+    )
+)
 
 def _env_truthy(name: str) -> bool:
     return (os.getenv(name) or "").strip().lower() in ("1", "true", "yes", "on")
@@ -139,10 +155,49 @@ def is_summer_daily_league(league_code: str) -> bool:
     return (league_code or "").strip().upper() in _SUMMER_DAILY_LEAGUE_CODES
 
 
+def post_wc_domestic_european_active(*, today: Optional[date] = None) -> bool:
+    """
+    After the World Cup auto window ends but before domestic seasons resume (~Aug).
+
+  Override: ``HIBS_POST_WC_DOMESTIC_EUROPEAN=0`` disables; ``=1`` forces on outside the window.
+    """
+    raw = (os.getenv("HIBS_POST_WC_DOMESTIC_EUROPEAN") or "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    if raw in ("1", "true", "yes", "on"):
+        cur = today if today is not None else _today_utc()
+        _, off_end = _domestic_offseason_window()
+        return domestic_offseason_active(today=cur) and cur < off_end
+    if tournament_focus_active(today=today):
+        return False
+    if not domestic_offseason_active(today=today):
+        return False
+    cur = today if today is not None else _today_utc()
+    _, wc_end = _auto_window()
+    _, off_end = _domestic_offseason_window()
+    return wc_end < cur < off_end
+
+
+def post_wc_domestic_european_league_codes() -> List[str]:
+    """UK + European domestic leagues for the post-WC summer gap."""
+    seen: set[str] = set()
+    out: List[str] = []
+    for code in _POST_WC_DOMESTIC_EUROPEAN_CODES:
+        c = (code or "").strip().upper()
+        if c and c in ALL_LEAGUE_CODES and c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
+
 def active_competition_league_codes(*, today: Optional[date] = None) -> List[str]:
     """
     Summer / focus fetch list: World Cup first, then friendlies, LOI/Nordics (5-day), cups.
+    Post-WC gap (Jul–Aug): UK + European domestic calendars instead of international-only.
     """
+    if post_wc_domestic_european_active(today=today):
+        return post_wc_domestic_european_league_codes()
+
     seen: set[str] = set()
     out: List[str] = []
 
@@ -256,11 +311,14 @@ def dashboard_default_region(*, today: Optional[date] = None) -> str:
     Default region chip on the dashboard.
 
     World Cup window: International (friendlies + WC in that chip).
+    Post-WC summer gap: All (UK + European leagues in default fetch).
     Pre-WC summer / domestic offseason: All — UEFA finals (UCL/EL/UECL) are fetched but
     use the European region slug, so International-only hides Conference League tonight.
     """
     if tournament_focus_active(today=today):
         return "international"
+    if post_wc_domestic_european_active(today=today):
+        return ""
     if domestic_offseason_active(today=today):
         return ""
     if friendlies_window_active(today=today):
@@ -335,10 +393,13 @@ def tournament_focus_context(
     off_season = domestic_offseason_active(today=today)
     off_start, off_end = _domestic_offseason_window()
     intl_only = (active or off_season) and not include_domestic
+    post_wc = post_wc_domestic_european_active(today=today)
     return {
         "active": active,
         "mode": mode,
         "label": tournament_focus_label(today=today) if active else "",
+        "post_wc_domestic_european_active": post_wc,
+        "post_wc_label": "UK + European leagues" if post_wc else "",
         "default_region": dashboard_default_region(today=today),
         "fetch_leagues": list(league_codes_for_fetch(today=today, include_domestic=include_domestic)),
         "include_friendlies": _friendlies_in_focus(today=today),

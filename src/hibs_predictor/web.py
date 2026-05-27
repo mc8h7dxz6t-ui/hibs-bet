@@ -135,7 +135,7 @@ def _api_football_season_year(now: datetime) -> int:
 _FDO_CALENDAR_COMPS = frozenset({"WC", "EC", "UNL", "CL", "EL", "UECL"})
 # UEFA club cups: API-Football season id is Jul-based; FDO often 403/429 on finals week.
 _API_FIRST_FIXTURE_LEAGUES = frozenset({"UCL", "EUROPA_LEAGUE", "UECL", "INTL_FRIENDLIES"})
-_FIXTURE_CACHE_VERSION = "v48"
+_FIXTURE_CACHE_VERSION = "v50"
 _EMPTY_FIXTURE_CACHE_TTL_HOURS = 0.2  # short negative cache — avoid hour-long empty poison
 
 
@@ -642,6 +642,41 @@ def _refresh_live_on_bundle(bundle: Dict[str, Any]) -> None:
         print(f"[Live scores] refresh failed: {exc!r}")
 
 
+def _live_snapshot_on_load_enabled() -> bool:
+    return (os.getenv("HIBS_LIVE_SNAPSHOT_ON_LOAD") or "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+def _refresh_live_kickoff_window(fixtures: List[Dict[str, Any]]) -> None:
+    """Attach live scores only for fixtures near kickoff (fast first paint)."""
+    if not _live_snapshot_on_load_enabled() or not fixtures:
+        return
+    from hibs_predictor.live_scores import attach_live_to_fixtures, fixtures_in_kickoff_poll_window
+
+    subset = fixtures_in_kickoff_poll_window(fixtures)
+    if not subset:
+        return
+    stats_on_load = (os.getenv("HIBS_LIVE_ATTACH_STATS_ON_LOAD") or "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    try:
+        attach_live_to_fixtures(
+            subset,
+            aggregator,
+            include_events=True,
+            include_stats=stats_on_load,
+        )
+    except Exception as exc:
+        print(f"[Live kickoff window] refresh failed: {exc!r}")
+
+
 def _all_fixtures_bundle_fresh(bundle: Dict[str, Any]) -> bool:
     """False when bundled rows are missing core form/stats (post-429 thin snapshots)."""
     return _league_fixture_cache_fresh(bundle.get("all") or [])
@@ -1083,8 +1118,14 @@ def fetch_next_48h_fixtures(league_code: str, *, allow_stale: bool = False) -> L
             fdo_competition_name=comp_meta.get("fdo_competition_name"),
         )
 
+        raw_fid = fixture.get("fixture", {}).get("id")
+        from hibs_predictor.live_scores import parse_fixture_id_int
+
+        api_fid = parse_fixture_id_int(raw_fid)
         row = {
-            "id": fixture.get("fixture", {}).get("id"),
+            "id": raw_fid,
+            "api_fixture_id": api_fid,
+            "source": fixture.get("source"),
             "home": home_nm or "?",
             "away": away_nm or "?",
             "home_id": home_id,
@@ -1181,6 +1222,18 @@ def _data_quality_for_enriched(enriched: Dict[str, Any], prediction: Dict[str, A
         scoring.setdefault("odds_draw", bo.get("draw"))
         scoring.setdefault("odds_away", bo.get("away"))
     return compute_fixture_data_quality(scoring)
+
+
+def _reboost_bundle_data_quality(all_fixtures: List[Dict[str, Any]]) -> None:
+    """Deep-enrich thin rows after a cold cache (developer / HIBS_BUNDLE_DQ_REBOOST)."""
+    from hibs_predictor.deep_enrich import reboost_dashboard_data_quality
+
+    try:
+        n = reboost_dashboard_data_quality(aggregator, all_fixtures)
+        if n:
+            print(f"[DQ reboost] upgraded {n} fixture row(s) toward target")
+    except Exception as exc:
+        print(f"[DQ reboost] failed: {exc!r}")
 
 
 def _ensure_fixture_data_quality(all_fixtures: List[Dict[str, Any]]) -> None:
@@ -1718,6 +1771,7 @@ def _finalize_fixture_bundle(
     if attach_live:
         _refresh_live_on_bundle({"all": all_fixtures})
     _ensure_fixture_data_quality(all_fixtures)
+    _reboost_bundle_data_quality(all_fixtures)
     _ensure_fixture_pick_menus(all_fixtures)
     all_fixtures.sort(key=lambda x: x.get("kickoff_sort") or x.get("date") or "")
     league_tables = _build_league_tables(all_fixtures, include_live=False, include_domestic=include_domestic)
@@ -2115,6 +2169,10 @@ def index():
     if data.get("cache_stale"):
         _schedule_dashboard_refresh()
     upcoming = _bundle_fixtures(data)
+    try:
+        _refresh_live_kickoff_window(upcoming)
+    except Exception as exc:
+        print(f"[Dashboard live snapshot] {exc!r}")
     from hibs_predictor.recent_results import fetch_recent_results
 
     if progressive:
@@ -2300,28 +2358,34 @@ def api_health():
 @login_required
 def api_fixtures_live():
     """Lightweight in-play score poll for dashboard rows (cached live=all + optional events)."""
-    from hibs_predictor.live_scores import live_payload_for_ids
+    from hibs_predictor.live_scores import (
+        fixture_ids_likely_in_play,
+        live_payload_for_dashboard_rows,
+    )
 
     raw_ids = (request.args.get("ids") or "").strip()
-    fixture_ids: List[int] = []
-    for part in raw_ids.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        try:
-            fixture_ids.append(int(part))
-        except ValueError:
-            continue
-    if not fixture_ids:
-        data = fetch_all_fixtures()
-        from hibs_predictor.live_scores import fixture_ids_likely_in_play
-
-        fixture_ids = fixture_ids_likely_in_play(data.get("all") or [])
+    dashboard_ids = [part.strip() for part in raw_ids.split(",") if part.strip()]
+    include_domestic = request.args.get("domestic") == "1"
+    fixture_rows: List[Dict[str, Any]] = []
+    if dashboard_ids:
+        data = fetch_all_fixtures(allow_stale=True, include_domestic=include_domestic)
+        want = set(dashboard_ids)
+        fixture_rows = [
+            f for f in (data.get("all") or []) if str(f.get("id")) in want
+        ]
+    else:
+        data = fetch_all_fixtures(allow_stale=True, include_domestic=include_domestic)
+        all_rows = data.get("all") or []
+        dashboard_ids = fixture_ids_likely_in_play(all_rows)
+        fixture_rows = [
+            f for f in all_rows if str(f.get("id")) in set(dashboard_ids)
+        ]
     include_stats = request.args.get("stats", "1") != "0"
     return jsonify(
-        live_payload_for_ids(
+        live_payload_for_dashboard_rows(
             aggregator,
-            fixture_ids,
+            dashboard_ids,
+            fixture_rows,
             include_events=True,
             include_stats=include_stats,
         )

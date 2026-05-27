@@ -82,14 +82,16 @@ def test_focus_auto_on_early_june(monkeypatch):
 
 
 def test_focus_off_after_world_cup_ends(monkeypatch):
-    """After WC window but before August: still summer trim."""
+    """After WC window but before August: post-WC UK + European fetch (not intl-only)."""
+    monkeypatch.delenv("HIBS_POST_WC_DOMESTIC_EUROPEAN", raising=False)
     monkeypatch.setattr(
         "hibs_predictor.tournament_focus._today_utc",
         lambda: date(2026, 7, 19),
     )
     assert tournament_focus_active() is False
     assert domestic_offseason_active() is True
-    assert "EPL" not in league_codes_for_fetch()
+    assert "EPL" in league_codes_for_fetch()
+    assert "WORLD_CUP" not in league_codes_for_fetch()
 
 
 def test_domestic_returns_august(monkeypatch):
@@ -243,6 +245,27 @@ def test_friendlies_fixture_window_days(monkeypatch):
     assert _fixture_window_days_for_league("INTL_FRIENDLIES") == 14
     assert _fixture_window_days_for_league("DENMARK_SL") == 7
     assert _fixture_window_days_for_league("IRELAND_PREMIER") == 7
+
+
+def test_post_wc_domestic_european_fetch_after_world_cup(monkeypatch):
+    monkeypatch.delenv("HIBS_POST_WC_DOMESTIC_EUROPEAN", raising=False)
+    monkeypatch.delenv("HIBS_TOURNAMENT_FOCUS", raising=False)
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 7, 25),
+    )
+    from hibs_predictor.tournament_focus import (
+        active_competition_league_codes,
+        dashboard_default_region,
+        post_wc_domestic_european_active,
+    )
+
+    assert post_wc_domestic_european_active() is True
+    assert dashboard_default_region() == ""
+    codes = active_competition_league_codes()
+    assert "EPL" in codes
+    assert "UCL" in codes
+    assert "WORLD_CUP" not in codes
 
 
 def test_friendlies_in_window_before_worldcup_focus(monkeypatch):

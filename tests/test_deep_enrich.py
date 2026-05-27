@@ -13,10 +13,13 @@ from hibs_predictor.deep_enrich import (
     analyze_dq_gaps,
     apply_xg_ladder,
     deep_band_min,
+    deep_enrich_applies_to_fixture,
     deep_enrich_pass,
     deep_enrich_plan,
+    deep_enrich_rescue_low_enabled,
     deep_enrich_target_pct,
     deep_enrich_today_only,
+    dev_full_dq_enabled,
     fixture_is_today,
     is_showpiece_league,
     maybe_deep_enrich,
@@ -63,6 +66,42 @@ def test_showpiece_deep_band_allows_rescue_from_thin_scores():
     assert is_showpiece_league("UECL")
     assert deep_band_min("UECL") == 0.0
     assert deep_band_min("EPL") == DEEP_BAND_MIN
+
+
+def test_rescue_low_allows_deep_plan_for_thin_epl(monkeypatch):
+    monkeypatch.setenv("HIBS_TARGET_DQ_PCT", "90")
+    monkeypatch.setenv("HIBS_DEEP_ENRICH_RESCUE_LOW", "1")
+    monkeypatch.delenv("HIBS_DEV_FULL_DQ", raising=False)
+    assert deep_enrich_rescue_low_enabled() is True
+    assert deep_band_min("EPL") == 0.0
+    from datetime import datetime, timezone
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    fixture = {"date": f"{today}T18:00:00+00:00"}
+    thin = {
+        "home_recent_n": 0,
+        "away_recent_n": 0,
+        "home_stats": {},
+        "away_stats": {},
+        "odds_available": False,
+    }
+    thin["data_quality"] = compute_fixture_data_quality(thin)
+    assert float(thin["data_quality"]["score_pct"]) < DEEP_BAND_MIN
+    assert deep_enrich_plan(fixture, "EPL", thin) is not None
+
+
+def test_dev_full_dq_disables_today_only_and_sets_target(monkeypatch):
+    monkeypatch.setenv("HIBS_DEV_FULL_DQ", "1")
+    monkeypatch.delenv("HIBS_TARGET_DQ_PCT", raising=False)
+    monkeypatch.delenv("HIBS_DEEP_ENRICH_TODAY_ONLY", raising=False)
+    assert dev_full_dq_enabled() is True
+    assert deep_enrich_today_only() is False
+    assert deep_enrich_target_pct("EPL") == 90.0
+    from datetime import datetime, timedelta, timezone
+
+    soon = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+    fixture = {"date": soon}
+    assert deep_enrich_applies_to_fixture(fixture) is True
 
 
 def test_deep_enrich_today_only_skips_future_kickoff(monkeypatch):
