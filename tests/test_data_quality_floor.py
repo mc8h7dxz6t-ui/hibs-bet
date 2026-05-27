@@ -98,7 +98,8 @@ def test_ucl_showpiece_floor_without_league_table():
     )
     assert _showpiece_ready(enriched, league_code="UCL")
     dq = compute_fixture_data_quality(enriched)
-    assert dq["score_pct"] >= 85.0
+    assert dq["score_pct"] >= 95.0
+    assert dq.get("premium_scope") is True
     assert "League table" not in dq["weak_fields"]
 
 

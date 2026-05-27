@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 XG_TARGET_EARNED = 16.0
 DEEP_BAND_MIN = 75.0
-SHOWPIECE_DEEP_TARGET = 85.0
+SHOWPIECE_DEEP_TARGET = 95.0
 SHOWPIECE_DEEP_BAND_MIN = 0.0
 
 
@@ -124,7 +124,10 @@ def deep_enrich_target_pct(league_code: Optional[str] = None) -> float:
     raw = (os.getenv("HIBS_TARGET_DQ_PCT") or "").strip()
     if raw:
         try:
-            return max(DEEP_BAND_MIN, min(100.0, float(raw)))
+            target = max(DEEP_BAND_MIN, min(100.0, float(raw)))
+            if league_code and is_showpiece_league(league_code):
+                return max(target, SHOWPIECE_DEEP_TARGET)
+            return target
         except ValueError:
             pass
     if _env_truthy("HIBS_DEEP_ENRICH"):
