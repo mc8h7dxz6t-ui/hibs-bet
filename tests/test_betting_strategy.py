@@ -263,6 +263,38 @@ def test_enriched_cache_fresh_within_window():
     assert DataAggregator._enriched_cache_fresh(stale, 10, 20, minutes=15) is False
 
 
+def test_recent_team_ids_to_try_resolves_by_name():
+    from hibs_predictor.data_aggregator import DataAggregator
+
+    class FakeApiSports:
+        def resolve_team_id_by_name(self, team_name: str):
+            if "rayo" in team_name.lower():
+                return 728
+            return None
+
+    agg = DataAggregator()
+    agg.clients = {"api_sports": FakeApiSports()}
+    ids = agg._recent_team_ids_to_try(8370, "Rayo Vallecano", prefer_name_resolution=True)
+    assert ids[0] == 728
+    assert 8370 in ids
+
+
+def test_fdo_match_to_recent_format_includes_team_names():
+    from hibs_predictor.data_aggregator import _fdo_match_to_recent_format
+
+    row = _fdo_match_to_recent_format(
+        {
+            "utcDate": "2026-05-01T19:00:00Z",
+            "homeTeam": {"id": 1, "name": "Crystal Palace"},
+            "awayTeam": {"id": 2, "name": "Rayo Vallecano"},
+            "score": {"fullTime": {"home": 2, "away": 1}},
+        }
+    )
+    assert row is not None
+    assert row["teams"]["home"]["name"] == "Crystal Palace"
+    assert row["fixture"]["status"]["short"] == "FT"
+
+
 def test_team_recent_mem_dedupes_within_session(monkeypatch):
     from hibs_predictor.data_aggregator import DataAggregator
 

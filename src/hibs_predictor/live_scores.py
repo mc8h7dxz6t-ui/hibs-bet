@@ -90,23 +90,10 @@ def _normalize_team(name: str) -> str:
 
 
 def _team_names_match(a: str, b: str) -> bool:
-    """Loose match for provider naming (e.g. SC Freiburg vs Freiburg)."""
-    if not a or not b:
-        return False
-    if a == b:
-        return True
-    if a in b or b in a:
-        return True
-    for prefix in ("sc ", "fc ", "ac ", "as ", "sv ", "sk ", "rc ", "cd ", "cf "):
-        if a.startswith(prefix):
-            core = a[len(prefix) :].strip()
-            if core and (core == b or core in b or b in core):
-                return True
-        if b.startswith(prefix):
-            core = b[len(prefix) :].strip()
-            if core and (core == a or core in a or a in core):
-                return True
-    return False
+    """Loose match for provider naming (e.g. SC Freiburg vs Freiburg, LOI clubs)."""
+    from hibs_predictor.team_aliases import team_names_match
+
+    return team_names_match(a, b)
 
 
 def _stat_type_key(stat_type: str) -> Optional[str]:

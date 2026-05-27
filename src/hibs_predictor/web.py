@@ -117,6 +117,9 @@ _cache_prune_last: float = 0.0
 _CACHE_PRUNE_INTERVAL_SEC = 300.0
 _dashboard_page_cache: Dict[str, Any] = {"t": 0.0, "etag": "", "body": None, "fetch_days": None}
 _DASHBOARD_PAGE_TTL_SEC = 30.0
+_DASHBOARD_PAGE_STALE_MAX_SEC = 3600.0
+_dashboard_refresh_lock = __import__("threading").Lock()
+_dashboard_refresh_inflight = False
 _BUNDLE_DISK_KEYS = frozenset(
     {"all", "by_region", "by_league", "dashboard_days", "value_bets", "total", "fixture_coverage"}
 )
@@ -132,7 +135,7 @@ def _api_football_season_year(now: datetime) -> int:
 _FDO_CALENDAR_COMPS = frozenset({"WC", "EC", "UNL", "CL", "EL", "UECL"})
 # UEFA club cups: API-Football season id is Jul-based; FDO often 403/429 on finals week.
 _API_FIRST_FIXTURE_LEAGUES = frozenset({"UCL", "EUROPA_LEAGUE", "UECL", "INTL_FRIENDLIES"})
-_FIXTURE_CACHE_VERSION = "v36"
+_FIXTURE_CACHE_VERSION = "v48"
 _EMPTY_FIXTURE_CACHE_TTL_HOURS = 0.2  # short negative cache — avoid hour-long empty poison
 
 
@@ -284,11 +287,18 @@ def _fetch_days_from_env() -> int:
 
 
 def _fixture_window_days_for_league(league_code: str) -> int:
-    """Wider window for international friendlies during the friendlies calendar block."""
-    from hibs_predictor.tournament_focus import INTL_FRIENDLIES_CODE, friendlies_window_active
+    """Friendlies: wider horizon; LOI/Nordics and others: dashboard window only (5 or 7 days)."""
+    from hibs_predictor.tournament_focus import (
+        INTL_FRIENDLIES_CODE,
+        friendlies_window_active,
+        summer_daily_league_codes,
+    )
 
     days = _fetch_window_days()
-    if (league_code or "").strip().upper() != INTL_FRIENDLIES_CODE:
+    code = (league_code or "").strip().upper()
+    if code in summer_daily_league_codes():
+        return days
+    if code != INTL_FRIENDLIES_CODE:
         return days
     if not friendlies_window_active():
         return days
@@ -412,14 +422,16 @@ def _is_complete_fixture_bundle(cached: Any) -> bool:
     return isinstance(cached, dict) and bool(cached.get("all")) and _BUNDLE_DISK_KEYS.issubset(cached.keys())
 
 
-def _dashboard_page_cache_get() -> Optional[Tuple[bytes, str]]:
+def _dashboard_page_cache_get(*, allow_stale: bool = False) -> Optional[Tuple[bytes, str]]:
     now = _time.monotonic()
     body = _dashboard_page_cache.get("body")
     etag = _dashboard_page_cache.get("etag") or ""
     if body is None or not etag:
         return None
-    if (now - float(_dashboard_page_cache.get("t") or 0)) > _DASHBOARD_PAGE_TTL_SEC:
-        return None
+    age = now - float(_dashboard_page_cache.get("t") or 0)
+    if age > _DASHBOARD_PAGE_TTL_SEC:
+        if not allow_stale or age > _DASHBOARD_PAGE_STALE_MAX_SEC:
+            return None
     if _dashboard_page_cache.get("fetch_days") != _fetch_window_days():
         return None
     from hibs_predictor.recent_results import results_days
@@ -427,6 +439,32 @@ def _dashboard_page_cache_get() -> Optional[Tuple[bytes, str]]:
     if _dashboard_page_cache.get("results_days") != results_days():
         return None
     return body, etag
+
+
+def _schedule_dashboard_refresh() -> None:
+    """Background rebuild so the next request gets a fresh page without blocking nginx."""
+    global _dashboard_refresh_inflight
+    if not _env_truthy("HIBS_WARM_FIXTURE_CACHE"):
+        return
+    with _dashboard_refresh_lock:
+        if _dashboard_refresh_inflight:
+            return
+        _dashboard_refresh_inflight = True
+
+    import threading
+
+    def _run() -> None:
+        global _dashboard_refresh_inflight
+        try:
+            fetch_all_fixtures(attach_live=False, include_domestic=False)
+            _clear_dashboard_page_cache()
+        except Exception as exc:
+            print(f"[Dashboard refresh] {exc!r}")
+        finally:
+            with _dashboard_refresh_lock:
+                _dashboard_refresh_inflight = False
+
+    threading.Thread(target=_run, name="hibs-dashboard-refresh", daemon=True).start()
 
 
 def _dashboard_page_cache_set(body: bytes) -> str:
@@ -444,6 +482,35 @@ def _dashboard_page_cache_set(body: bytes) -> str:
 def _dashboard_lite_mode() -> bool:
     """Lighter first paint: skip assistant bundle build; fewer parallel league fetches."""
     return _env_truthy("HIBS_DASHBOARD_LITE")
+
+
+def _progressive_load_enabled() -> bool:
+    """Serve HTML from cache/stale fixtures first; load insights, results, assistant after paint."""
+    raw = os.getenv("HIBS_PROGRESSIVE_LOAD", "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def _defer_assistant_on_page() -> bool:
+    """Skip embedding assistant JSON in HTML; client loads /api/assistant/snapshot after paint."""
+    return _progressive_load_enabled() or _dashboard_lite_mode()
+
+
+def _insights_content_context(
+    data: Dict[str, Any],
+    insights: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Template context shared by /insights and /api/insights/content."""
+    fixture_coverage = data.get("fixture_coverage") or {}
+    return {
+        "insights": insights,
+        "total": data.get("total", 0),
+        "value_bet_count": data.get("value_bet_count", 0),
+        "fetch_days": data.get("fetch_days", _fetch_window_days()),
+        "data_quality_ui_min": _ui_data_quality_min_pct(),
+        "dashboard_info": _dashboard_info_box(fixture_coverage, data.get("total", 0)),
+        "fixture_coverage": fixture_coverage,
+        "display_tz_label": display_tz_label(),
+    }
 
 
 def _fixture_fetch_workers() -> int:
@@ -479,9 +546,20 @@ def _slim_row_enrich_fresh(row: Dict[str, Any]) -> bool:
 
     home_id = row.get("home_id")
     away_id = row.get("away_id")
-    if home_id and not row.get("home_last10"):
+
+    def _recent_ok(side: str) -> bool:
+        try:
+            n = int(row.get(f"{side}_recent_n") or 0)
+        except (TypeError, ValueError):
+            n = 0
+        if n >= 5:
+            return True
+        last = row.get(f"{side}_last10") or []
+        return len(last) >= 5
+
+    if home_id and not _recent_ok("home"):
         return False
-    if away_id and not row.get("away_last10"):
+    if away_id and not _recent_ok("away"):
         return False
     if home_id and not _has_stats(row.get("home_stats")):
         return False
@@ -498,9 +576,13 @@ def _league_fixture_cache_fresh(rows: List[Dict[str, Any]]) -> bool:
 
 
 def _league_codes_enrich_priority_order(codes: List[str]) -> List[str]:
-    """When HIBS_ENRICH_PRIORITY_TODAY=1, leagues with a cached kickoff today are fetched first."""
+    """Summer/offseason: LOI + Nordics ahead; optional today-first when HIBS_ENRICH_PRIORITY_TODAY=1."""
+    from hibs_predictor.deep_enrich import league_codes_priority_today, league_codes_priority_xg_gaps
+    from hibs_predictor.tournament_focus import domestic_offseason_active
+
+    ordered = league_codes_priority_xg_gaps(list(codes)) if domestic_offseason_active() else list(codes)
     if not _env_truthy("HIBS_ENRICH_PRIORITY_TODAY"):
-        return list(codes)
+        return ordered
     from hibs_predictor.deep_enrich import fixture_is_today, league_codes_priority_today
 
     days = _fetch_window_days()
@@ -508,14 +590,16 @@ def _league_codes_enrich_priority_order(codes: List[str]) -> List[str]:
     skip_as_fx = _env_truthy("HIBS_SKIP_API_SPORTS_FIXTURES")
     cache = Cache()
     preview: Dict[str, List[Dict[str, Any]]] = {}
-    for code in codes:
+    for code in ordered:
         cache_key = f"fixtures_{days}d_{code}_{_FIXTURE_CACHE_VERSION}_{int(prefer_fdo)}{int(skip_as_fx)}"
         cached = cache.get(cache_key, ttl_hours=_cache_ttl_hours(1.0)) or []
         preview[code] = cached if isinstance(cached, list) else []
-    return league_codes_priority_today(codes, preview)
+    return league_codes_priority_today(ordered, preview)
 
 
-def _fetch_all_league_fixtures_parallel(*, include_domestic: bool = False) -> List[Dict]:
+def _fetch_all_league_fixtures_parallel(
+    *, include_domestic: bool = False, allow_stale: bool = False
+) -> List[Dict]:
     """Fetch per-league fixture rows concurrently (each league uses its own disk cache)."""
     from hibs_predictor.tournament_focus import INTL_FRIENDLIES_CODE, friendlies_window_active
 
@@ -523,7 +607,7 @@ def _fetch_all_league_fixtures_parallel(*, include_domestic: bool = False) -> Li
     out: List[Dict] = []
     if friendlies_window_active() and INTL_FRIENDLIES_CODE in codes:
         try:
-            out.extend(fetch_next_48h_fixtures(INTL_FRIENDLIES_CODE))
+            out.extend(fetch_next_48h_fixtures(INTL_FRIENDLIES_CODE, allow_stale=allow_stale))
             print(f"[AllFixtures] priority {INTL_FRIENDLIES_CODE}: {len(out)} rows")
         except Exception as exc:
             print(f"[AllFixtures] priority {INTL_FRIENDLIES_CODE}: {exc!r}")
@@ -532,7 +616,10 @@ def _fetch_all_league_fixtures_parallel(*, include_domestic: bool = False) -> Li
         return out
     workers = min(_fixture_fetch_workers(), len(codes))
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(fetch_next_48h_fixtures, code): code for code in codes}
+        futures = {
+            pool.submit(fetch_next_48h_fixtures, code, allow_stale=allow_stale): code
+            for code in codes
+        }
         for fut in as_completed(futures):
             league_code = futures[fut]
             try:
@@ -793,7 +880,7 @@ def _normalize_fotmob(match: Dict, league_code: str) -> Optional[Dict]:
     }
 
 
-def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
+def fetch_next_48h_fixtures(league_code: str, *, allow_stale: bool = False) -> List[Dict]:
     days = _fixture_window_days_for_league(league_code)
     cache = Cache()
     prefer_fdo = _env_truthy("HIBS_PREFER_FOOTBALL_DATA_FIXTURES")
@@ -803,6 +890,8 @@ def fetch_next_48h_fixtures(league_code: str) -> List[Dict]:
     cached = cache.get(cache_key, ttl_hours=ttl)
     if cached:
         if _league_fixture_cache_fresh(cached):
+            return cached
+        if allow_stale:
             return cached
         _hibs_debug_log(f"partial enrich cache bust {league_code} key={cache_key}")
 
@@ -1095,28 +1184,18 @@ def _data_quality_for_enriched(enriched: Dict[str, Any], prediction: Dict[str, A
 
 
 def _ensure_fixture_data_quality(all_fixtures: List[Dict[str, Any]]) -> None:
-    """Backfill data_quality on legacy cache rows only — never replace enrich-time scores."""
+    """Backfill missing data_quality only — never re-score rows that already have a score (avoids DQ cliffs)."""
     from hibs_predictor.data_quality import compute_fixture_data_quality_from_row
     from hibs_predictor.xg_source_display import attach_xg_display_fields
 
     for f in all_fixtures:
         existing = f.get("data_quality") if isinstance(f.get("data_quality"), dict) else {}
+        if existing.get("score_pct") is not None:
+            continue
         if not f.get("xg_source_hint"):
             attach_xg_display_fields(f)
         try:
-            new_dq = compute_fixture_data_quality_from_row(f)
-            if f.get("enriched_at") and existing.get("score_pct") is not None:
-                try:
-                    old_pct = float(existing["score_pct"])
-                    new_pct = float(new_dq.get("score_pct") or 0)
-                    if new_pct >= old_pct:
-                        f["data_quality"] = new_dq
-                    else:
-                        f["data_quality"] = existing
-                except (TypeError, ValueError):
-                    f["data_quality"] = new_dq
-            else:
-                f["data_quality"] = new_dq
+            f["data_quality"] = compute_fixture_data_quality_from_row(f)
         except Exception as exc:
             print(f"[Data quality] {f.get('home')} v {f.get('away')}: {exc!r}")
 
@@ -1162,57 +1241,23 @@ def _normalize_position_rank(value: Any) -> Optional[int]:
     return normalize_position_rank(value)
 
 
-_TEAM_CANONICAL_ALIASES = {
-    "hibs": "hibernian",
-    "man utd": "manchester united",
-    "man city": "manchester city",
-    "spurs": "tottenham",
-    "wolves": "wolverhampton",
-    "nottm forest": "nottingham forest",
-}
-
-
 def _team_key(name: Any) -> str:
-    import re
-    import unicodedata
+    from hibs_predictor.team_aliases import team_key
 
-    text = unicodedata.normalize("NFKD", _table_team_display(name))
-    text = "".join(c for c in text if not unicodedata.combining(c)).lower()
-    text = re.sub(r"[^a-z0-9]+", " ", text).strip()
-    for suffix in (" fc", " afc", " cf", " sc", " united", " city"):
-        if text.endswith(suffix):
-            text = text[: -len(suffix)].strip()
-    return text
+    return team_key(_table_team_display(name))
 
 
 def _canonical_team_key(name: Any) -> str:
-    key = _team_key(name)
-    return _TEAM_CANONICAL_ALIASES.get(key, key)
+    from hibs_predictor.team_aliases import canonical_team_key
+
+    return canonical_team_key(_table_team_display(name))
 
 
 def _team_names_match(a: str, b: str) -> bool:
     """Loose match for fixture display names vs standings (e.g. Hibs vs Hibernian)."""
-    if not a or not b:
-        return False
-    ca, cb = _canonical_team_key(a), _canonical_team_key(b)
-    if ca == cb:
-        return True
-    if ca in cb or cb in ca:
-        return True
-    ap = ca.split()
-    bp = cb.split()
-    if ap and bp and ap[0] == bp[0] and len(ap[0]) > 3:
-        return True
-    for prefix in ("sc ", "fc ", "ac ", "as ", "sv ", "sk ", "rc ", "cd ", "cf "):
-        if ca.startswith(prefix):
-            core = ca[len(prefix) :].strip()
-            if core and (core == cb or core in cb or cb in core):
-                return True
-        if cb.startswith(prefix):
-            core = cb[len(prefix) :].strip()
-            if core and (core == ca or core in ca or ca in core):
-                return True
-    return False
+    from hibs_predictor.team_aliases import team_names_match
+
+    return team_names_match(a, b)
 
 
 def _normalize_table_row(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -1754,10 +1799,10 @@ def _fixture_coverage_summary(
             f"in the next {days} days."
         )
         reason = (
-            "International focus mode is active — World Cup, Nations League, Euros"
-            " and international friendlies (when in the friendlies window or enabled) are fetched by default. "
-            "Filter chips reflect leagues with fixtures in the current window. "
-            "Use All / UK / European region chips on the dashboard for domestic leagues when needed."
+            "International focus mode is active — World Cup and international friendlies are fetched first. "
+            "League of Ireland and Nordic leagues use the same dashboard window as full daily options — "
+            "filter with Ireland or Nordic region chips. "
+            "Use All / UK / European for other domestic leagues when needed."
         )
     elif focus_active:
         summary = (
@@ -1813,7 +1858,12 @@ def _dashboard_info_box(fixture_coverage: Dict[str, Any], total: int) -> Dict[st
     }
 
 
-def fetch_all_fixtures(*, attach_live: bool = False, include_domestic: bool = False) -> Dict:
+def fetch_all_fixtures(
+    *,
+    attach_live: bool = False,
+    include_domestic: bool = False,
+    allow_stale: bool = False,
+) -> Dict:
     from hibs_predictor.fixture_statistics_xg import reset_statistics_xg_budget
 
     reset_statistics_xg_budget()
@@ -1829,6 +1879,13 @@ def fetch_all_fixtures(*, attach_live: bool = False, include_domestic: bool = Fa
             if attach_live:
                 _refresh_live_on_bundle(bundle)
             return bundle
+        if allow_stale and _is_complete_fixture_bundle(cached):
+            bundle = dict(cached)
+            bundle["fetch_days"] = _fetch_window_days()
+            bundle["cache_stale"] = True
+            if attach_live:
+                _refresh_live_on_bundle(bundle)
+            return bundle
         if _is_complete_fixture_bundle(cached):
             _hibs_debug_log(f"partial all_fixtures bundle bust key={ck}")
         all_f = cached.get("all") if isinstance(cached, dict) else None
@@ -1841,7 +1898,9 @@ def fetch_all_fixtures(*, attach_live: bool = False, include_domestic: bool = Fa
             return bundle
         _hibs_debug_log(f"skip empty all_fixtures cache key={ck}")
 
-    all_fixtures = _fetch_all_league_fixtures_parallel(include_domestic=include_domestic)
+    all_fixtures = _fetch_all_league_fixtures_parallel(
+        include_domestic=include_domestic, allow_stale=allow_stale
+    )
     result = _finalize_fixture_bundle(all_fixtures, attach_live=attach_live, include_domestic=include_domestic)
     if result.get("total"):
         cache.set(ck, result, ttl_hours=ttl)
@@ -2033,7 +2092,7 @@ def index():
     if request.args.get("refresh") == "1":
         clear_application_caches(all_disk=request.args.get("all") == "1")
     elif not include_domestic:
-        cached_page = _dashboard_page_cache_get()
+        cached_page = _dashboard_page_cache_get(allow_stale=True)
         if cached_page is not None:
             body, etag = cached_page
             if request.headers.get("If-None-Match") == etag:
@@ -2043,15 +2102,26 @@ def index():
             resp.mimetype = "text/html; charset=utf-8"
             resp.headers["ETag"] = etag
             resp.headers["Cache-Control"] = "private, max-age=30"
+            _schedule_dashboard_refresh()
             return _set_fetch_days_cookie_if_requested(resp)
 
-    attach_live = not _dashboard_lite_mode()
-    data = fetch_all_fixtures(attach_live=attach_live, include_domestic=include_domestic)
+    # Never block the HTML dashboard on live-score + xG enrich (avoids nginx 502 on cold cache).
+    progressive = _progressive_load_enabled()
+    data = fetch_all_fixtures(
+        attach_live=False,
+        include_domestic=include_domestic,
+        allow_stale=True,
+    )
+    if data.get("cache_stale"):
+        _schedule_dashboard_refresh()
     upcoming = _bundle_fixtures(data)
     from hibs_predictor.recent_results import fetch_recent_results
 
-    recent_results = fetch_recent_results(aggregator, include_domestic=include_domestic)
-    if _dashboard_lite_mode():
+    if progressive:
+        recent_results = {"all": [], "days": [], "total": 0, "results_days": 3}
+    else:
+        recent_results = fetch_recent_results(aggregator, include_domestic=include_domestic)
+    if _defer_assistant_on_page():
         assistant_packets: List[Dict[str, Any]] = []
         assistant_bundle: Dict[str, Any] = {"packets": [], "recommendations": [], "acca_candidates": [], "count": 0}
     else:
@@ -2092,6 +2162,7 @@ def index():
         recent_results_total=recent_results.get("total", 0),
         recent_results_days_groups=recent_results.get("days", []),
         display_tz_label=display_tz_label(),
+        progressive_load=progressive,
     )
     body = html.encode("utf-8")
     etag = _dashboard_page_cache_set(body)
@@ -2268,7 +2339,7 @@ def api_fixtures():
 @app.route("/api/value-bets")
 @login_required
 def api_value_bets():
-    data = fetch_all_fixtures()
+    data = fetch_all_fixtures(allow_stale=True)
     return jsonify({"value_bets": data["value_bets"], "count": data["value_bet_count"]})
 
 
@@ -2278,7 +2349,7 @@ def api_insights():
     """Handicapper-style insight digest for the current fixture window."""
     from hibs_predictor.insights import build_insights
 
-    data = fetch_all_fixtures()
+    data = fetch_all_fixtures(allow_stale=True)
     upcoming = _bundle_fixtures(data)
     all_rows = data.get("all") or []
     return jsonify(
@@ -2289,6 +2360,67 @@ def api_insights():
     )
 
 
+@app.route("/api/insights/content")
+@login_required
+def api_insights_content():
+    """HTML fragment for progressive /insights load (full build_insights, same DQ as sync page)."""
+    from hibs_predictor.insights import build_insights
+
+    include_domestic = request.args.get("domestic") == "1"
+    data = fetch_all_fixtures(
+        include_domestic=include_domestic,
+        allow_stale=True,
+        attach_live=False,
+    )
+    if data.get("cache_stale"):
+        _schedule_dashboard_refresh()
+    upcoming = _bundle_fixtures(data)
+    all_rows = data.get("all") or []
+    backfill_rows = [f for f in all_rows if f.get("prediction")]
+    if backfill_rows:
+        try:
+            from hibs_predictor.prediction_log import backfill_snapshots_from_fixtures
+
+            backfill_snapshots_from_fixtures(backfill_rows)
+        except Exception:
+            pass
+    insights = build_insights(upcoming, backfill_fixtures=[])
+    ctx = _insights_content_context(data, insights)
+    html = render_template("_insights_deferred.html", **ctx)
+    summary = insights.get("summary") or {}
+    return jsonify(
+        {
+            "html": html,
+            "summary": {
+                "fixtures_eligible": summary.get("fixtures_eligible", 0),
+                "fixtures_excluded": summary.get("fixtures_excluded", 0),
+            },
+            "value_bet_count": data.get("value_bet_count", 0),
+            "cache_stale": bool(data.get("cache_stale")),
+        }
+    )
+
+
+@app.route("/api/dashboard/recent-results")
+@login_required
+def api_dashboard_recent_results():
+    """Recent results HTML for progressive dashboard load."""
+    from hibs_predictor.recent_results import fetch_recent_results
+    from hibs_predictor.tournament_focus import tournament_focus_context
+
+    include_domestic = request.args.get("domestic") == "1"
+    recent = fetch_recent_results(aggregator, include_domestic=include_domestic)
+    html = render_template(
+        "_dashboard_recent_results.html",
+        recent_results_days_groups=recent.get("days", []),
+        recent_results_days=recent.get("results_days", 3),
+        display_tz_label=display_tz_label(),
+        tournament_focus=tournament_focus_context(include_domestic=include_domestic),
+        include_domestic=include_domestic,
+    )
+    return jsonify({"html": html, "total": recent.get("total", 0)})
+
+
 @app.route("/api/acca/recommendations")
 @login_required
 def api_acca_recommendations():
@@ -2296,39 +2428,87 @@ def api_acca_recommendations():
     from hibs_predictor.acca_recommender import build_acca_recommendations
     from hibs_predictor.match_insight import build_assistant_packet
 
-    data = fetch_all_fixtures()
+    data = fetch_all_fixtures(allow_stale=True)
     upcoming = _bundle_fixtures(data)
     packets = [build_assistant_packet(f) for f in upcoming]
     return jsonify(build_acca_recommendations(packets))
+
+
+@app.route("/performance")
+@login_required
+def performance_page():
+    """Track record: logged model + value picks (separate from Insights handicapping)."""
+    from hibs_predictor.performance_analytics import build_performance_page_dict
+
+    try:
+        history_days = max(7, min(60, int(request.args.get("days", "14"))))
+    except ValueError:
+        history_days = 14
+    perf = build_performance_page_dict(history_days=history_days)
+    return render_template(
+        "performance.html",
+        perf=perf,
+        display_tz_label=perf.get("display_tz_label") or display_tz_label(),
+    )
+
+
+@app.route("/api/performance")
+@login_required
+def api_performance():
+    from hibs_predictor.performance_analytics import build_performance_page_dict
+
+    try:
+        history_days = max(7, min(60, int(request.args.get("days", "14"))))
+    except ValueError:
+        history_days = 14
+    return jsonify(build_performance_page_dict(history_days=history_days))
 
 
 @app.route("/insights")
 @login_required
 def insights_page():
     """Actionable model/data/market insights built from the current fixture packets."""
-    from hibs_predictor.insights import build_insights
+    from hibs_predictor.insights import build_insights, insights_empty_shell
 
-    data = fetch_all_fixtures()
-    upcoming = _bundle_fixtures(data)
-    all_rows = data.get("all") or []
-    insights = build_insights(
-        upcoming,
-        backfill_fixtures=[f for f in all_rows if f.get("prediction")],
+    progressive = _progressive_load_enabled()
+    include_domestic = request.args.get("domestic") == "1"
+    data = fetch_all_fixtures(
+        include_domestic=include_domestic,
+        allow_stale=True,
+        attach_live=False,
     )
-    assistant_bundle = _assistant_bundle(upcoming)
-    fixture_coverage = data.get("fixture_coverage") or {}
+    if data.get("cache_stale"):
+        _schedule_dashboard_refresh()
+    upcoming = _bundle_fixtures(data)
+    if progressive:
+        insights = insights_empty_shell()
+        assistant_packets: List[Dict[str, Any]] = []
+        assistant_recommendations = None
+    else:
+        all_rows = data.get("all") or []
+        backfill_rows = [f for f in all_rows if f.get("prediction")]
+        if backfill_rows:
+            try:
+                from hibs_predictor.prediction_log import backfill_snapshots_from_fixtures
+
+                backfill_snapshots_from_fixtures(backfill_rows)
+            except Exception:
+                pass
+        insights = build_insights(upcoming, backfill_fixtures=[])
+        if _defer_assistant_on_page():
+            assistant_packets = []
+            assistant_recommendations = None
+        else:
+            assistant_bundle = _assistant_bundle(upcoming)
+            assistant_packets = assistant_bundle["packets"]
+            assistant_recommendations = assistant_bundle.get("recommendations")
+    ctx = _insights_content_context(data, insights)
     return render_template(
         "insights.html",
-        insights=insights,
-        total=data["total"],
-        fetch_days=data.get("fetch_days", _fetch_window_days()),
-        value_bet_count=data["value_bet_count"],
-        data_quality_ui_min=_ui_data_quality_min_pct(),
-        assistant_packets=assistant_bundle["packets"],
-        assistant_recommendations=assistant_bundle.get("recommendations"),
-        display_tz_label=display_tz_label(),
-        dashboard_info=_dashboard_info_box(fixture_coverage, data["total"]),
-        fixture_coverage=fixture_coverage,
+        progressive_load=progressive,
+        assistant_packets=assistant_packets,
+        assistant_recommendations=assistant_recommendations,
+        **ctx,
     )
 
 
@@ -2336,7 +2516,7 @@ def insights_page():
 @login_required
 def tables_page():
     """League tables from available standings feeds, with fixture-row fallback."""
-    data = fetch_all_fixtures()
+    data = fetch_all_fixtures(allow_stale=True)
     tables = _build_league_tables(data["all"], include_live=True)
     return render_template(
         "tables.html",

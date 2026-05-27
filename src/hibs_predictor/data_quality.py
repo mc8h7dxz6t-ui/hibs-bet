@@ -2,6 +2,7 @@
 
 from typing import Any, Dict, List, Optional
 
+from hibs_predictor.config import ALL_LEAGUE_CODES, _DASHBOARD_REGION_EUROPEAN
 from hibs_predictor.season import CALENDAR_YEAR_LEAGUES
 
 _SHOWPIECE_LEAGUES = frozenset(
@@ -26,7 +27,12 @@ _INTERNATIONAL_LEAGUES = frozenset(
 _SHOWPIECE_DQ_FLOOR = 85.0
 _CORE_DQ_FLOOR = 88.0
 _CALENDAR_DQ_FLOOR = 85.0
+_MEASURED_DQ_FLOOR = 90.0
+_PREMIUM_DQ_FLOOR = 95.0
 _INTL_DQ_FLOOR = 85.0
+
+# Mapped domestic leagues (excludes internationals) — 3+ recent games + stats + odds floor path.
+_DOMESTIC_STANDARD_LEAGUES = frozenset(c for c in ALL_LEAGUE_CODES if c not in _INTERNATIONAL_LEAGUES)
 
 
 def _has_stats(stats: Optional[Dict[str, Any]]) -> bool:
@@ -167,10 +173,31 @@ def _showpiece_ready(enriched: Dict[str, Any], *, league_code: Optional[str] = N
     return True
 
 
-def _calendar_league_ready(enriched: Dict[str, Any], *, league_code: Optional[str] = None) -> bool:
-    """Spring-start leagues (Nordics, friendlies): slightly lower recency bar when core inputs exist."""
+def _strong_xg_tier(src: str) -> bool:
+    """Measured or season-table xG — eligible for 90% DQ floor when core/domestic story is solid."""
+    s = (src or "").lower()
+    if _season_xg_source_tag(s):
+        return True
+    return s in (
+        "api_fixture_xg",
+        "api_statistics_xg",
+        "stats_api_xg",
+        "fotmob_league_xg",
+        "understat_xg",
+        "understat_team_xg",
+        "fbref_schedule_xg",
+    )
+
+
+def _domestic_standard_ready(enriched: Dict[str, Any], *, league_code: Optional[str] = None) -> bool:
+    """
+    European / Nordic domestic (and UK when 3–4 recent games): stats + odds + 3+ recent.
+    Skips when already core-ready (5+ recent). Internationals use _international_match_ready.
+    """
     lc = str(league_code or enriched.get("league") or "").strip().upper()
-    if lc not in CALENDAR_YEAR_LEAGUES:
+    if lc not in _DOMESTIC_STANDARD_LEAGUES:
+        return False
+    if _core_api_rich_ready(enriched):
         return False
     if not _team_ids_ready(enriched) or not _book_odds_ready(enriched):
         return False
@@ -178,6 +205,11 @@ def _calendar_league_ready(enriched: Dict[str, Any], *, league_code: Optional[st
         return False
     n_h, n_a = _recent_n(enriched)
     return n_h >= 3.0 and n_a >= 3.0
+
+
+def _calendar_league_ready(enriched: Dict[str, Any], *, league_code: Optional[str] = None) -> bool:
+    """Alias for mapped domestic early-season path (Nordics + European leagues)."""
+    return _domestic_standard_ready(enriched, league_code=league_code)
 
 
 def _international_match_ready(enriched: Dict[str, Any], *, league_code: Optional[str] = None) -> bool:
@@ -202,6 +234,37 @@ def _international_match_ready(enriched: Dict[str, Any], *, league_code: Optiona
     return True
 
 
+def _premium_ready(enriched: Dict[str, Any], *, league_code: Optional[str] = None) -> bool:
+    """
+  95% band: full European-league enrich (5+ form, stats, 1X2, BTTS/O2.5, strong xG tier).
+  Cups use showpiece rules (no league-table requirement).
+  """
+    lc = str(league_code or enriched.get("league") or "").strip().upper()
+    if lc not in _DASHBOARD_REGION_EUROPEAN:
+        return False
+    if not _team_ids_ready(enriched):
+        return False
+    if not _book_odds_ready(enriched):
+        return False
+    if _side_markets_pts(enriched) < 4.0:
+        return False
+    if not _has_stats(enriched.get("home_stats")) or not _has_stats(enriched.get("away_stats")):
+        return False
+    n_h, n_a = _recent_n(enriched)
+    if n_h < 5.0 or n_a < 5.0:
+        return False
+    src = _effective_xg_source(enriched)
+    if not _strong_xg_tier(src):
+        return False
+    if _xg_points(src, n_h, n_a, enriched) < 14.0:
+        return False
+    if _cup_competition_code(lc):
+        return _showpiece_ready(enriched, league_code=lc)
+    hp = enriched.get("home_position") or {}
+    ap = enriched.get("away_position") or {}
+    return _position_ok(hp) and _position_ok(ap)
+
+
 def _international_dq_floor_pct(enriched: Dict[str, Any], *, league_code: Optional[str] = None) -> Optional[float]:
     """Target floor for international competitions (85%+ UI band when enrich is solid)."""
     if not _international_match_ready(enriched, league_code=league_code):
@@ -214,7 +277,11 @@ def _international_dq_floor_pct(enriched: Dict[str, Any], *, league_code: Option
             and _has_stats(enriched.get("home_stats"))
             and _has_stats(enriched.get("away_stats"))
         ):
+            if _strong_xg_tier(_effective_xg_source(enriched)):
+                return _MEASURED_DQ_FLOOR
             return _CORE_DQ_FLOOR
+    if _strong_xg_tier(_effective_xg_source(enriched)):
+        return _MEASURED_DQ_FLOOR
     return _INTL_DQ_FLOOR
 
 
@@ -516,15 +583,23 @@ def compute_fixture_data_quality(enriched: Dict[str, Any]) -> Dict[str, Any]:
     pct = max(0.0, min(100.0, round(score, 1)))
     league_code = str(enriched.get("league") or "").strip().upper()
     showpiece_ready = _showpiece_ready(enriched, league_code=league_code or None)
-    calendar_ready = _calendar_league_ready(enriched, league_code=league_code or None)
+    domestic_standard_ready = _domestic_standard_ready(enriched, league_code=league_code or None)
     intl_floor = _international_dq_floor_pct(enriched, league_code=league_code or None)
-    if core_ready and pct < _CORE_DQ_FLOOR:
+    strong_xg = _strong_xg_tier(src)
+    premium_ready = _premium_ready(enriched, league_code=league_code or None)
+    if premium_ready and pct < _PREMIUM_DQ_FLOOR:
+        pct = _PREMIUM_DQ_FLOOR
+    elif core_ready and strong_xg and pct < _MEASURED_DQ_FLOOR:
+        pct = _MEASURED_DQ_FLOOR
+    elif core_ready and pct < _CORE_DQ_FLOOR:
         pct = _CORE_DQ_FLOOR
     elif intl_floor is not None and pct < intl_floor:
         pct = intl_floor
     elif showpiece_ready and pct < _SHOWPIECE_DQ_FLOOR:
         pct = _SHOWPIECE_DQ_FLOOR
-    elif calendar_ready and pct < _CALENDAR_DQ_FLOOR:
+    elif domestic_standard_ready and strong_xg and pct < _MEASURED_DQ_FLOOR:
+        pct = _MEASURED_DQ_FLOOR
+    elif domestic_standard_ready and pct < _CALENDAR_DQ_FLOOR:
         pct = _CALENDAR_DQ_FLOOR
     field_scores = _field_quality_from_blocks(blocks)
     weak_fields = [
@@ -545,17 +620,25 @@ def compute_fixture_data_quality(enriched: Dict[str, Any]) -> Dict[str, Any]:
         weak_fields = [w for w in weak_fields if w not in _table_weak]
         if _season_xg_source_tag(src) and xg_row.get("status") in ("usable", "strong"):
             weak_fields = [w for w in weak_fields if w != "Expected goals"]
-    elif calendar_ready and pct >= _CALENDAR_DQ_FLOOR:
+    elif domestic_standard_ready and pct >= _CALENDAR_DQ_FLOOR:
         weak_fields = [w for w in weak_fields if w not in _table_weak]
-        if _season_xg_source_tag(src) and xg_row.get("status") == "usable":
+        if strong_xg and xg_row.get("status") in ("usable", "strong"):
             weak_fields = [w for w in weak_fields if w != "Expected goals"]
+    elif premium_ready and pct >= _PREMIUM_DQ_FLOOR:
+        weak_fields = [
+            w
+            for w in weak_fields
+            if w not in _table_weak and w != "Expected goals"
+        ]
     elif intl_floor is not None and pct >= _INTL_DQ_FLOOR:
         weak_fields = [w for w in weak_fields if w not in _table_weak]
         if _season_xg_source_tag(src) and xg_row.get("status") in ("usable", "strong"):
             weak_fields = [w for w in weak_fields if w != "Expected goals"]
         if not _book_odds_ready(enriched) and "Odds markets" not in weak_fields:
             weak_fields = (weak_fields + ["Odds markets"])[:5]
-    if pct >= 85 and not weak_fields:
+    if pct >= _PREMIUM_DQ_FLOOR and not weak_fields:
+        trust_label = "Premium data"
+    elif pct >= 85 and not weak_fields:
         trust_label = "Strong data"
     elif pct >= 80:
         trust_label = "Good data, check weak fields"
@@ -571,6 +654,7 @@ def compute_fixture_data_quality(enriched: Dict[str, Any]) -> Dict[str, Any]:
         "trust_label": trust_label,
         "full_scope": pct >= 85.0,
         "strong_scope": pct >= 80.0,
+        "premium_scope": pct >= _PREMIUM_DQ_FLOOR,
     }
 
 

@@ -113,6 +113,16 @@ LEAGUES = {
         "sportsmonk_id": None,
         "strength_factor": 0.88,
     },
+    "IRELAND_PREMIER": {
+        "name": "League of Ireland Premier",
+        "country": "Republic of Ireland",
+        "region": "Ireland",
+        "flag": "🇮🇪",
+        "football_data_org_id": None,
+        "api_sports_id": 357,
+        "sportsmonk_id": None,
+        "strength_factor": 0.62,
+    },
     # European
     "UCL": {
         "name": "Champions League",
@@ -363,6 +373,7 @@ ALL_LEAGUE_CODES = [
     "LEAGUE_TWO",
     "FA_CUP",
     "LEAGUE_CUP",
+    "IRELAND_PREMIER",
     "LA_LIGA",
     "COPA_DEL_REY",
     "SERIE_A",
@@ -393,6 +404,7 @@ DASHBOARD_LEAGUE_ORDER = list(ALL_LEAGUE_CODES)
 LEAGUE_REGIONS = {
     "🏴󠁧󠁢󠁳󠁣󠁴󠁿 Scotland": ["SCOTLAND", "SCOTLAND_CHAMP", "SCOTLAND_L1", "SCOTLAND_L2", "SCOTTISH_CUP"],
     "🏴󠁧󠁢󠁥󠁮󠁧󠁿 England": ["EPL", "CHAMPIONSHIP", "LEAGUE_ONE", "LEAGUE_TWO", "FA_CUP", "LEAGUE_CUP"],
+    "🇮🇪 Ireland": ["IRELAND_PREMIER"],
     "🏆 European": [
         "LA_LIGA", "COPA_DEL_REY", "SERIE_A", "COPPA_ITALIA", "BUNDESLIGA", "DFB_POKAL",
         "LIGUE_1", "COUPE_DE_FRANCE", "EREDIVISIE", "PRIMEIRA",
@@ -432,21 +444,28 @@ _DASHBOARD_REGION_EUROPEAN = frozenset(
         "EREDIVISIE",
         "PRIMEIRA",
         "BELGIUM_FIRST",
-        "DENMARK_SL",
         "GREECE_SL",
         "AUSTRIA_BL",
-        "NORWAY_ELITESERIEN",
-        "FINLAND_VEIKKAUSLIIGA",
         "UCL",
         "EUROPA_LEAGUE",
         "UECL",
     }
 )
 _DASHBOARD_REGION_INTERNATIONAL = frozenset({"WORLD_CUP", "EUROS", "NATIONS_LEAGUE", "INTL_FRIENDLIES"})
+_DASHBOARD_REGION_IRELAND = frozenset({"IRELAND_PREMIER"})
+_DASHBOARD_REGION_NORDIC = frozenset(
+    {
+        "NORWAY_ELITESERIEN",
+        "FINLAND_VEIKKAUSLIIGA",
+        "DENMARK_SL",
+    }
+)
 
 DASHBOARD_FILTER_REGIONS = (
     ("", "All"),
     ("uk", "UK"),
+    ("ireland", "Ireland"),
+    ("nordic", "Nordic"),
     ("european", "European"),
     ("international", "International"),
 )
@@ -457,6 +476,10 @@ def league_dashboard_region(league_code: str) -> str:
     code = (league_code or "").strip()
     if code in _DASHBOARD_REGION_UK:
         return "uk"
+    if code in _DASHBOARD_REGION_IRELAND:
+        return "ireland"
+    if code in _DASHBOARD_REGION_NORDIC:
+        return "nordic"
     if code in _DASHBOARD_REGION_EUROPEAN:
         return "european"
     if code in _DASHBOARD_REGION_INTERNATIONAL:

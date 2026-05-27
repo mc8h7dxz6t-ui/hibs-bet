@@ -414,8 +414,9 @@ def _format_same_game_builder(builder: Dict[str, Any]) -> Dict[str, Any]:
 def build_same_fixture_combo_ideas(
     packets: List[Dict[str, Any]],
     *,
-    builder_limit: int = 8,
+    builder_limit: int = 24,
     priced_combo_limit: int = 6,
+    max_per_fixture: int = 3,
 ) -> Dict[str, Any]:
     """
     Same-fixture correlated market ideas (BTTS+O2.5, win+O2.5, win+BTTS, etc.).
@@ -423,7 +424,9 @@ def build_same_fixture_combo_ideas(
     Component legs must have book prices; no synthetic combo odds.
     """
     analyzable = [p for p in packets if is_analyzable(p)]
-    builders = build_bet_builder_suggestions(analyzable, limit=builder_limit)
+    builders = build_bet_builder_suggestions(
+        analyzable, limit=builder_limit, max_per_fixture=max_per_fixture
+    )
     priced_combos = build_win_btts_combo_suggestions(analyzable, limit=priced_combo_limit)
     formatted_builders = [_format_same_game_builder(b) for b in builders]
     formatted_priced = []

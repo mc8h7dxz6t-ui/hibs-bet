@@ -43,9 +43,9 @@ strip_lite_block() {
   fi
   local tmp
   tmp="$(mktemp)"
-  awk -v m="${LITE_MARKER}" '
+  awk -v m="${LITE_MARKER}" "${_preserved_hibs_awk}"'
     $0 == m { skip=1; next }
-    skip && /^HIBS_/ { next }
+    skip && /^HIBS_/ && !preserved($0) { next }
     skip && /^$/ { skip=0; next }
     skip && /^#/ { skip=0 }
     { print }
@@ -63,12 +63,17 @@ strip_unwanted_env() {
   mv "$tmp" "$f"
 }
 
+# Auth / session keys must survive safe-block refresh (never strip on redeploy).
+_preserved_hibs_awk='function preserved(line) {
+  return line ~ /^HIBS_(SECRET_KEY|AUTH_PASSWORD|HIBS_PASSWORD|AUTH_USERNAME)=/
+}'
+
 dedupe_hibs_env() {
   local f="$1"
   [[ -f "$f" ]] || return 0
   local tmp
   tmp="$(mktemp)"
-  awk '
+  awk "${_preserved_hibs_awk}"'
     /^HIBS_[A-Za-z0-9_]+=/ {
       key = $0
       sub(/=.*/, "", key)
@@ -94,9 +99,9 @@ upsert_safe_env() {
   if grep -qF "${SAFE_MARKER}" "$f"; then
     local tmp
     tmp="$(mktemp)"
-    awk -v m="${SAFE_MARKER}" '
+    awk -v m="${SAFE_MARKER}" "${_preserved_hibs_awk}"'
       $0 == m { skip=1; next }
-      skip && /^HIBS_/ { next }
+      skip && /^HIBS_/ && !preserved($0) { next }
       skip && /^$/ { skip=0; next }
       skip && /^[^#]/ { skip=0 }
       { print }
@@ -108,12 +113,21 @@ upsert_safe_env() {
 
 ${SAFE_MARKER}
 # Scope A end-of-season: player/injury/lineup on; squad depth off (429 budget).
-HIBS_FETCH_DAYS=7
+HIBS_FETCH_DAYS=5
 HIBS_FRIENDLIES_FETCH_DAYS=14
 HIBS_MAX_DATA=1
 HIBS_ENABLE_FOTMOB_XG=1
 HIBS_FETCH_FIXTURE_STATISTICS_XG=1
-HIBS_FETCH_FIXTURE_STATISTICS_XG_MAX=24
+HIBS_FETCH_FIXTURE_STATISTICS_XG_MAX=64
+# API budget: fixture lists 2h; enrich disk 8h for non-today kickoffs; deep pass only today + below 90% DQ.
+HIBS_CACHE_TTL_HOURS=2
+HIBS_TARGET_DQ_PCT=90
+HIBS_DEEP_ENRICH_MAX_RETRIES=2
+HIBS_DEEP_ENRICH_TODAY_ONLY=1
+HIBS_ENRICH_CACHE_HOURS_FUTURE=8
+HIBS_UI_FULL_DATA_MIN_PCT=90
+HIBS_ENRICH_PRIORITY_TODAY=1
+HIBS_PROGRESSIVE_LOAD=1
 HIBS_DASHBOARD_LITE=0
 HIBS_ALWAYS_DEEP_SCRAPE=0
 HIBS_SKIP_HEAVY_WHEN_API_STRONG=1
@@ -137,9 +151,32 @@ HIBS_RESULTS_FETCH_EVENTS=1
 HIBS_RESULTS_MAX_EVENT_FETCHES=12
 EOF
   dedupe_hibs_env "$f"
+  ensure_production_auth_env "$f"
   chown www-data:www-data "$f"
   chmod 640 "$f"
   echo "    Applied safer full-data flags to ${f}"
+}
+
+ensure_production_auth_env() {
+  local f="$1"
+  [[ -f "$f" ]] || return 0
+  if ! grep -qE '^HIBS_AUTH_ENABLED=(1|true|yes|on)\s*$' "$f"; then
+    return 0
+  fi
+  if ! grep -qE '^HIBS_SECRET_KEY=.+' "$f"; then
+    local secret
+    secret="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+    echo "HIBS_SECRET_KEY=${secret}" >>"$f"
+    echo "    Generated HIBS_SECRET_KEY (sessions will reset — users must log in again)"
+  fi
+  if ! grep -qE '^HIBS_AUTH_PASSWORD=.+' "$f" && ! grep -qE '^HIBS_HIBS_PASSWORD=.+' "$f"; then
+    echo "    ERROR: HIBS_AUTH_ENABLED=1 but no HIBS_AUTH_PASSWORD in ${f} — set before restart." >&2
+    return 1
+  fi
+  if ! grep -qE '^HIBS_AUTH_USERNAME=' "$f"; then
+    echo "HIBS_AUTH_USERNAME=hibs" >>"$f"
+    echo "    Set HIBS_AUTH_USERNAME=hibs (default)"
+  fi
 }
 
 echo "==> Production .env (safer 2GB profile)"
@@ -156,13 +193,13 @@ sed -i 's/--timeout [0-9]\+/--timeout 180/' "${SERVICE_DST}"
 systemctl daemon-reload
 systemctl enable hibs-bet
 
-echo "==> nginx proxy timeouts (180s, >= gunicorn)"
+echo "==> nginx proxy timeouts (300s, >= gunicorn)"
 if [[ -f "${NGINX_SITE}" ]]; then
-  sed -i 's/proxy_connect_timeout [0-9]\+s/proxy_connect_timeout 180s/g' "${NGINX_SITE}" 2>/dev/null || true
-  sed -i 's/proxy_read_timeout [0-9]\+s/proxy_read_timeout 180s/g' "${NGINX_SITE}" 2>/dev/null || true
-  sed -i 's/proxy_send_timeout [0-9]\+s/proxy_send_timeout 180s/g' "${NGINX_SITE}" 2>/dev/null || true
+  sed -i 's/proxy_connect_timeout [0-9]\+s/proxy_connect_timeout 300s/g' "${NGINX_SITE}" 2>/dev/null || true
+  sed -i 's/proxy_read_timeout [0-9]\+s/proxy_read_timeout 300s/g' "${NGINX_SITE}" 2>/dev/null || true
+  sed -i 's/proxy_send_timeout [0-9]\+s/proxy_send_timeout 300s/g' "${NGINX_SITE}" 2>/dev/null || true
   if ! grep -q 'proxy_read_timeout' "${NGINX_SITE}"; then
-    sed -i '/proxy_set_header X-Forwarded-Proto/a\        proxy_connect_timeout 180s;\n        proxy_read_timeout 180s;\n        proxy_send_timeout 180s;' "${NGINX_SITE}"
+    sed -i '/proxy_set_header X-Forwarded-Proto/a\        proxy_connect_timeout 300s;\n        proxy_read_timeout 300s;\n        proxy_send_timeout 300s;' "${NGINX_SITE}"
   fi
   nginx -t
   systemctl reload nginx
@@ -171,6 +208,10 @@ else
 fi
 
 echo "==> Restart hibs-bet"
+if [[ -f "${ENV_FILE}" ]] && ! ensure_production_auth_env "${ENV_FILE}"; then
+  echo "    Skipping restart until auth env is fixed." >&2
+  exit 1
+fi
 systemctl restart hibs-bet
 sleep 2
 systemctl status hibs-bet --no-pager || true

@@ -1,34 +1,11 @@
 {% extends "base.html" %}
-{% macro monitor_tally(bp, label='Model 1X2 pick') %}
-<p class="monitor-tally"><span class="tally-label">{{ label }}:</span> Wins <strong class="tally-w">{{ bp.wins or 0 }}</strong> · Losses <strong class="tally-l">{{ bp.losses or 0 }}</strong> · Pending <strong class="tally-p">{{ bp.pending or 0 }}</strong></p>
-{% endmacro %}
-{% macro value_tally(vp) %}
-{% if vp.attempts %}
-<p class="monitor-tally monitor-tally-value"><span class="tally-label">Value bet (top edge at log):</span> Wins <strong class="tally-w">{{ vp.wins or 0 }}</strong> · Losses <strong class="tally-l">{{ vp.losses or 0 }}</strong> · Pending <strong class="tally-p">{{ vp.pending or 0 }}</strong>{% if vp.hit_rate_pct is not none %} · Hit <strong class="tally-w">{{ vp.hit_rate_pct }}%</strong> <span class="tally-hint">(settled only)</span>{% elif vp.attempts and not vp.settled %} · <span class="tally-hint">awaiting FT</span>{% endif %}</p>
-{% endif %}
-{% endmacro %}
-{% macro result_badge(res) %}
-{% if res == 'W' %}<span class="result-badge result-badge-w" title="Won">W</span>{% elif res == 'L' %}<span class="result-badge result-badge-l" title="Lost">L</span>{% else %}<span class="result-badge result-badge-pending" title="Awaiting full-time result">pending</span>{% endif %}
-{% endmacro %}
-{% macro monitor_row(row) %}
-<tr class="{% if row.value_result == 'W' %}monitor-win{% elif row.value_result == 'L' %}monitor-loss{% elif row.result == 'W' %}monitor-win{% elif row.result == 'L' %}monitor-loss{% endif %}">
-    <td>{{ row.match }}{% if row.league %}<span class="ir-meta" style="display:block;font-weight:400;">{{ row.league }}</span>{% endif %}</td>
-    <td>{% if row.has_value %}{{ row.value_market or '—' }}{% else %}<span class="tally-hint">no value</span>{% endif %}</td>
-    <td>{% if row.has_value and row.value_model_pct is not none %}{{ row.value_model_pct }}%{% else %}—{% endif %}</td>
-    <td>{% if row.has_value and row.value_odds %}{{ "%.2f"|format(row.value_odds) }}{% else %}—{% endif %}</td>
-    <td>{% if row.has_value and row.value_edge_pct is not none %}+{{ row.value_edge_pct }}%{% else %}—{% endif %}</td>
-    <td>{% if row.has_value %}{{ result_badge(row.value_result) }}{% else %}—{% endif %}</td>
-    <td>{{ row.score or '—' }}</td>
-    <td title="Model 1X2 lean: {{ row.pick or '—' }}">{{ row.pick or '—' }} {{ result_badge(row.result) }}</td>
-    <td>{% if row.clv_pp is not none %}{{ row.clv_pp }} pp{% else %}—{% endif %}</td>
-</tr>
-{% endmacro %}
+{% from '_insights_macros.html' import monitor_tally, value_tally, result_badge, monitor_row %}
 {% block title %}hibs-bet — Insights{% endblock %}
 {% block container_class %} dash-outer{% endblock %}
 {% block extra_css %}
 <style>
 .insights-page{max-width:1720px;margin:0 auto;}
-.insights-hero{border:1px solid var(--border);border-radius:16px;padding:18px;background:linear-gradient(145deg,rgba(15,23,42,0.96),rgba(2,6,23,0.9));margin-bottom:14px;}
+.insights-hero{border:1px solid rgba(0,122,51,0.28);border-radius:16px;padding:18px;background:linear-gradient(118deg,rgba(0,122,51,0.22) 0%,rgba(10,32,22,0.96) 42%,rgba(2,6,23,0.9) 100%);margin-bottom:14px;box-shadow:var(--shadow-sm);}
 .insights-title{font-family:'Orbitron',monospace;font-size:1.35em;color:var(--hibs-neon);letter-spacing:0.06em;margin:0 0 6px;}
 .insights-sub{font-size:0.82em;color:var(--muted);line-height:1.5;max-width:760px;}
 .insights-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
@@ -50,6 +27,12 @@
 .insight-list li{margin-bottom:4px;}
 .coverage-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
 @media(max-width:720px){.coverage-grid{grid-template-columns:1fr;}}
+@media(max-width:767px){
+    .insights-hero{padding:12px;}
+    .insights-title{font-size:1.1em;}
+    .insight-card{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+    .acca-rec-table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;min-width:480px;}
+}
 .coverage-season{border:1px solid rgba(148,163,184,0.12);border-radius:10px;padding:10px;background:rgba(2,6,23,0.35);}
 .coverage-season h3{font-size:0.86em;margin:0 0 6px;color:var(--text);}
 .source-counts{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
@@ -72,18 +55,41 @@
 .acca-rec-foot{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px;}
 .btn-acca-slip{background:rgba(255,215,0,0.12);border:1px solid rgba(255,215,0,0.35);color:var(--gold);padding:6px 12px;border-radius:8px;font-size:0.72em;font-weight:800;cursor:pointer;font-family:'Inter',sans-serif;}
 .btn-acca-slip:hover{background:rgba(255,215,0,0.2);}
+.insights-primary{display:flex;flex-direction:column;gap:14px;margin-bottom:14px;}
+.insights-prob-card{border:1px solid rgba(0,122,51,0.32);border-radius:14px;background:rgba(8,28,20,0.72);padding:14px;box-shadow:var(--shadow-sm);}
+.insights-prob-hd{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;justify-content:space-between;margin-bottom:10px;}
+.insights-prob-hd h2{margin:0;}
+.insights-prob-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:10px;border:1px solid rgba(148,163,184,0.12);}
+.insights-prob-table{width:100%;border-collapse:collapse;font-size:0.76em;min-width:720px;}
+.insights-prob-table th,.insights-prob-table td{padding:8px 10px;border-bottom:1px solid rgba(148,163,184,0.1);text-align:left;vertical-align:middle;}
+.insights-prob-table th{color:var(--muted);font-weight:800;text-transform:uppercase;font-size:0.82em;letter-spacing:0.06em;background:rgba(2,6,23,0.35);position:sticky;top:0;}
+.insights-prob-table tr:hover td{background:rgba(0,122,51,0.06);}
+.insights-prob-rank{color:var(--muted);font-weight:800;width:2rem;text-align:center;}
+.insights-prob-pct{font-weight:900;color:var(--neon-value);font-variant-numeric:tabular-nums;}
+.insights-prob-match a{color:var(--text);text-decoration:none;font-weight:700;}
+.insights-prob-match a:hover{color:var(--hibs-neon);}
+.insights-secondary{margin-top:4px;}
+.insights-secondary > summary{cursor:pointer;font-size:0.78em;font-weight:700;color:var(--hibs-neon);padding:8px 0;list-style:none;}
+.insights-secondary > summary::-webkit-details-marker{display:none;}
+.insights-secondary[open] > summary{margin-bottom:10px;}
+.hibs-deferred-loading{padding:20px 12px;text-align:center;color:var(--muted);font-size:0.82em;line-height:1.45;}
+.hibs-deferred[aria-busy="true"]{min-height:48px;}
 </style>
 {% endblock %}
 {% block content %}
 <div class="insights-page">
     <header class="site-top">
         <div class="site-top-left">
-            <img src="{{ url_for('static', filename='badge_harp_shield.png') }}" alt="Hibernian FC" class="site-crest" width="38" height="38">
+            <div class="site-crest-wrap">
+                <img src="{{ url_for('static', filename='badge_harp_shield.png') }}" alt="Hibernian FC harp shield" class="site-crest" width="38" height="38">
+                <img src="{{ url_for('static', filename='hibs_badge.svg') }}" alt="" class="site-crest site-crest-alt" width="32" height="32" aria-hidden="true">
+            </div>
             <span class="site-wordmark">hibs-bet</span>
             <nav class="site-links" aria-label="Primary">
                 <a href="/" class="site-link">Dashboard</a>
                 <a href="/acca" class="site-link">Acca Builder</a>
                 <span class="site-link site-link-active">Insights</span>
+                <a href="/performance" class="site-link">Performance</a>
                 <a href="/tables" class="site-link">Tables</a>
                 <a href="/guide" class="site-link">Guide</a>
                 <a href="/status" class="site-link">API status</a>
@@ -103,467 +109,37 @@
 
     <section class="insights-hero">
         <h1 class="insights-title">Personal Handicapper</h1>
-        <p class="insights-sub">Your read-only analyst view: best model probabilities, value flags, data gaps, and ready-made acca ideas — all from the same fixture data as the dashboard.</p>
-        <p class="insights-intro"><strong>Model monitor</strong> (below) tracks how past picks scored after full time. <strong>Recommended accas</strong> are ranked multi-leg slips from fixtures with enough data and priced markets — combined odds multiply leg prices; treat legs as independent unless a warning says otherwise.</p>
+        <p class="insights-sub">Probability-first: ranked model picks with data coverage, then ready-made accas — same engine as the dashboard.</p>
+        <p class="insights-intro">Sorted by <strong>model %</strong> (then data %). Value and track record are secondary here; see <a href="/performance">Performance</a> for logged results.</p>
         {% set s = insights.summary %}
-        <div class="source-counts">
-            <span class="ir-pill ir-good">{{ s.fixtures_eligible | default(0) }} eligible</span>
-            <span class="ir-pill ir-warn">{{ s.fixtures_excluded | default(0) }} data-gated</span>
+        <div class="source-counts" id="insights-summary-pills">
+            <span class="ir-pill ir-good" id="insights-eligible-pill">{% if progressive_load %}…{% else %}{{ s.fixtures_eligible | default(0) }} eligible{% endif %}</span>
+            <span class="ir-pill ir-warn" id="insights-excluded-pill">{% if progressive_load %}…{% else %}{{ s.fixtures_excluded | default(0) }} data-gated{% endif %}</span>
             <span class="ir-pill ir-gold">{{ value_bet_count }} value flagged</span>
             <span class="ir-pill">Full data bar {{ data_quality_ui_min }}%</span>
         </div>
     </section>
 
-    {% if dashboard_info is defined and dashboard_info %}
-    <section class="insight-card insight-card-wide" aria-label="How hibs-bet works">
-        <h2>What this app does</h2>
-        <p style="margin:0 0 10px;font-size:0.82em;line-height:1.55;color:var(--text);">{{ dashboard_info.description }}</p>
-        <p style="margin:0;font-size:0.78em;color:var(--muted);">
-            <strong>{{ dashboard_info.loaded_count }}</strong> leagues loaded{% if dashboard_info.total_fixtures %} across <strong>{{ dashboard_info.total_fixtures }}</strong> fixtures{% endif %}.
-            {% if dashboard_info.loaded_names %}
-            Loaded: {{ dashboard_info.loaded_names_text }}.
-            {% else %}
-            No leagues loaded in the current window.
-            {% endif %}
-        </p>
-        {% if fixture_coverage is defined and fixture_coverage and fixture_coverage.summary %}
-        <div class="insight-row" style="margin-top:12px;">
-            <div class="ir-main">{{ fixture_coverage.summary }}</div>
-            <p style="margin:6px 0 0;font-size:0.76em;color:var(--muted);">{{ fixture_coverage.reason }}</p>
-            {% if fixture_coverage.empty_sample %}
-            <p style="margin:6px 0 0;font-size:0.72em;color:var(--muted);">No fixtures: {{ fixture_coverage.empty_sample|map(attribute='name')|join(', ') }}{% if fixture_coverage.empty_count > fixture_coverage.empty_sample|length %}, +{{ fixture_coverage.empty_count - fixture_coverage.empty_sample|length }} more{% endif %}.</p>
-            {% endif %}
-        </div>
-        {% endif %}
-    </section>
-    {% endif %}
-
-    {% set acca_rec = insights.acca_recommendations %}
-    {% if acca_rec and acca_rec.enabled %}
-    <section class="insight-card insight-card-wide" aria-label="Recommended accas" id="recommended-accas">
-        <h2>Recommended accas</h2>
-        <p class="ir-meta" style="margin:0 0 10px;color:var(--accent);line-height:1.45;">Stat-ranked multi-leg ideas from fixtures with model support and book prices. <strong>Combined odds</strong> = multiply each leg’s decimal price. <strong>Independence</strong> assumes legs don’t affect each other — correlated picks (same game, linked markets) are flagged when detected. {{ acca_rec.eligible_leg_count }} eligible leg(s) · data gate ≥{{ acca_rec.value_data_pct_gate }}%.</p>
-        {% if acca_rec.accas %}
-        {% set acca_winners = acca_rec.winning_accas or [] %}
-        {% set acca_others = acca_rec.other_accas if acca_winners else [] %}
-        {% set acca_full_list = acca_winners if acca_winners else acca_rec.accas %}
-        {% for acca in acca_full_list %}
-        <div class="acca-rec-card{% if acca.is_winning %} acca-win-card{% endif %}" data-acca-legs="{{ acca.legs|tojson|e }}">
-            {% if acca.is_winning %}<div class="acca-win-banner" aria-label="All legs won">All legs won</div>{% endif %}
-            <div class="acca-rec-hd">
-                <span class="acca-rec-title">{{ acca.name }}</span>
-                {% if acca.combined_odds %}<span class="ir-pill ir-gold" data-odds-dec="{{ acca.combined_odds }}" data-odds-template="Combined {odds}">Combined {{ "%.2f"|format(acca.combined_odds) }}</span>{% endif %}
-                {% if acca.combined_prob_pct is not none %}<span class="ir-pill ir-good">Model ~{{ acca.combined_prob_pct }}%</span>{% endif %}
-                {% if acca.joint_confidence_pct is not none %}<span class="ir-pill">Joint conf. {{ acca.joint_confidence_pct }}%</span>{% endif %}
-            </div>
-            <table class="acca-rec-table">
-                <thead>
-                    <tr>
-                        <th>Fixture</th>
-                        <th>Pick</th>
-                        <th>Result</th>
-                        <th>Model</th>
-                        <th>Odds</th>
-                        <th>Edge</th>
-                        <th>Reasoning</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for leg in acca.legs %}
-                    <tr class="{% if leg.result == 'W' %}monitor-win{% elif leg.result == 'L' %}monitor-loss{% endif %}">
-                        <td>
-                            <a href="/#fix-{{ leg.fixture_id }}">{{ leg.match }}</a>
-                            {% if leg.league %}<div class="ir-meta">{{ leg.league }}{% if leg.kickoff_time %} · {{ leg.kickoff_time }}{% endif %}</div>{% endif %}
-                        </td>
-                        <td>{{ leg.market_label }}</td>
-                        <td>{{ result_badge(leg.result) }}</td>
-                        <td>{% if leg.model_pct|default(none) is not none %}{{ leg.model_pct }}%{% else %}—{% endif %}</td>
-                        <td>{% if leg.odds|default(none) %}<span data-odds-dec="{{ leg.odds }}" data-odds-template="{odds}">{{ "%.2f"|format(leg.odds) }}</span>{% else %}—{% endif %}</td>
-                        <td>{% if leg.edge_pct|default(none) is not none %}<span class="ir-good">+{{ "%.1f"|format(leg.edge_pct) }}%</span>{% else %}—{% endif %}</td>
-                        <td class="acca-rec-reason">{{ leg.reasoning }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% if acca.independence_note %}<p class="ir-meta" style="margin:4px 0;">{{ acca.independence_note }}</p>{% endif %}
-            {% for w in acca.warnings or [] %}
-            <span class="ir-pill ir-warn">{{ w }}</span>
-            {% endfor %}
-            <div class="acca-rec-foot">
-                <button type="button" class="btn-acca-slip hibs-insights-acca-slip">Add to betslip</button>
-            </div>
-        </div>
-        {% endfor %}
-        {% if acca_others %}
-        <div class="acca-rec-others" aria-label="Other recommended accas">
-            <h3>Other accas</h3>
-            {% for acca in acca_others %}
-            <div class="acca-rec-brief" data-acca-legs="{{ acca.legs|tojson|e }}">
-                <span class="acca-rec-brief-title">{{ acca.name }}</span>
-                <span class="acca-rec-brief-meta">{{ acca.leg_count }} leg{% if acca.leg_count != 1 %}s{% endif %}{% if acca.combined_odds %} · <span data-odds-dec="{{ acca.combined_odds }}" data-odds-template="Combined {odds}">{{ "%.2f"|format(acca.combined_odds) }}</span>{% endif %}</span>
-                <span class="acca-rec-brief-reason">{{ acca.brief_summary or acca.name }}</span>
-                <button type="button" class="btn-acca-slip hibs-insights-acca-slip" style="margin-left:auto;flex-shrink:0;">Add</button>
-            </div>
-            {% endfor %}
-        </div>
-        {% endif %}
-        <p class="ir-meta">{{ acca_rec.disclaimer }}</p>
-        {% else %}
-        <div class="empty-mini">{{ acca_rec.message or "No acca legs cleared the model/value gates in this window." }}</div>
-        {% endif %}
-        {% set sfc = acca_rec.same_fixture_combos %}
-        {% if sfc and (sfc.builders or sfc.priced_combo_legs) %}
-        <div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(148,163,184,0.15);">
-            <h3 style="font-size:0.78em;color:var(--hibs-neon);text-transform:uppercase;letter-spacing:0.1em;margin:0 0 8px;">Same-game combo ideas</h3>
-            <p class="ir-meta" style="margin:0 0 10px;">Correlated markets on one fixture (e.g. BTTS + O2.5, win + O2.5). Each component needs a real book price — multiply for reference; use bet builder for the actual quote.</p>
-            {% for row in sfc.builders %}
-            <div class="insight-row">
-                <div class="ir-meta">{{ row.league }}{% if row.kickoff_time %} · {{ row.kickoff_time }}{% endif %}</div>
-                <div class="ir-main"><a href="/#fix-{{ row.fixture_id }}">{{ row.match }}</a> — {{ row.title }}</div>
-                {% for leg in row.legs %}
-                <span class="ir-pill"{% if leg.odds %} data-odds-dec="{{ leg.odds }}" data-odds-template="{{ leg.market_label|e }} {odds}"{% endif %}>{{ leg.market_label }}{% if leg.odds %} {{ "%.2f"|format(leg.odds) }}{% endif %}{% if leg.model_pct is not none %} · {{ leg.model_pct }}%{% endif %}</span>
-                {% endfor %}
-                {% if row.estimated_independent_odds %}<span class="ir-pill ir-gold" data-odds-dec="{{ row.estimated_independent_odds }}" data-odds-template="Ref. ~{odds}">Ref. ~{{ "%.2f"|format(row.estimated_independent_odds) }}</span>{% endif %}
-            </div>
-            {% endfor %}
-            {% for row in sfc.priced_combo_legs %}
-            <div class="insight-row">
-                <div class="ir-meta">{{ row.league }}{% if row.kickoff_time %} · {{ row.kickoff_time }}{% endif %}</div>
-                <div class="ir-main"><a href="/#fix-{{ row.fixture_id }}">{{ row.match }}</a> — {{ row.market_label }}</div>
-                {% if row.odds %}<span class="ir-pill ir-gold" data-odds-dec="{{ row.odds }}" data-odds-template="{odds}">{{ "%.2f"|format(row.odds) }}</span>{% endif %}
-                {% if row.model_pct is not none %}<span class="ir-pill ir-good">Model {{ row.model_pct }}%</span>{% endif %}
-            </div>
-            {% endfor %}
-            {% if sfc.note %}<p class="ir-meta" style="margin:8px 0 0;">{{ sfc.note }}</p>{% endif %}
-        </div>
-        {% endif %}
-    </section>
-    {% endif %}
-
-    <div class="insights-grid">
-        <section class="insight-card">
-            <h2>Top Model Probabilities</h2>
-            {% for row in insights.top_probabilities %}
-            <div class="insight-row">
-                <div class="ir-meta">{{ row.league }}{% if row.kickoff_time %} · {{ row.kickoff_time }}{% endif %}</div>
-                <div class="ir-main"><a href="/#fix-{{ row.fixture_id }}">{{ row.match }}</a> — {{ row.market_label }}</div>
-                <span class="ir-pill ir-good">Model {{ row.model_pct }}%</span>
-                {% if row.odds %}<span class="ir-pill" data-odds-dec="{{ row.odds }}" data-odds-template="Odds {odds}">Odds {{ "%.2f"|format(row.odds) }}</span>{% endif %}
-                {% if row.data_quality_pct is not none %}<span class="ir-pill">Data {{ row.data_quality_pct }}%</span>{% endif %}
-            </div>
-            {% else %}
-            <div class="empty-mini">No model probability rows with usable market data in this window.</div>
-            {% endfor %}
-        </section>
-
-        <section class="insight-card">
-            <h2>Value Opportunities</h2>
-            {% for row in insights.value_opportunities %}
-            <div class="insight-row">
-                <div class="ir-meta">{{ row.league }}{% if row.kickoff_time %} · {{ row.kickoff_time }}{% endif %}</div>
-                <div class="ir-main"><a href="/#fix-{{ row.fixture_id }}">{{ row.match }}</a> — {{ row.market_label }}</div>
-                {% if row.odds %}<span class="ir-pill" data-odds-dec="{{ row.odds }}" data-odds-template="Odds {odds}">Odds {{ "%.2f"|format(row.odds) }}</span>{% endif %}
-                {% if row.edge_pct is not none %}<span class="ir-pill ir-gold">+{{ "%.1f"|format(row.edge_pct) }}% edge</span>{% endif %}
-                {% if row.roi_percent is not none %}<span class="ir-pill">ROI {{ "%.1f"|format(row.roi_percent) }}%</span>{% endif %}
-            </div>
-            {% else %}
-            <div class="empty-mini">No value flags clear the current model/data bar.</div>
-            {% endfor %}
-        </section>
-
-        <section class="insight-card">
-            <h2>Form / xG / Table Angles</h2>
-            {% for row in insights.angles %}
-            <div class="insight-row">
-                <div class="ir-meta">{{ row.league }}{% if row.kickoff_time %} · {{ row.kickoff_time }}{% endif %}</div>
-                <div class="ir-main"><a href="/#fix-{{ row.fixture_id }}">{{ row.match }}</a></div>
-                <ul class="insight-list">
-                    {% for b in row.bullets %}<li>{{ b }}</li>{% endfor %}
-                </ul>
-            </div>
-            {% else %}
-            <div class="empty-mini">No form/xG/table angles loaded yet. Refresh data or check API status.</div>
-            {% endfor %}
-        </section>
-
-        <section class="insight-card">
-            <h2>Pro Bet Builders</h2>
-            {% for row in insights.bet_builders %}
-            <div class="insight-row">
-                <div class="ir-meta">{{ row.league_name or row.league }}{% if row.kickoff_time %} · {{ row.kickoff_time }}{% endif %}</div>
-                <div class="ir-main"><a href="/#fix-{{ row.fixture_id }}">{{ row.match }}</a> — {{ row.title }}</div>
-                {% for leg in row.legs %}
-                <span class="ir-pill"{% if leg.odds %} data-odds-dec="{{ leg.odds }}" data-odds-template="{{ leg.market_label|e }} {odds}"{% endif %}>{{ leg.market_label }}{% if leg.odds %} {{ "%.2f"|format(leg.odds) }}{% endif %}</span>
-                {% endfor %}
-                {% if row.joint_confidence_pct is not none %}<span class="ir-pill ir-good">Model {{ row.joint_confidence_pct }}%</span>{% endif %}
-            </div>
-            {% else %}
-            <div class="empty-mini">No same-game builder clears both model support and priced component markets. Player props are not suggested because no player-prop feed is wired.</div>
-            {% endfor %}
-        </section>
-
-        <section class="insight-card">
-            <h2>Data Quality Alerts</h2>
-            {% for row in insights.data_quality_alerts %}
-            <div class="insight-row">
-                <div class="ir-meta">{{ row.league }} · xG source {{ row.xg_source }}</div>
-                <div class="ir-main"><a href="/#fix-{{ row.fixture_id }}">{{ row.match }}</a></div>
-                <span class="ir-pill {% if row.analyzable %}ir-good{% else %}ir-warn{% endif %}">Data {{ row.data_quality_pct if row.data_quality_pct is not none else 'n/a' }}%</span>
-                {% if row.missing %}
-                <span class="ir-pill ir-warn">Missing: {{ row.missing|join(', ') }}</span>
-                {% endif %}
-            </div>
-            {% else %}
-            <div class="empty-mini">No material coverage alerts in the current packet set.</div>
-            {% endfor %}
-        </section>
-
-        <section class="insight-card">
-            <h2>Trust & Accuracy Controls</h2>
-            <div class="insight-row">
-                <div class="ir-main">Data trust split</div>
-                {% for label, count in insights.trust_digest.labels.items() %}
-                <span class="ir-pill {% if 'Strong' in label or 'Good' in label %}ir-good{% elif 'Thin' in label %}ir-warn{% endif %}">{{ label }}: {{ count }}</span>
-                {% endfor %}
-            </div>
-            <div class="insight-row">
-                <div class="ir-main">Most common weak fields</div>
-                {% for row in insights.trust_digest.weak_fields %}
-                <span class="ir-pill ir-warn">{{ row.label }} × {{ row.count }}</span>
-                {% else %}
-                <span class="ir-pill ir-good">No recurring weak field</span>
-                {% endfor %}
-            </div>
-            <p class="ir-meta">The engine now reads these field-level scores before promoting picks, so thin xG/table/team-news data reduces trust without hiding the fixture.</p>
-        </section>
-
-        <section class="insight-card">
-            <h2>Avoid / Caution Watchlist</h2>
-            {% for row in insights.avoid_watchlist %}
-            <div class="insight-row">
-                <div class="ir-meta">{{ row.league }}{% if row.kickoff_time %} · {{ row.kickoff_time }}{% endif %}</div>
-                <div class="ir-main"><a href="/#fix-{{ row.fixture_id }}">{{ row.match }}</a></div>
-                {% if row.data_quality_pct is not none %}<span class="ir-pill ir-warn">Data {{ row.data_quality_pct }}%</span>{% endif %}
-                {% for reason in row.reasons %}
-                <span class="ir-pill">{{ reason }}</span>
-                {% endfor %}
-            </div>
-            {% else %}
-            <div class="empty-mini">No obvious avoid/caution flags in the current fixture set.</div>
-            {% endfor %}
-        </section>
-
-        <section class="insight-card">
-            <h2>2025/26 and 2026/27 Coverage</h2>
-            <div class="coverage-grid">
-                {% for season in insights.coverage.seasons %}
-                <div class="coverage-season">
-                    <h3>{{ season.season }} · {{ season.status }}</h3>
-                    <p class="ir-meta">{{ season.summary }}</p>
-                    <ul class="insight-list">
-                        {% for b in season.strengths[:2] %}<li>{{ b }}</li>{% endfor %}
-                        {% for b in season.shortcomings[:2] %}<li>{{ b }}</li>{% endfor %}
-                    </ul>
-                </div>
-                {% endfor %}
-            </div>
-            <div class="source-counts">
-                <span class="ir-pill ir-good">{{ insights.coverage.counts.wired }} wired sources</span>
-                <span class="ir-pill ir-warn">{{ insights.coverage.counts.experimental }} experimental</span>
-                <span class="ir-pill">{{ insights.coverage.counts.planned }} planned</span>
-            </div>
-            <p class="ir-meta" style="margin-top:10px;">{{ insights.coverage.player_prop_note }}</p>
-        </section>
-
-        <section class="insight-card" id="model-monitor">
-            <h2>Model monitor</h2>
-            <p class="monitor-glossary"><strong>Value bet</strong> — the highest-edge market we logged before kick-off (1X2, BTTS, goals, etc.), settled on the real score. <strong>Model 1X2 pick</strong> — our home/draw/away lean (may differ from the value row). <strong>Brier</strong> — lower is better; probability accuracy. <strong>CLV</strong> — positive means you beat the closing price (percentage points).</p>
-            {% set m = insights.monitor %}
-            {% set y = m.yesterday or {} %}
-            {% set t = m.today or {} %}
-            {% set yk = y.kickoff or y %}
-            {% set ys = y.scored or {} %}
-            {% set tk = t.kickoff or t %}
-            {% set ts = t.scored or {} %}
-            <h3 style="font-size:0.95em;margin:12px 0 6px;">Yesterday ({{ y.display_tz_label or display_tz_label }})</h3>
-            {% if m.get('enabled') is sameas false or y.get('enabled') is sameas false %}
-            <div class="empty-mini">Model monitor off — set HIBS_PREDICTION_LOG_ENABLED=1.</div>
-            {% else %}
-            <h4 style="font-size:0.88em;margin:8px 0 4px;font-weight:600;">Kickoff yesterday</h4>
-            {% if yk.n_logged %}
-            <div class="insight-row">
-                <div class="ir-main">{{ yk.n_logged }} fixtures · {{ yk.n_scored_ft }} FT synced</div>
-            </div>
-            {% set ybp = yk.best_pick or {} %}
-            {% set yvp = yk.value_pick or {} %}
-            {{ monitor_tally(ybp) }}
-            {{ value_tally(yvp) }}
-            {% if yk.rows %}
-            <p class="monitor-table-hint">Rows sorted with wins first. Highlight follows the <strong>value bet</strong> result when one was logged.</p>
-            <table class="data-table monitor-detail-table" style="margin-top:10px;font-size:0.78em;width:100%;">
-                <thead><tr><th>Match</th><th>Value market</th><th>Model %</th><th>Odds</th><th>Edge</th><th>Value W/L</th><th>Score</th><th>1X2 lean</th><th>CLV</th></tr></thead>
-                <tbody>
-                {% for row in yk.rows %}
-                {{ monitor_row(row) }}
-                {% endfor %}
-                </tbody>
-            </table>
-            {% endif %}
-            {% else %}
-            <div class="empty-mini">{{ yk.message or 'No fixtures kicking off yesterday.' }}</div>
-            {% endif %}
-            <h4 style="font-size:0.88em;margin:14px 0 4px;font-weight:600;">Results recorded yesterday</h4>
-            {% if ys.n_logged %}
-            <div class="insight-row">
-                <div class="ir-main">{{ ys.n_logged }} fixtures scored</div>
-            </div>
-            {% set ysb = ys.best_pick or {} %}
-            {% set ysvp = ys.value_pick or {} %}
-            {{ monitor_tally(ysb) }}
-            {{ value_tally(ysvp) }}
-            {% if ys.rows %}
-            <p class="monitor-table-hint">Fixtures whose full-time result was synced yesterday (kickoff may be earlier).</p>
-            <table class="data-table monitor-detail-table" style="margin-top:10px;font-size:0.78em;width:100%;">
-                <thead><tr><th>Match</th><th>Value market</th><th>Model %</th><th>Odds</th><th>Edge</th><th>Value W/L</th><th>Score</th><th>1X2 lean</th><th>CLV</th></tr></thead>
-                <tbody>
-                {% for row in ys.rows %}
-                {{ monitor_row(row) }}
-                {% endfor %}
-                </tbody>
-            </table>
-            {% endif %}
-            {% else %}
-            <div class="empty-mini">{{ ys.message or 'No FT results recorded yesterday — run pred-log-sync after matches finish.' }}</div>
-            {% endif %}
-            {% endif %}
-            <h3 style="font-size:0.95em;margin:16px 0 6px;">Today ({{ t.display_tz_label or display_tz_label }})</h3>
-            {% if m.get('enabled') is sameas false or t.get('enabled') is sameas false %}
-            <div class="empty-mini">Model monitor off — set HIBS_PREDICTION_LOG_ENABLED=1.</div>
-            {% else %}
-            <h4 style="font-size:0.88em;margin:8px 0 4px;font-weight:600;">Kickoff today</h4>
-            {% if tk.n_logged %}
-            <div class="insight-row">
-                <div class="ir-main">{{ tk.n_logged }} fixtures · {{ tk.n_scored_ft }} FT synced today</div>
-            </div>
-            {% set bp = tk.best_pick or {} %}
-            {% set tvp = tk.value_pick or {} %}
-            {{ monitor_tally(bp) }}
-            {{ value_tally(tvp) }}
-            {% if tk.rows %}
-            <p class="monitor-table-hint">Snapshots taken before kick-off today. Pending until pred-log-sync records FT.</p>
-            <table class="data-table monitor-detail-table" style="margin-top:10px;font-size:0.78em;width:100%;">
-                <thead><tr><th>Match</th><th>Value market</th><th>Model %</th><th>Odds</th><th>Edge</th><th>Value W/L</th><th>Score</th><th>1X2 lean</th><th>CLV</th></tr></thead>
-                <tbody>
-                {% for row in tk.rows %}
-                {{ monitor_row(row) }}
-                {% endfor %}
-                </tbody>
-            </table>
-            {% endif %}
-            {% else %}
-            <div class="empty-mini">{{ tk.message or 'No fixtures kicking off today.' }}</div>
-            {% endif %}
-            <h4 style="font-size:0.88em;margin:14px 0 4px;font-weight:600;">Results recorded today</h4>
-            {% if ts.n_logged %}
-            <div class="insight-row">
-                <div class="ir-main">{{ ts.n_logged }} fixtures scored</div>
-            </div>
-            {% set tsb = ts.best_pick or {} %}
-            {% set tsvp = ts.value_pick or {} %}
-            {{ monitor_tally(tsb) }}
-            {{ value_tally(tsvp) }}
-            {% if ts.rows %}
-            <table class="data-table monitor-detail-table" style="margin-top:10px;font-size:0.78em;width:100%;">
-                <thead><tr><th>Match</th><th>Value market</th><th>Model %</th><th>Odds</th><th>Edge</th><th>Value W/L</th><th>Score</th><th>1X2 lean</th><th>CLV</th></tr></thead>
-                <tbody>
-                {% for row in ts.rows %}
-                {{ monitor_row(row) }}
-                {% endfor %}
-                </tbody>
-            </table>
-            {% endif %}
-            {% else %}
-            <div class="empty-mini">{{ ts.message or 'No FT results recorded today yet.' }}</div>
-            {% endif %}
-            {% endif %}
-            <h3 style="font-size:0.95em;margin:16px 0 6px;">Last {{ m.window_days or 28 }} days</h3>
-            {% if m.ok and m.n_logged %}
-            <div class="insight-row">
-                <div class="ir-main">{{ m.n_logged }} logged · {{ m.n_scored }} scored (FT)</div>
-                {% if m.n_used_metrics %}
-                <span class="ir-pill">Brier {{ m.brier_score_1x2 }}</span>
-                <span class="ir-pill">Best pick {{ m.best_pick_accuracy_pct }}%</span>
-                {% if m.beat_close_pct is not none %}<span class="ir-pill ir-gold">Beat close {{ m.beat_close_pct }}%</span>{% endif %}
-                {% else %}
-                <span class="ir-pill ir-warn">Awaiting FT sync</span>
-                {% endif %}
-            </div>
-            {% if m.pred_log_sync_cron and m.pred_log_sync_cron.needs_reminder %}
-            <p class="ir-meta" style="color:var(--warn);">{{ m.pred_log_sync_cron.message }}</p>
-            {% endif %}
-            {% if m.by_league %}
-            <table class="data-table" style="margin-top:10px;font-size:0.78em;width:100%;">
-                <thead><tr><th>League</th><th>Scored</th><th>Brier</th><th>Pick %</th><th>CLV beat</th></tr></thead>
-                <tbody>
-                {% for row in m.by_league %}
-                <tr>
-                    <td>{{ row.league }}</td>
-                    <td>{{ row.n_scored }}</td>
-                    <td>{{ row.brier if row.brier is not none else '—' }}</td>
-                    <td>{{ row.best_pick_accuracy_pct if row.best_pick_accuracy_pct is not none else '—' }}</td>
-                    <td>{% if row.beat_close_pct is not none %}{{ row.beat_close_pct }}%{% else %}—{% endif %}</td>
-                </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-            {% endif %}
-            {% else %}
-            <div class="empty-mini">{{ m.message or 'Enable HIBS_PREDICTION_LOG_ENABLED=1 and use the dashboard; run pred-log-sync after matches.' }}</div>
-            {% endif %}
-            <p class="ir-meta">Window: last {{ m.window_days or 28 }} days · <a href="/status#model-monitor">API status</a> · JSON <code>/api/monitor/summary</code></p>
-        </section>
-
-        <section class="insight-card">
-            <h2>Calibration Snapshot</h2>
-            {% if insights.audit.n_used_metrics %}
-            <div class="insight-row">
-                <div class="ir-main">{{ insights.audit.n_used_metrics }} scored prediction rows</div>
-                <span class="ir-pill">Brier {{ insights.audit.brier_score_1x2 }}</span>
-                <span class="ir-pill">Log loss {{ insights.audit.log_loss_1x2 }}</span>
-                {% if insights.audit.value_hit_rate is not none %}<span class="ir-pill ir-gold" title="Settled value legs only (BTTS, goals, 1X2, etc.)">Value hit {{ insights.audit.value_hit_rate }}% ({{ insights.audit.value_best_outcome_hits or 0 }}/{{ insights.audit.value_settled or 0 }} settled)</span>{% elif insights.audit.value_flags_count %}<span class="ir-pill ir-warn">{{ insights.audit.value_flags_count }} value legs · awaiting FT</span>{% endif %}
-            </div>
-            {% else %}
-            <div class="empty-mini">{{ insights.audit.message }}</div>
-            {% endif %}
-            {% for row in insights.audit.brier_by_data_quality_bucket or [] %}
-            <span class="ir-pill">DQ {{ row.bucket }}: {% if row.brier is not none %}Brier {{ row.brier }}{% else %}not scored{% endif %}</span>
-            {% endfor %}
-        </section>
+    {% if progressive_load %}
+    <div id="insights-deferred-mount" class="hibs-deferred" aria-busy="true" data-fetch-url="/api/insights/content">
+        <p class="hibs-deferred-loading">Loading probability list, accas, and coverage…</p>
     </div>
+    {% else %}
+    {% include '_insights_deferred.html' %}
+    {% endif %}
 </div>
 {% include '_assistant_widget.html' %}
 {% endblock %}
 {% block extra_js %}
+<script>window.HIBS_DEFER_ASSISTANT = {% if progressive_load or not assistant_packets %}true{% else %}false{% endif %};</script>
 <script type="application/json" id="hibs-assistant-data">{{ {"packets": assistant_packets, "recommendations": assistant_recommendations or none}|tojson }}</script>
 <script>window.HIBS_ASSISTANT = JSON.parse(document.getElementById('hibs-assistant-data').textContent);</script>
 <script src="{{ url_for('static', filename='hibs_assistant.js') }}"></script>
+{% if progressive_load %}<script src="{{ url_for('static', filename='hibs_deferred.js') }}"></script>{% else %}
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    document.querySelectorAll('.hibs-insights-acca-slip').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-            var card = btn.closest('.acca-rec-card') || btn.closest('.acca-rec-brief');
-            if (!card) return;
-            var raw = card.getAttribute('data-acca-legs');
-            if (!raw) return;
-            var legs;
-            try { legs = JSON.parse(raw); } catch (e) { return; }
-            if (window.HibsAssistant && typeof HibsAssistant.addAccaLegsToSlip === 'function') {
-                HibsAssistant.addAccaLegsToSlip(legs);
-            } else if (window.HibsBetslip && typeof HibsBetslip.addMultipleSelections === 'function') {
-                HibsBetslip.addMultipleSelections(legs);
-            }
-        });
-    });
+    if (window.HibsDeferred && HibsDeferred.bindInsightsAccaSlips) HibsDeferred.bindInsightsAccaSlips(document);
 });
 </script>
+{% endif %}
 {% endblock %}

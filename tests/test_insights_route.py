@@ -33,12 +33,43 @@ def insights_client():
         yield app.test_client()
 
 
-def test_insights_route_returns_200(insights_client):
+def test_insights_route_returns_200(insights_client, monkeypatch):
+    monkeypatch.setenv("HIBS_PROGRESSIVE_LOAD", "0")
     response = insights_client.get("/insights")
     assert response.status_code == 200, response.get_data(as_text=True)[:400]
+    html = response.get_data(as_text=True)
+    assert "Probability-led list" in html
+    assert "Recommended accas" in html
 
 
-def test_insights_route_renders_acca_result_badges(insights_client):
+def test_api_insights_content_returns_html(insights_client, monkeypatch):
+    monkeypatch.setenv("HIBS_PROGRESSIVE_LOAD", "1")
+    with patch(
+        "hibs_predictor.insights.build_insights",
+        return_value={
+            "summary": {"fixtures_eligible": 2, "fixtures_excluded": 1},
+            "probability_led_list": [{"rank": 1, "match": "A v B", "fixture_id": 1}],
+            "acca_recommendations": {"enabled": False},
+            "value_opportunities": [],
+            "angles": [],
+            "bet_builders": [],
+            "data_quality_alerts": [],
+            "trust_digest": {"labels": {}, "weak_fields": []},
+            "avoid_watchlist": [],
+            "coverage": {"seasons": [], "counts": {"wired": 0, "experimental": 0, "planned": 0}, "player_prop_note": ""},
+            "audit": {"message": "n/a", "n_used_metrics": 0},
+            "performance_url": "/performance",
+        },
+    ):
+        response = insights_client.get("/api/insights/content")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload.get("html")
+    assert "Probability-led" in payload["html"] or "insights-primary" in payload["html"]
+
+
+def test_insights_route_renders_acca_result_badges(insights_client, monkeypatch):
+    monkeypatch.setenv("HIBS_PROGRESSIVE_LOAD", "0")
     """Macros must be module-scoped, not inside extra_css block."""
     acca_rec = {
         "enabled": True,

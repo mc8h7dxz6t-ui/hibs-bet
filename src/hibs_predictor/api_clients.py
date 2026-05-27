@@ -472,6 +472,54 @@ class ApiSportsFootballClient(BaseApiClient):
         resp = data.get("response", [])
         return resp if isinstance(resp, list) else []
 
+    def resolve_team_id_by_name(self, team_name: str) -> Optional[int]:
+        """Map display name → API-Football team id (cached). Used when fixtures carry FotMob/FDO ids."""
+        from hibs_predictor.team_aliases import canonical_team_key, team_names_match
+
+        name = (team_name or "").strip()
+        if len(name) < 3:
+            return None
+        nk = canonical_team_key(name)
+        if not nk or len(nk) < 3:
+            return None
+        cache_key = f"api_team_resolve_{nk}"
+        cached = self.cache.get(cache_key, ttl_hours=168.0)
+        if cached is not None:
+            try:
+                tid = int(cached)
+                return tid if tid > 0 else None
+            except (TypeError, ValueError):
+                return None
+
+        queries: List[str] = []
+        for candidate in (name, name.split()[-1] if " " in name else ""):
+            q = (candidate or "").strip()
+            if len(q) >= 3 and q not in queries:
+                queries.append(q)
+
+        resolved: Optional[int] = None
+        for query in queries:
+            data = self._get_json("teams", params={"search": query})
+            for block in data.get("response") or []:
+                if not isinstance(block, dict):
+                    continue
+                team = block.get("team") or {}
+                if not isinstance(team, dict):
+                    continue
+                nm = str(team.get("name") or "")
+                if team_names_match(nm, name):
+                    try:
+                        resolved = int(team.get("id"))
+                    except (TypeError, ValueError):
+                        resolved = None
+                    if resolved and resolved > 0:
+                        break
+            if resolved:
+                break
+
+        self.cache.set(cache_key, resolved or 0, ttl_hours=168.0)
+        return resolved
+
     def fetch_team_last_matches(self, team_id: int, limit: int = 10) -> List[Dict[str, Any]]:
         """Last *finished* league/cup matches for this team (scores present)."""
         endpoint = "fixtures"
@@ -533,6 +581,11 @@ class OddsApiClient(BaseApiClient):
         "LEAGUE_ONE": "soccer_england_league1",
         "LEAGUE_TWO": "soccer_england_league2",
         "FA_CUP": "soccer_fa_cup",
+        "LEAGUE_CUP": "soccer_england_efl_cup",
+        "IRELAND_PREMIER": "soccer_league_of_ireland",
+        "SCOTTISH_CUP": "soccer_scotland_cup",
+        "COPA_DEL_REY": "soccer_spain_copa_del_rey",
+        "COPPA_ITALIA": "soccer_italy_coppa_italia",
         "COUPE_DE_FRANCE": "soccer_france_coupe_de_france",
         "DFB_POKAL": "soccer_germany_dfb_pokal",
         "SCOTLAND": "soccer_spl",
@@ -562,6 +615,10 @@ class OddsApiClient(BaseApiClient):
         "CHAMPIONSHIP": ["soccer_england_efl_championship"],
         "SCOTLAND": ["soccer_scotland_premiership"],
         "INTL_FRIENDLIES": ["soccer_fifa_world_cup"],
+        "LEAGUE_CUP": ["soccer_efl_league_cup"],
+        "SCOTTISH_CUP": ["soccer_scotland_league_cup"],
+        "COPA_DEL_REY": ["soccer_spain_copa_del_rey"],
+        "COPPA_ITALIA": ["soccer_italy_copa_italia"],
     }
 
     def __init__(self, api_key: str) -> None:

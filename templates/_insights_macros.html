@@ -1,0 +1,24 @@
+{% macro monitor_tally(bp, label='Model 1X2 pick') %}
+<p class="monitor-tally"><span class="tally-label">{{ label }}:</span> Wins <strong class="tally-w">{{ bp.wins or 0 }}</strong> · Losses <strong class="tally-l">{{ bp.losses or 0 }}</strong> · Pending <strong class="tally-p">{{ bp.pending or 0 }}</strong></p>
+{% endmacro %}
+{% macro value_tally(vp) %}
+{% if vp.attempts %}
+<p class="monitor-tally monitor-tally-value"><span class="tally-label">Value bet (top edge at log):</span> Wins <strong class="tally-w">{{ vp.wins or 0 }}</strong> · Losses <strong class="tally-l">{{ vp.losses or 0 }}</strong> · Pending <strong class="tally-p">{{ vp.pending or 0 }}</strong>{% if vp.hit_rate_pct is not none %} · Hit <strong class="tally-w">{{ vp.hit_rate_pct }}%</strong> <span class="tally-hint">(settled only)</span>{% elif vp.attempts and not vp.settled %} · <span class="tally-hint">awaiting FT</span>{% endif %}</p>
+{% endif %}
+{% endmacro %}
+{% macro result_badge(res) %}
+{% if res == 'W' %}<span class="result-badge result-badge-w" title="Won">W</span>{% elif res == 'L' %}<span class="result-badge result-badge-l" title="Lost">L</span>{% else %}<span class="result-badge result-badge-pending" title="Awaiting full-time result">pending</span>{% endif %}
+{% endmacro %}
+{% macro monitor_row(row) %}
+<tr class="{% if row.value_result == 'W' %}monitor-win{% elif row.value_result == 'L' %}monitor-loss{% elif row.result == 'W' %}monitor-win{% elif row.result == 'L' %}monitor-loss{% endif %}">
+    <td>{{ row.match }}{% if row.league %}<span class="ir-meta" style="display:block;font-weight:400;">{{ row.league }}</span>{% endif %}</td>
+    <td>{% if row.has_value %}{{ row.value_market or '—' }}{% else %}<span class="tally-hint">no value</span>{% endif %}</td>
+    <td>{% if row.has_value and row.value_model_pct is not none %}{{ row.value_model_pct }}%{% else %}—{% endif %}</td>
+    <td>{% if row.has_value and row.value_odds %}{{ "%.2f"|format(row.value_odds) }}{% else %}—{% endif %}</td>
+    <td>{% if row.has_value and row.value_edge_pct is not none %}+{{ row.value_edge_pct }}%{% else %}—{% endif %}</td>
+    <td>{% if row.has_value %}{{ result_badge(row.value_result) }}{% else %}—{% endif %}</td>
+    <td>{{ row.score or '—' }}</td>
+    <td title="Model 1X2 lean: {{ row.pick or '—' }}">{{ row.pick or '—' }} {{ result_badge(row.result) }}</td>
+    <td>{% if row.clv_pp is not none %}{{ row.clv_pp }} pp{% else %}—{% endif %}</td>
+</tr>
+{% endmacro %}

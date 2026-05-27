@@ -9,11 +9,16 @@ import pytest
 from hibs_predictor.data_quality import compute_fixture_data_quality
 from hibs_predictor.deep_enrich import (
     DEEP_BAND_MIN,
+    SHOWPIECE_DEEP_TARGET,
     analyze_dq_gaps,
     apply_xg_ladder,
+    deep_band_min,
     deep_enrich_pass,
+    deep_enrich_plan,
     deep_enrich_target_pct,
+    deep_enrich_today_only,
     fixture_is_today,
+    is_showpiece_league,
     maybe_deep_enrich,
 )
 
@@ -49,6 +54,86 @@ def test_deep_enrich_target_pct_from_env(monkeypatch):
     assert deep_enrich_target_pct() == 0.0
     monkeypatch.setenv("HIBS_TARGET_DQ_PCT", "90")
     assert deep_enrich_target_pct() == 90.0
+    monkeypatch.delenv("HIBS_TARGET_DQ_PCT", raising=False)
+    monkeypatch.setenv("HIBS_DEEP_ENRICH", "1")
+    assert deep_enrich_target_pct("UECL") == SHOWPIECE_DEEP_TARGET
+
+
+def test_showpiece_deep_band_allows_rescue_from_thin_scores():
+    assert is_showpiece_league("UECL")
+    assert deep_band_min("UECL") == 0.0
+    assert deep_band_min("EPL") == DEEP_BAND_MIN
+
+
+def test_deep_enrich_today_only_skips_future_kickoff(monkeypatch):
+    monkeypatch.setenv("HIBS_TARGET_DQ_PCT", "90")
+    monkeypatch.setenv("HIBS_DEEP_ENRICH_TODAY_ONLY", "1")
+    assert deep_enrich_today_only() is True
+    fixture = {"fixture": {"id": 1, "date": "2099-06-01T20:00:00+00:00"}, "date": "2099-06-01T20:00:00+00:00"}
+    enriched = {
+        "teams": {"home": {"id": 1}, "away": {"id": 2}},
+        "home_recent_n": 8,
+        "away_recent_n": 8,
+        "home_stats": {"played": 10, "goals_for": 10, "goals_against": 8},
+        "away_stats": {"played": 10, "goals_for": 9, "goals_against": 9},
+        "odds_available": True,
+        "odds_home": 2.0,
+        "odds_draw": 3.2,
+        "odds_away": 3.5,
+        "data_quality": {"score_pct": 82.0},
+    }
+    assert deep_enrich_plan(fixture, "EPL", enriched) is None
+    aggregator = MagicMock()
+    with patch("hibs_predictor.deep_enrich.deep_enrich_pass") as mock_pass:
+        maybe_deep_enrich(aggregator, fixture, "EPL", enriched)
+        mock_pass.assert_not_called()
+
+
+def test_deep_enrich_plan_none_when_already_at_target(monkeypatch):
+    monkeypatch.setenv("HIBS_TARGET_DQ_PCT", "90")
+    from datetime import datetime, timezone
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    fixture = {"date": f"{today}T18:00:00+00:00"}
+    enriched = _rich_enriched()
+    assert deep_enrich_plan(fixture, "EPL", enriched) is None
+
+
+def test_maybe_deep_enrich_rescues_thin_uecl(monkeypatch):
+    monkeypatch.delenv("HIBS_DEEP_ENRICH", raising=False)
+    monkeypatch.delenv("HIBS_TARGET_DQ_PCT", raising=False)
+    from datetime import datetime, timezone
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    fixture = {
+        "fixture": {"id": 848001, "date": f"{today}T20:00:00+00:00"},
+        "date": f"{today}T20:00:00+00:00",
+        "teams": {"home": {"id": 10, "name": "Home"}, "away": {"id": 20, "name": "Away"}},
+    }
+    enriched = {
+        "fixture": {"id": 848001},
+        "teams": {"home": {"id": 10}, "away": {"id": 20}},
+        "league": "UECL",
+        "home_recent_n": 0,
+        "away_recent_n": 0,
+        "home_stats": {},
+        "away_stats": {},
+        "odds_available": False,
+        "market_odds": {},
+    }
+    before = compute_fixture_data_quality(enriched)["score_pct"]
+    assert before < DEEP_BAND_MIN
+
+    aggregator = MagicMock()
+    aggregator.cache = MagicMock()
+    aggregator.cache._get_cache_path = lambda k: MagicMock(exists=lambda: False)
+    aggregator.clients = {"api_sports": MagicMock()}
+
+    with patch("hibs_predictor.deep_enrich._fill_recent_if_needed") as mock_recent:
+        with patch("hibs_predictor.deep_enrich._fill_odds_if_needed") as mock_odds:
+            maybe_deep_enrich(aggregator, fixture, "UECL", enriched)
+    assert mock_recent.call_count >= 1
+    assert mock_odds.call_count >= 1
 
 
 def test_analyze_dq_gaps_lists_weak_xg():

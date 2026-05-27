@@ -23,13 +23,34 @@ SEASON_XG_SOURCES = frozenset(
     }
 )
 
+# Reserved calls per refresh for active / thin-xG leagues (summer LOI, cups, friendlies).
+_PRIORITY_XG_LEAGUE_CODES = frozenset(
+    {
+        "IRELAND_PREMIER",
+        "NORWAY_ELITESERIEN",
+        "FINLAND_VEIKKAUSLIIGA",
+        "DENMARK_SL",
+        "WORLD_CUP",
+        "INTL_FRIENDLIES",
+        "UCL",
+        "EUROPA_LEAGUE",
+        "UECL",
+    }
+)
+
 _statistics_budget_remaining: Optional[int] = None
+_priority_xg_budget_remaining: Optional[int] = None
 
 
 def reset_statistics_xg_budget() -> None:
     """Call at the start of each dashboard fixture refresh cycle."""
-    global _statistics_budget_remaining
-    _statistics_budget_remaining = None
+    global _statistics_budget_remaining, _priority_xg_budget_remaining
+    total = max_statistics_fetches_per_refresh()
+    reserve = min(16, max(4, total // 3))
+    if total <= reserve + 2:
+        reserve = max(0, total // 2)
+    _priority_xg_budget_remaining = reserve
+    _statistics_budget_remaining = max(0, total - reserve)
 
 
 def fixture_statistics_xg_enabled() -> bool:
@@ -56,13 +77,21 @@ def needs_statistics_xg_fetch(xg_source: Any) -> bool:
     return True
 
 
-def _take_budget() -> bool:
-    global _statistics_budget_remaining
+def _is_priority_league(league_code: Optional[str]) -> bool:
+    return str(league_code or "").strip().upper() in _PRIORITY_XG_LEAGUE_CODES
+
+
+def _take_budget(*, league_code: Optional[str] = None) -> bool:
+    global _statistics_budget_remaining, _priority_xg_budget_remaining
     if _statistics_budget_remaining is None:
-        _statistics_budget_remaining = max_statistics_fetches_per_refresh()
-    if _statistics_budget_remaining <= 0:
+        reset_statistics_xg_budget()
+    code = str(league_code or "").strip().upper()
+    if _is_priority_league(code) and (_priority_xg_budget_remaining or 0) > 0:
+        _priority_xg_budget_remaining = int(_priority_xg_budget_remaining or 0) - 1
+        return True
+    if (_statistics_budget_remaining or 0) <= 0:
         return False
-    _statistics_budget_remaining -= 1
+    _statistics_budget_remaining = int(_statistics_budget_remaining or 0) - 1
     return True
 
 
@@ -76,6 +105,7 @@ def fetch_fixture_statistics_xg(
     home_name: Optional[str] = None,
     away_name: Optional[str] = None,
     current_source: str = "",
+    league_code: Optional[str] = None,
 ) -> Optional[Tuple[float, float, str]]:
     """
     One API ``fixtures/statistics`` call when the fixture still lacks measured xG.
@@ -87,7 +117,7 @@ def fetch_fixture_statistics_xg(
         return None
     if not api_client or not fixture_id:
         return None
-    if not _take_budget():
+    if not _take_budget(league_code=league_code):
         return None
 
     cache_key = f"api_fixture_statistics_xg_{int(fixture_id)}"
@@ -118,6 +148,6 @@ def fetch_fixture_statistics_xg(
     if xh is None or xa is None or xh <= 0.04 or xa <= 0.04:
         return None
 
-    out: Tuple[float, float, str] = (float(xh), float(xa), "api_statistics_xg")
-    cache.set(cache_key, out, ttl_hours=12.0)
+    out = (float(xh), float(xa), "api_statistics_xg")
+    cache.set(cache_key, list(out), ttl_hours=12.0)
     return out

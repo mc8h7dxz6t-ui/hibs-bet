@@ -56,6 +56,31 @@ def _top_probability_rows(packets: List[Dict[str, Any]], limit: int = 10) -> Lis
     return rows[:limit]
 
 
+def _probability_led_list(packets: List[Dict[str, Any]], limit: int = 20) -> List[Dict[str, Any]]:
+    """Probability-first ranked list for Insights (model % then data %)."""
+    pkt_by_id = {p.get("id"): p for p in packets if p.get("id") is not None}
+    rows = _top_probability_rows(packets, limit=limit * 3)
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        pkt = pkt_by_id.get(row.get("fixture_id")) or {}
+        if pkt and not is_analyzable(pkt):
+            continue
+        out.append(row)
+        if len(out) >= limit:
+            break
+    if len(out) < min(limit, 6):
+        for row in _top_probability_rows(packets, limit=limit):
+            key = (row.get("fixture_id"), row.get("market_key"))
+            if any((r.get("fixture_id"), r.get("market_key")) == key for r in out):
+                continue
+            out.append(row)
+            if len(out) >= limit:
+                break
+    for idx, row in enumerate(out, start=1):
+        row["rank"] = idx
+    return out
+
+
 def _value_opportunities(packets: List[Dict[str, Any]], limit: int = 8) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for pkt in packets:
@@ -187,20 +212,6 @@ def _avoid_watchlist(packets: List[Dict[str, Any]], limit: int = 8) -> List[Dict
     return rows[:limit]
 
 
-def _monitor_snapshot(fixtures: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
-    try:
-        from hibs_predictor.prediction_log import (
-            backfill_snapshots_from_fixtures,
-            monitor_summary_dict,
-        )
-
-        if fixtures:
-            backfill_snapshots_from_fixtures(fixtures)
-        return monitor_summary_dict()
-    except Exception as exc:
-        return {"ok": False, "message": f"monitor unavailable: {exc!r}"}
-
-
 def _audit_snapshot() -> Dict[str, Any]:
     try:
         report = report_summary_dict()
@@ -232,6 +243,27 @@ def _audit_snapshot() -> Dict[str, Any]:
     return out_audit
 
 
+def insights_empty_shell() -> Dict[str, Any]:
+    """Placeholder for progressive /insights first paint (same keys as build_insights)."""
+    return {
+        "packets": [],
+        "recommendations": {},
+        "acca_recommendations": {"enabled": False, "accas": [], "message": "Loading…"},
+        "summary": {"fixtures_eligible": 0, "fixtures_excluded": 0},
+        "top_probabilities": [],
+        "probability_led_list": [],
+        "value_opportunities": [],
+        "data_quality_alerts": [],
+        "angles": [],
+        "bet_builders": [],
+        "coverage": data_coverage_status(),
+        "trust_digest": {"labels": {}, "weak_fields": []},
+        "avoid_watchlist": [],
+        "audit": {"message": "Loading calibration snapshot…", "n_used_metrics": 0},
+        "performance_url": "/performance",
+    }
+
+
 def build_insights(
     fixtures: List[Dict[str, Any]],
     *,
@@ -246,13 +278,14 @@ def build_insights(
         "acca_recommendations": build_acca_recommendations(packets),
         "summary": recommendations.get("deep_dive_summary") or {},
         "top_probabilities": _top_probability_rows(packets),
+        "probability_led_list": _probability_led_list(packets, limit=20),
         "value_opportunities": _value_opportunities(packets),
         "data_quality_alerts": _data_quality_alerts(packets),
         "angles": _form_xg_table_angles(packets),
-        "bet_builders": build_bet_builder_suggestions(packets, limit=8),
+        "bet_builders": build_bet_builder_suggestions(packets, limit=36, max_per_fixture=3),
         "coverage": data_coverage_status(),
         "trust_digest": _trust_digest(packets),
         "avoid_watchlist": _avoid_watchlist(packets),
         "audit": _audit_snapshot(),
-        "monitor": _monitor_snapshot(list(fixtures) + list(backfill_fixtures or [])),
+        "performance_url": "/performance",
     }

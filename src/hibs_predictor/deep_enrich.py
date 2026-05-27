@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from hibs_predictor.data_quality import (
+    _SHOWPIECE_LEAGUES,
     _effective_xg_source,
     _has_stats,
     _position_ok,
@@ -20,13 +21,39 @@ if TYPE_CHECKING:
 
 XG_TARGET_EARNED = 16.0
 DEEP_BAND_MIN = 75.0
+SHOWPIECE_DEEP_TARGET = 85.0
+SHOWPIECE_DEEP_BAND_MIN = 0.0
+
+
+def is_showpiece_league(league_code: Optional[str]) -> bool:
+    """UEFA cups / internationals where thin first-pass rows must be rescued (not skipped)."""
+    return str(league_code or "").strip().upper() in _SHOWPIECE_LEAGUES
+
+
+def deep_band_min(league_code: Optional[str]) -> float:
+    """Minimum raw DQ before deep pass runs; showpieces allow rescue from any score."""
+    return SHOWPIECE_DEEP_BAND_MIN if is_showpiece_league(league_code) else DEEP_BAND_MIN
 
 
 def _env_truthy(name: str) -> bool:
     return (os.getenv(name) or "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def deep_enrich_target_pct() -> float:
+def deep_enrich_today_only() -> bool:
+    """When set, second-pass enrich runs only for kickoffs today (saves API on the rest of the window)."""
+    return _env_truthy("HIBS_DEEP_ENRICH_TODAY_ONLY")
+
+
+def summer_daily_deep_target_pct(league_code: str) -> Optional[float]:
+    """Realistic deep-enrich target for LOI + Nordics during domestic offseason (not inflated)."""
+    from hibs_predictor.tournament_focus import domestic_offseason_active, is_summer_daily_league
+
+    if not domestic_offseason_active() or not is_summer_daily_league(league_code):
+        return None
+    return 88.0
+
+
+def deep_enrich_target_pct(league_code: Optional[str] = None) -> float:
     """Return target DQ %% when deep pass is enabled; 0 disables."""
     raw = (os.getenv("HIBS_TARGET_DQ_PCT") or "").strip()
     if raw:
@@ -35,15 +62,22 @@ def deep_enrich_target_pct() -> float:
         except ValueError:
             pass
     if _env_truthy("HIBS_DEEP_ENRICH"):
+        if league_code:
+            summer = summer_daily_deep_target_pct(league_code)
+            if summer is not None:
+                return summer
+            if is_showpiece_league(league_code):
+                return SHOWPIECE_DEEP_TARGET
         return 90.0
     return 0.0
 
 
-def deep_enrich_max_retries() -> int:
+def deep_enrich_max_retries(league_code: Optional[str] = None) -> int:
+    default = "3" if is_showpiece_league(league_code) else "2"
     try:
-        return max(1, min(4, int(os.getenv("HIBS_DEEP_ENRICH_MAX_RETRIES", "2"))))
+        return max(1, min(4, int(os.getenv("HIBS_DEEP_ENRICH_MAX_RETRIES", default))))
     except ValueError:
-        return 2
+        return 3 if is_showpiece_league(league_code) else 2
 
 
 def _current_xg_earned(enriched: Dict[str, Any]) -> float:
@@ -139,11 +173,22 @@ def _fill_recent_if_needed(
 ) -> None:
     home_id = fixture_team_id(fixture, "home") or fixture_team_id(enriched, "home")
     away_id = fixture_team_id(fixture, "away") or fixture_team_id(enriched, "away")
+    home_nm = fixture_team_name(fixture, "home") or fixture_team_name(enriched, "home")
+    away_nm = fixture_team_name(fixture, "away") or fixture_team_name(enriched, "away")
+    prefer_name_ids = fixture.get("source") == "fotmob_public" or str(
+        (fixture.get("fixture") or {}).get("id") if isinstance(fixture.get("fixture"), dict) else fixture.get("id")
+        or ""
+    ).startswith("fotmob_")
     from hibs_predictor.data_aggregator import _recent_match_rates
 
     if home_id and float(enriched.get("home_recent_n") or 0) < 8:
         try:
-            enriched["home_recent"] = aggregator._fetch_team_recent_matches(home_id, fdo_comp=fdo_comp)
+            enriched["home_recent"] = aggregator._fetch_team_recent_matches(
+                home_id,
+                fdo_comp=fdo_comp,
+                team_name=home_nm,
+                prefer_name_resolution=prefer_name_ids,
+            )
             rates = _recent_match_rates(enriched["home_recent"], home_id)
             enriched["home_recent_n"] = int(rates["n"])
             enriched["home_btts_rate"] = rates["btts_rate"]
@@ -153,7 +198,12 @@ def _fill_recent_if_needed(
             pass
     if away_id and float(enriched.get("away_recent_n") or 0) < 8:
         try:
-            enriched["away_recent"] = aggregator._fetch_team_recent_matches(away_id, fdo_comp=fdo_comp)
+            enriched["away_recent"] = aggregator._fetch_team_recent_matches(
+                away_id,
+                fdo_comp=fdo_comp,
+                team_name=away_nm,
+                prefer_name_resolution=prefer_name_ids,
+            )
             rates = _recent_match_rates(enriched["away_recent"], away_id)
             enriched["away_recent_n"] = int(rates["n"])
             enriched["away_btts_rate"] = rates["btts_rate"]
@@ -174,21 +224,27 @@ def _fill_stats_if_needed(
 ) -> None:
     home_id = fixture_team_id(enriched, "home")
     away_id = fixture_team_id(enriched, "away")
-    from hibs_predictor.data_aggregator import _recent_match_rates
+    from hibs_predictor.data_aggregator import _cup_domestic_stats_league, _recent_match_rates
+    from hibs_predictor.fixture_utils import is_cup_competition
+
+    stats_code = league_code
+    stats_api_id = league_api_id
+    if is_cup_competition(league_code):
+        stats_code, stats_api_id = _cup_domestic_stats_league(league_code)
 
     home_rates = _recent_match_rates(enriched.get("home_recent") or [], home_id or 0)
     away_rates = _recent_match_rates(enriched.get("away_recent") or [], away_id or 0)
     if home_id and not _has_stats(enriched.get("home_stats")):
         try:
             enriched["home_stats"] = aggregator._fetch_team_stats(
-                home_id, league_code, league_api_id, season, home_rates, fdo_comp=fdo_comp
+                home_id, stats_code, stats_api_id, season, home_rates, fdo_comp=fdo_comp
             )
         except Exception:
             pass
     if away_id and not _has_stats(enriched.get("away_stats")):
         try:
             enriched["away_stats"] = aggregator._fetch_team_stats(
-                away_id, league_code, league_api_id, season, away_rates, fdo_comp=fdo_comp
+                away_id, stats_code, stats_api_id, season, away_rates, fdo_comp=fdo_comp
             )
         except Exception:
             pass
@@ -279,6 +335,7 @@ def apply_xg_ladder(
                 away_rates,
                 league_strength,
                 allow_statistics_xg=True,
+                league_code=league_code,
             )
             enriched["xg_home"], enriched["xg_away"], enriched["xg_source"] = float(xh), float(xa), tag
         except Exception:
@@ -366,11 +423,16 @@ def deep_enrich_pass(
     *,
     target_pct: float = 90.0,
     max_retries: Optional[int] = None,
+    min_pct: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
-    Fill only missing weak fields for fixtures in the 75–(target-1)% band; retry until target or max_retries.
+    Fill missing weak fields and retry until target or max_retries.
+
+    Domestic leagues normally run only in the 75–(target-1)% band; UEFA showpieces (e.g. UECL final)
+  may rescue from any raw score when min_pct is 0.
     """
-    retries = max_retries if max_retries is not None else deep_enrich_max_retries()
+    floor = DEEP_BAND_MIN if min_pct is None else float(min_pct)
+    retries = max_retries if max_retries is not None else deep_enrich_max_retries(league_code)
     from hibs_predictor.config import LEAGUES
     from hibs_predictor.data_aggregator import _season_candidates
 
@@ -385,9 +447,19 @@ def deep_enrich_pass(
         pct = float(dq.get("score_pct") or 0)
         if pct >= target_pct:
             break
-        if pct < DEEP_BAND_MIN:
+        if pct < floor:
             break
         weak = set(_weak_block_keys(dq))
+        if not weak and floor <= SHOWPIECE_DEEP_BAND_MIN and is_showpiece_league(league_code):
+            weak = {
+                "recent_home",
+                "recent_away",
+                "stats_home",
+                "stats_away",
+                "book_1x2",
+                "side_markets",
+                "xg",
+            }
         if not weak:
             break
 
@@ -435,33 +507,97 @@ def deep_enrich_pass(
     return enriched
 
 
+def deep_enrich_plan(
+    fixture: Dict[str, Any],
+    league_code: str,
+    enriched: Dict[str, Any],
+) -> Optional[Tuple[float, float]]:
+    """
+    When a second-pass enrich is worth API calls: (target_pct, min_pct).
+    Returns None when disabled, already at target, wrong day, or out of band.
+    """
+    target = deep_enrich_target_pct(league_code)
+    if target <= 0 and is_showpiece_league(league_code) and fixture_is_today(fixture):
+        target = SHOWPIECE_DEEP_TARGET
+    if target <= 0:
+        return None
+    if deep_enrich_today_only() and not fixture_is_today(fixture):
+        return None
+    dq = enriched.get("data_quality") or compute_fixture_data_quality(enriched)
+    pct = float(dq.get("score_pct") or 0)
+    if pct >= target:
+        return None
+    floor = deep_band_min(league_code)
+    if pct < floor:
+        return None
+    return (target, floor)
+
+
 def maybe_deep_enrich(
     aggregator: "DataAggregator",
     fixture: Dict[str, Any],
     league_code: str,
     enriched: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Run deep pass when HIBS_TARGET_DQ_PCT / HIBS_DEEP_ENRICH is set and score is below target."""
-    target = deep_enrich_target_pct()
-    if target <= 0:
+    """Run deep pass only when deep_enrich_plan says API spend is warranted."""
+    plan = deep_enrich_plan(fixture, league_code, enriched)
+    if not plan:
         return enriched
-    dq = enriched.get("data_quality") or compute_fixture_data_quality(enriched)
-    pct = float(dq.get("score_pct") or 0)
-    if pct >= target or pct < DEEP_BAND_MIN:
-        return enriched
-    return deep_enrich_pass(aggregator, fixture, league_code, enriched, target_pct=target)
+    target, floor = plan
+    return deep_enrich_pass(
+        aggregator,
+        fixture,
+        league_code,
+        enriched,
+        target_pct=target,
+        min_pct=floor,
+    )
+
+
+# Leagues without Understat slug — spend API statistics-xG budget here before top-5 leagues.
+# Summer daily (LOI + Nordics) immediately after WC / friendlies during domestic offseason.
+_XG_GAP_LEAGUE_PRIORITY: tuple[str, ...] = (
+    "WORLD_CUP",
+    "INTL_FRIENDLIES",
+    "IRELAND_PREMIER",
+    "NORWAY_ELITESERIEN",
+    "FINLAND_VEIKKAUSLIIGA",
+    "DENMARK_SL",
+    "UCL",
+    "EUROPA_LEAGUE",
+    "UECL",
+    "GREECE_SL",
+    "AUSTRIA_BL",
+    "BELGIUM_FIRST",
+    "EREDIVISIE",
+    "PRIMEIRA",
+    "LA_LIGA",
+    "SERIE_A",
+    "BUNDESLIGA",
+    "LIGUE_1",
+    "EUROS",
+    "NATIONS_LEAGUE",
+)
+
+
+def league_codes_priority_xg_gaps(codes: List[str]) -> List[str]:
+    """Pull Nordic / secondary European / international cups ahead for measured-xG budget."""
+    head = [c for c in _XG_GAP_LEAGUE_PRIORITY if c in codes]
+    tail = [c for c in codes if c not in head]
+    return head + tail
 
 
 def league_codes_priority_today(codes: List[str], fixtures_by_code: Dict[str, List[Dict[str, Any]]]) -> List[str]:
     """Leagues with a kickoff today first (API budget), then the rest."""
-    if not _env_truthy("HIBS_ENRICH_PRIORITY_TODAY"):
-        return list(codes)
-    today_first: List[str] = []
-    rest: List[str] = []
-    for code in codes:
-        rows = fixtures_by_code.get(code) or []
-        if any(fixture_is_today(r) for r in rows):
-            today_first.append(code)
-        else:
-            rest.append(code)
-    return today_first + rest
+    ordered = list(codes)
+    if _env_truthy("HIBS_ENRICH_PRIORITY_TODAY"):
+        today_first: List[str] = []
+        rest: List[str] = []
+        for code in codes:
+            rows = fixtures_by_code.get(code) or []
+            if any(fixture_is_today(r) for r in rows):
+                today_first.append(code)
+            else:
+                rest.append(code)
+        ordered = today_first + rest
+    return league_codes_priority_xg_gaps(ordered)

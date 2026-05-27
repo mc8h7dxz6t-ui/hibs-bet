@@ -359,193 +359,264 @@ def _build_same_game_builder(
     }
 
 
+def _collect_bet_builders_for_packet(pkt: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """All qualifying same-game builders for one fixture (caller applies per-fixture cap)."""
+    if not is_analyzable(pkt):
+        return []
+    menu = _menu_item_by_key(pkt)
+    local: List[Dict[str, Any]] = []
+
+    def pct(key: str) -> float:
+        try:
+            return float((menu.get(key) or {}).get("model_pct") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def add(builder: Optional[Dict[str, Any]]) -> None:
+        if builder:
+            builder["score"] = sum(float(l.get("score") or 0) for l in builder.get("legs") or [])
+            local.append(builder)
+
+    if pct("btts_yes") >= 58 and pct("over_25") >= 58:
+        add(
+            _build_same_game_builder(
+                pkt,
+                "BTTS + Over 2.5",
+                "btts_over25",
+                ("btts_yes", "over_25"),
+                [
+                    "Positive correlation: both teams scoring supports a higher total-goals line.",
+                    "Only suggested where both component markets have model support and book prices.",
+                ],
+            )
+        )
+    if pct("btts_yes") >= 60 and pct("over_15") >= 68:
+        add(
+            _build_same_game_builder(
+                pkt,
+                "BTTS + Over 1.5",
+                "btts_over15",
+                ("btts_yes", "over_15"),
+                [
+                    "Lower total than O2.5; still aligned with the BTTS game script.",
+                    "Useful when BTTS is strong but the third goal is less certain.",
+                ],
+            )
+        )
+    if pct("draw") >= 28 and pct("over_15") >= 65:
+        add(
+            _build_same_game_builder(
+                pkt,
+                "Draw + Over 1.5",
+                "draw_over15",
+                ("draw", "over_15"),
+                [
+                    "Stalemate script with enough goal expectation for two or more.",
+                    "Both legs need priced markets from the book.",
+                ],
+            )
+        )
+    if pct("home_win") >= 50 and pct("over_15") >= 62:
+        add(
+            _build_same_game_builder(
+                pkt,
+                "Home result + Over 1.5",
+                "home_over15",
+                ("home_win", "over_15"),
+                [
+                    "Favourite-led game script: home edge with enough goals profile for O1.5.",
+                    "Standings/form context should still be checked before staking.",
+                ],
+            )
+        )
+    if pct("away_win") >= 50 and pct("over_15") >= 62:
+        add(
+            _build_same_game_builder(
+                pkt,
+                "Away result + Over 1.5",
+                "away_over15",
+                ("away_win", "over_15"),
+                [
+                    "Away side has a win edge and the match profile clears the O1.5 bar.",
+                    "Use smaller stakes if travel/form inputs are thin.",
+                ],
+            )
+        )
+    if pct("home_or_draw") >= 62 and pct("over_15") >= 62:
+        add(
+            _build_same_game_builder(
+                pkt,
+                "Home or Draw + Over 1.5",
+                "home_or_draw_over15",
+                ("home_or_draw", "over_15"),
+                [
+                    "Safer result anchor: home avoids defeat while the goals profile supports O1.5.",
+                    "Only appears when both double-chance and goals components have real book prices.",
+                ],
+            )
+        )
+    if pct("away_or_draw") >= 62 and pct("over_15") >= 62:
+        add(
+            _build_same_game_builder(
+                pkt,
+                "Away or Draw + Over 1.5",
+                "away_or_draw_over15",
+                ("away_or_draw", "over_15"),
+                [
+                    "Safer away-side result anchor paired with a modest goals line.",
+                    "Only appears when both double-chance and goals components have real book prices.",
+                ],
+            )
+        )
+    if pct("home_or_draw") >= 58 and pct("btts_yes") >= 55:
+        add(
+            _build_same_game_builder(
+                pkt,
+                "Home or Draw + BTTS",
+                "home_or_draw_btts",
+                ("home_or_draw", "btts_yes"),
+                [
+                    "Double-chance home cover with both teams to score.",
+                    "Correlated — use your book's bet-builder price, not multiplied leg odds.",
+                ],
+            )
+        )
+    if pct("away_or_draw") >= 58 and pct("btts_yes") >= 55:
+        add(
+            _build_same_game_builder(
+                pkt,
+                "Away or Draw + BTTS",
+                "away_or_draw_btts",
+                ("away_or_draw", "btts_yes"),
+                [
+                    "Away avoids defeat while both attacks rate for goals.",
+                    "Correlated — confirm the combined quote in bet builder.",
+                ],
+            )
+        )
+    if pct("home_or_away") >= 70 and pct("over_15") >= 62:
+        add(
+            _build_same_game_builder(
+                pkt,
+                "No Draw + Over 1.5",
+                "home_or_away_over15",
+                ("home_or_away", "over_15"),
+                [
+                    "Draw risk rates low enough to pair no-draw with the O1.5 game script.",
+                    "Requires a priced no-draw/double-chance market from the available odds feed.",
+                ],
+            )
+        )
+    if pct("home_win") >= 45 and pct("btts_yes") >= 58:
+        add(
+            _build_same_game_builder(
+                pkt,
+                "Home result + BTTS",
+                "home_btts",
+                ("home_win", "btts_yes"),
+                [
+                    "Correlated if the home side can win without fully suppressing the away attack.",
+                    "Prefer when xG/form points to chances for both teams.",
+                ],
+                combo_key="home_and_btts",
+            )
+        )
+    if pct("away_win") >= 45 and pct("btts_yes") >= 58:
+        add(
+            _build_same_game_builder(
+                pkt,
+                "Away result + BTTS",
+                "away_btts",
+                ("away_win", "btts_yes"),
+                [
+                    "Correlated if the away side has enough win probability and both attacks rate well.",
+                    "No player props are included unless a real player-prop feed is wired.",
+                ],
+                combo_key="away_and_btts",
+            )
+        )
+    if pct("draw") >= 28 and pct("btts_yes") >= 58:
+        add(
+            _build_same_game_builder(
+                pkt,
+                "Draw + BTTS",
+                "draw_btts",
+                ("draw", "btts_yes"),
+                [
+                    "Shared game script: stalemate with both teams scoring.",
+                    "Use your book's bet builder — component odds multiply for reference only.",
+                ],
+                combo_key="draw_and_btts",
+            )
+        )
+    if pct("home_win") >= 45 and pct("over_25") >= 58:
+        add(
+            _build_same_game_builder(
+                pkt,
+                "Home result + Over 2.5",
+                "home_over25",
+                ("home_win", "over_25"),
+                [
+                    "Favourite win profile paired with a higher goals line.",
+                    "Correlated — book quote will differ from multiplying leg prices.",
+                ],
+            )
+        )
+    if pct("away_win") >= 45 and pct("over_25") >= 58:
+        add(
+            _build_same_game_builder(
+                pkt,
+                "Away result + Over 2.5",
+                "away_over25",
+                ("away_win", "over_25"),
+                [
+                    "Away win edge with enough goal expectation for three or more.",
+                    "Correlated — confirm price in bet builder before staking.",
+                ],
+            )
+        )
+    if pct("home_win") >= 48 and pct("under_25") >= 58:
+        add(
+            _build_same_game_builder(
+                pkt,
+                "Home result + Under 2.5",
+                "home_under25",
+                ("home_win", "under_25"),
+                [
+                    "Tight home control script: win lean with a low total-goals profile.",
+                    "Opposite correlation to BTTS+O2.5 — do not combine both on the same slip.",
+                ],
+            )
+        )
+    local.sort(key=lambda x: -float(x.get("score") or 0))
+    return local
+
+
 def build_bet_builder_suggestions(
     packets: List[Dict[str, Any]],
     fixture_id: Optional[Any] = None,
-    limit: int = 6,
+    *,
+    limit: int = 36,
+    max_per_fixture: int = 3,
 ) -> List[Dict[str, Any]]:
-    """Same-game builder ideas from available markets only; no synthetic player props."""
+    """Same-game builder ideas from available markets only; no synthetic player props.
+
+    Keeps up to *max_per_fixture* ranked options per match, then applies a global *limit*.
+    """
     out: List[Dict[str, Any]] = []
     for pkt in packets:
         if fixture_id is not None and str(pkt.get("id")) != str(fixture_id):
             continue
-        if not is_analyzable(pkt):
-            continue
-        menu = _menu_item_by_key(pkt)
-
-        def pct(key: str) -> float:
-            try:
-                return float((menu.get(key) or {}).get("model_pct") or 0.0)
-            except (TypeError, ValueError):
-                return 0.0
-
-        def add(builder: Optional[Dict[str, Any]]) -> None:
-            if builder:
-                builder["score"] = sum(float(l.get("score") or 0) for l in builder.get("legs") or [])
-                out.append(builder)
-
-        if pct("btts_yes") >= 58 and pct("over_25") >= 58:
-            add(
-                _build_same_game_builder(
-                    pkt,
-                    "BTTS + Over 2.5",
-                    "btts_over25",
-                    ("btts_yes", "over_25"),
-                    [
-                        "Positive correlation: both teams scoring supports a higher total-goals line.",
-                        "Only suggested where both component markets have model support and book prices.",
-                    ],
-                )
-            )
-        if pct("btts_yes") >= 60 and pct("over_15") >= 68:
-            add(
-                _build_same_game_builder(
-                    pkt,
-                    "BTTS + Over 1.5",
-                    "btts_over15",
-                    ("btts_yes", "over_15"),
-                    [
-                        "Lower total than O2.5; still aligned with the BTTS game script.",
-                        "Useful when BTTS is strong but the third goal is less certain.",
-                    ],
-                )
-            )
-        if pct("home_win") >= 50 and pct("over_15") >= 62:
-            add(
-                _build_same_game_builder(
-                    pkt,
-                    "Home result + Over 1.5",
-                    "home_over15",
-                    ("home_win", "over_15"),
-                    [
-                        "Favourite-led game script: home edge with enough goals profile for O1.5.",
-                        "Standings/form context should still be checked before staking.",
-                    ],
-                )
-            )
-        if pct("away_win") >= 50 and pct("over_15") >= 62:
-            add(
-                _build_same_game_builder(
-                    pkt,
-                    "Away result + Over 1.5",
-                    "away_over15",
-                    ("away_win", "over_15"),
-                    [
-                        "Away side has a win edge and the match profile clears the O1.5 bar.",
-                        "Use smaller stakes if travel/form inputs are thin.",
-                    ],
-                )
-            )
-        if pct("home_or_draw") >= 62 and pct("over_15") >= 62:
-            add(
-                _build_same_game_builder(
-                    pkt,
-                    "Home or Draw + Over 1.5",
-                    "home_or_draw_over15",
-                    ("home_or_draw", "over_15"),
-                    [
-                        "Safer result anchor: home avoids defeat while the goals profile supports O1.5.",
-                        "Only appears when both double-chance and goals components have real book prices.",
-                    ],
-                )
-            )
-        if pct("away_or_draw") >= 62 and pct("over_15") >= 62:
-            add(
-                _build_same_game_builder(
-                    pkt,
-                    "Away or Draw + Over 1.5",
-                    "away_or_draw_over15",
-                    ("away_or_draw", "over_15"),
-                    [
-                        "Safer away-side result anchor paired with a modest goals line.",
-                        "Only appears when both double-chance and goals components have real book prices.",
-                    ],
-                )
-            )
-        if pct("home_or_away") >= 70 and pct("over_15") >= 62:
-            add(
-                _build_same_game_builder(
-                    pkt,
-                    "No Draw + Over 1.5",
-                    "home_or_away_over15",
-                    ("home_or_away", "over_15"),
-                    [
-                        "Draw risk rates low enough to pair no-draw with the O1.5 game script.",
-                        "Requires a priced no-draw/double-chance market from the available odds feed.",
-                    ],
-                )
-            )
-        if pct("home_win") >= 45 and pct("btts_yes") >= 58:
-            add(
-                _build_same_game_builder(
-                    pkt,
-                    "Home result + BTTS",
-                    "home_btts",
-                    ("home_win", "btts_yes"),
-                    [
-                        "Correlated if the home side can win without fully suppressing the away attack.",
-                        "Prefer when xG/form points to chances for both teams.",
-                    ],
-                    combo_key="home_and_btts",
-                )
-            )
-        if pct("away_win") >= 45 and pct("btts_yes") >= 58:
-            add(
-                _build_same_game_builder(
-                    pkt,
-                    "Away result + BTTS",
-                    "away_btts",
-                    ("away_win", "btts_yes"),
-                    [
-                        "Correlated if the away side has enough win probability and both attacks rate well.",
-                        "No player props are included unless a real player-prop feed is wired.",
-                    ],
-                    combo_key="away_and_btts",
-                )
-            )
-        if pct("draw") >= 28 and pct("btts_yes") >= 58:
-            add(
-                _build_same_game_builder(
-                    pkt,
-                    "Draw + BTTS",
-                    "draw_btts",
-                    ("draw", "btts_yes"),
-                    [
-                        "Shared game script: stalemate with both teams scoring.",
-                        "Use your book's bet builder — component odds multiply for reference only.",
-                    ],
-                    combo_key="draw_and_btts",
-                )
-            )
-        if pct("home_win") >= 45 and pct("over_25") >= 58:
-            add(
-                _build_same_game_builder(
-                    pkt,
-                    "Home result + Over 2.5",
-                    "home_over25",
-                    ("home_win", "over_25"),
-                    [
-                        "Favourite win profile paired with a higher goals line.",
-                        "Correlated — book quote will differ from multiplying leg prices.",
-                    ],
-                )
-            )
-        if pct("away_win") >= 45 and pct("over_25") >= 58:
-            add(
-                _build_same_game_builder(
-                    pkt,
-                    "Away result + Over 2.5",
-                    "away_over25",
-                    ("away_win", "over_25"),
-                    [
-                        "Away win edge with enough goal expectation for three or more.",
-                        "Correlated — confirm price in bet builder before staking.",
-                    ],
-                )
-            )
-
-    out.sort(key=lambda x: -float(x.get("score") or 0))
-    return out[:limit]
+        per_match = _collect_bet_builders_for_packet(pkt)[: max(1, max_per_fixture)]
+        n = len(per_match)
+        for rank, builder in enumerate(per_match, start=1):
+            builder["builder_rank"] = rank
+            builder["builders_for_fixture"] = n
+            out.append(builder)
+    out.sort(key=lambda x: (-float(x.get("score") or 0), str(x.get("kickoff_time") or "")))
+    if limit > 0:
+        return out[:limit]
+    return out
 
 
 def _rank_all_legs(packets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

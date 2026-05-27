@@ -612,7 +612,8 @@
 
     document.addEventListener('DOMContentLoaded', function () {
         init();
-        if (!packets.length) refreshFromApi();
+        var deferAssistant = window.HIBS_DEFER_ASSISTANT === true || window.HIBS_DEFER_ASSISTANT === '1';
+        if (deferAssistant || !packets.length) refreshFromApi();
         document.addEventListener('hibs-betslip-change', syncAccaLegsFromBetslip);
         syncAccaLegsFromBetslip();
     });

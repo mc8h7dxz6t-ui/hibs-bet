@@ -130,6 +130,25 @@ def _enrich_fresh_minutes() -> float:
         return 15.0
 
 
+def _enriched_disk_ttl_hours(
+    fixture: Dict[str, Any],
+    enriched: Dict[str, Any],
+    home_id: Optional[int],
+    away_id: Optional[int],
+) -> float:
+    """Longer disk cache for future kickoffs; short TTL when core blocks are still thin."""
+    if DataAggregator._enriched_needs_recent_refetch(enriched, home_id, away_id):
+        return 0.25
+    try:
+        from hibs_predictor.deep_enrich import deep_enrich_today_only, fixture_is_today
+
+        if deep_enrich_today_only() and not fixture_is_today(fixture):
+            return max(2.0, float(os.getenv("HIBS_ENRICH_CACHE_HOURS_FUTURE", "8")))
+    except Exception:
+        pass
+    return 2.0
+
+
 def _enrich_api_semaphore_size() -> int:
     """Cap concurrent API team/history calls during bundle builds (reduces 429 bursts)."""
     raw = os.getenv("HIBS_ENRICH_API_SEM", "").strip()
@@ -305,7 +324,14 @@ def _fdo_match_to_recent_format(match: Dict[str, Any]) -> Optional[Dict[str, Any
         return None
     try:
         return {
-            "teams": {"home": {"id": int(hid)}, "away": {"id": int(aid)}},
+            "fixture": {
+                "date": match.get("utcDate") or match.get("date") or "",
+                "status": {"short": "FT"},
+            },
+            "teams": {
+                "home": {"id": int(hid), "name": ht.get("name") or ht.get("shortName") or "?"},
+                "away": {"id": int(aid), "name": at.get("name") or at.get("shortName") or "?"},
+            },
             "goals": {"home": int(home_g), "away": int(away_g)},
             "_source": "football_data_org",
         }
@@ -963,14 +989,18 @@ class DataAggregator:
 
         home_id = fixture_team_id(fixture, "home")
         away_id = fixture_team_id(fixture, "away")
+        hk = fixture_team_name(fixture, "home") or "?"
+        ak = fixture_team_name(fixture, "away") or "?"
+        prefer_name_ids = fixture.get("source") == "fotmob_public" or str(
+            (fixture.get("fixture") or {}).get("id") if isinstance(fixture.get("fixture"), dict) else fixture.get("id")
+            or ""
+        ).startswith("fotmob_")
 
         fx = fixture.get("fixture")
         raw_fid = fx.get("id") if isinstance(fx, dict) else None
         if raw_fid is None:
             raw_fid = fixture.get("id")
         fixture_id_str = str(raw_fid).strip() if raw_fid not in (None, "", 0, "0") else ""
-        hk = fixture_team_name(fixture, "home") or "?"
-        ak = fixture_team_name(fixture, "away") or "?"
         dt = str(fixture.get("date", ""))
         if fixture_id_str:
             cache_key = f"enriched_fixture_{fixture_id_str}_{league_code}_dq8"
@@ -984,7 +1014,23 @@ class DataAggregator:
 
         cached = self.cache.get(cache_key, ttl_hours=2)
         if cached and not self._enriched_needs_recent_refetch(cached, home_id, away_id):
-            return cached
+            from hibs_predictor.deep_enrich import deep_enrich_plan, maybe_deep_enrich
+
+            out = dict(cached)
+            if deep_enrich_plan(fixture, league_code, out):
+                try:
+                    out = maybe_deep_enrich(self, fixture, league_code, out)
+                    out.setdefault("league", league_code)
+                    out["data_quality"] = compute_fixture_data_quality(out)
+                    self.cache.set(
+                        cache_key,
+                        out,
+                        ttl_hours=_enriched_disk_ttl_hours(fixture, out, home_id, away_id),
+                    )
+                except Exception as exc:
+                    print(f"[enrich deep cache] {league_code} fid={fixture_id_str}: {exc!r}")
+                    return cached
+            return out
 
         enriched = dict(cached) if cached else dict(fixture)
 
@@ -1030,12 +1076,22 @@ class DataAggregator:
                 print(f"[enrich season_team_xg] {league_code} fid={fixture_id_str}: {exc!r}")
 
         try:
-            enriched["home_recent"] = self._fetch_team_recent_matches(home_id, fdo_comp=fdo_comp)
+            enriched["home_recent"] = self._fetch_team_recent_matches(
+                home_id,
+                fdo_comp=fdo_comp,
+                team_name=hk,
+                prefer_name_resolution=prefer_name_ids,
+            )
         except Exception as exc:
             print(f"[enrich home_recent] {league_code} fid={fixture_id_str}: {exc!r}")
             enriched["home_recent"] = []
         try:
-            enriched["away_recent"] = self._fetch_team_recent_matches(away_id, fdo_comp=fdo_comp)
+            enriched["away_recent"] = self._fetch_team_recent_matches(
+                away_id,
+                fdo_comp=fdo_comp,
+                team_name=ak,
+                prefer_name_resolution=prefer_name_ids,
+            )
         except Exception as exc:
             print(f"[enrich away_recent] {league_code} fid={fixture_id_str}: {exc!r}")
             enriched["away_recent"] = []
@@ -1192,6 +1248,8 @@ class DataAggregator:
                 away_team_id=away_id,
                 home_name=home_nm,
                 away_name=away_nm,
+                allow_statistics_xg=True,
+                league_code=league_code,
             )
             if xg_tag in ("api_fixture_xg", "api_statistics_xg", "stats_api_xg"):
                 enriched["xg_home"], enriched["xg_away"], enriched["xg_source"] = float(xh), float(xa), xg_tag
@@ -1261,6 +1319,7 @@ class DataAggregator:
                         home_name=home_nm,
                         away_name=away_nm,
                         current_source=cur_xg,
+                        league_code=league_code,
                     )
                     if stats_hit:
                         enriched["xg_home"], enriched["xg_away"], enriched["xg_source"] = (
@@ -1361,10 +1420,11 @@ class DataAggregator:
             print(f"[enrich xg_display] {league_code} fid={fixture_id_str}: {exc!r}")
 
         enriched["enriched_at"] = datetime.now().isoformat()
-        cache_ttl = 2.0
-        if self._enriched_needs_recent_refetch(enriched, home_id, away_id):
-            cache_ttl = 0.25
-        self.cache.set(cache_key, enriched, ttl_hours=cache_ttl)
+        self.cache.set(
+            cache_key,
+            enriched,
+            ttl_hours=_enriched_disk_ttl_hours(fixture, enriched, home_id, away_id),
+        )
         return enriched
 
     @classmethod
@@ -1629,57 +1689,113 @@ class DataAggregator:
         with self._team_recent_lock:
             self._team_recent_mem[mem_key] = (matches, exp)
 
+    def _recent_team_ids_to_try(
+        self,
+        team_id: Optional[int],
+        team_name: Optional[str],
+        *,
+        prefer_name_resolution: bool = False,
+    ) -> List[int]:
+        """Ordered API team ids to query for recent form (FotMob/FDO ids are often not API ids)."""
+        ids: List[int] = []
+        seen: set[int] = set()
+
+        def add(raw: Any) -> None:
+            try:
+                tid = int(raw)
+            except (TypeError, ValueError):
+                return
+            if tid > 0 and tid not in seen:
+                seen.add(tid)
+                ids.append(tid)
+
+        resolved: Optional[int] = None
+        if team_name and "api_sports" in self.clients:
+            client = self.clients["api_sports"]
+            if hasattr(client, "resolve_team_id_by_name"):
+                try:
+                    resolved = client.resolve_team_id_by_name(team_name)
+                except Exception:
+                    resolved = None
+
+        if prefer_name_resolution and resolved:
+            add(resolved)
+        if team_id:
+            add(team_id)
+        if not prefer_name_resolution and resolved:
+            add(resolved)
+        return ids
+
     def _fetch_team_recent_matches(
         self,
         team_id: Optional[int],
         limit: int = 10,
         fdo_comp: Optional[str] = None,
+        *,
+        team_name: Optional[str] = None,
+        prefer_name_resolution: bool = False,
     ) -> List[Dict[str, Any]]:
-        """Last finished matches: API-Sports when ids match; else Football-Data.org for FDO fixture ids."""
-        if not team_id:
+        """Last finished matches: API-Sports first (resolve id by name when needed); FDO fallback."""
+        ids_to_try = self._recent_team_ids_to_try(
+            team_id,
+            team_name,
+            prefer_name_resolution=prefer_name_resolution,
+        )
+        if not ids_to_try and not team_id:
             return []
 
-        provider = "fdo" if fdo_comp else "api"
-        cache_key = f"team_recent_{provider}_{team_id}"
-        mem_hit = self._team_recent_mem_get(cache_key)
-        if mem_hit is not None:
-            return mem_hit
-
-        cached = self.cache.get(cache_key, ttl_hours=4)
-        if cached:
-            self._team_recent_mem_set(cache_key, cached)
-            return cached
+        cache_providers = ("api", "fdo") if fdo_comp else ("api",)
+        for try_id in ids_to_try or ([int(team_id)] if team_id else []):
+            for provider in cache_providers:
+                cache_key = f"team_recent_{provider}_{try_id}"
+                mem_hit = self._team_recent_mem_get(cache_key)
+                if mem_hit is not None:
+                    return mem_hit
+                cached = self.cache.get(cache_key, ttl_hours=4)
+                if cached:
+                    self._team_recent_mem_set(cache_key, cached)
+                    return cached
 
         with self._api_sem:
-            mem_hit = self._team_recent_mem_get(cache_key)
-            if mem_hit is not None:
-                return mem_hit
-            disk_again = self.cache.get(cache_key, ttl_hours=4)
-            if disk_again:
-                self._team_recent_mem_set(cache_key, disk_again)
-                return disk_again
+            for try_id in ids_to_try or ([int(team_id)] if team_id else []):
+                for provider in cache_providers:
+                    cache_key = f"team_recent_{provider}_{try_id}"
+                    mem_hit = self._team_recent_mem_get(cache_key)
+                    if mem_hit is not None:
+                        return mem_hit
+                    disk_again = self.cache.get(cache_key, ttl_hours=4)
+                    if disk_again:
+                        self._team_recent_mem_set(cache_key, disk_again)
+                        return disk_again
 
-            matches: List[Dict[str, Any]] = []
-            if "api_sports" in self.clients:
-                try:
-                    matches = self.clients["api_sports"].fetch_team_last_matches(team_id, limit=limit)
-                except Exception:
-                    pass
+                matches: List[Dict[str, Any]] = []
+                provider = "api"
+                if "api_sports" in self.clients:
+                    try:
+                        matches = self.clients["api_sports"].fetch_team_last_matches(try_id, limit=limit)
+                    except Exception:
+                        pass
 
-            if not matches and fdo_comp and "football_data_org" in self.clients:
-                try:
-                    raw = self.clients["football_data_org"].fetch_team_matches(int(team_id), limit)
-                    for m in raw or []:
-                        norm = _fdo_match_to_recent_format(m)
-                        if norm:
-                            matches.append(norm)
-                except Exception:
-                    pass
+                if not matches and fdo_comp and "football_data_org" in self.clients:
+                    provider = "fdo"
+                    try:
+                        raw = self.clients["football_data_org"].fetch_team_matches(int(try_id), limit)
+                        for m in raw or []:
+                            norm = _fdo_match_to_recent_format(m)
+                            if norm:
+                                matches.append(norm)
+                    except Exception:
+                        pass
 
-            if matches:
-                self.cache.set(cache_key, matches, ttl_hours=4)
-            self._team_recent_mem_set(cache_key, matches)
-            return matches
+                cache_key = f"team_recent_{provider}_{try_id}"
+                if matches:
+                    self.cache.set(cache_key, matches, ttl_hours=4)
+                    self._team_recent_mem_set(cache_key, matches)
+                    return matches
+
+            cache_key = f"team_recent_api_{ids_to_try[0] if ids_to_try else team_id}"
+            self._team_recent_mem_set(cache_key, [])
+            return []
 
     def _fetch_expected_goals(
         self,
@@ -1693,6 +1809,7 @@ class DataAggregator:
         home_name: Optional[str] = None,
         away_name: Optional[str] = None,
         allow_statistics_xg: bool = False,
+        league_code: Optional[str] = None,
     ) -> Tuple[float, float, str]:
         """Expected goals from APIs; fall back to attack vs defence estimates from recent real results.
 
@@ -1809,6 +1926,7 @@ class DataAggregator:
                     home_name=home_name,
                     away_name=away_name,
                     current_source=prior,
+                    league_code=league_code,
                 )
                 if stats_hit:
                     result = stats_hit

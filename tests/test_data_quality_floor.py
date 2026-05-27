@@ -138,7 +138,7 @@ def test_intl_friendlies_floor_without_book_odds():
     assert "Odds markets" in dq["weak_fields"]
 
 
-def test_intl_friendlies_floor_88_with_odds():
+def test_intl_friendlies_floor_90_with_odds_and_measured_xg():
     dq = compute_fixture_data_quality(
         _rich_enriched(
             league="INTL_FRIENDLIES",
@@ -150,7 +150,7 @@ def test_intl_friendlies_floor_88_with_odds():
             away_recent_n=5,
         )
     )
-    assert dq["score_pct"] >= 88.0
+    assert dq["score_pct"] >= 90.0
 
 
 def test_norway_calendar_floor_early_season():
@@ -161,7 +161,35 @@ def test_norway_calendar_floor_early_season():
         away_recent_n=4,
     )
     dq = compute_fixture_data_quality(enriched)
-    assert dq["score_pct"] >= 85.0
+    assert dq["score_pct"] >= 90.0
+
+
+def test_european_premium_floor_95_la_liga():
+    enriched = _rich_enriched(
+        league="LA_LIGA",
+        xg_source="api_statistics_xg",
+        home_recent_n=8,
+        away_recent_n=8,
+        home_position={"position": 4},
+        away_position={"position": 9},
+        market_odds={"btts": {"yes": 1.75}, "totals_2_5": {"over": 1.85}},
+    )
+    dq = compute_fixture_data_quality(enriched)
+    assert dq["score_pct"] >= 95.0
+    assert dq.get("premium_scope") is True
+    assert dq["trust_label"] == "Premium data"
+
+
+def test_finland_fotmob_domestic_90_early_season():
+    enriched = _rich_enriched(
+        league="FINLAND_VEIKKAUSLIIGA",
+        xg_source="fotmob_league_xg",
+        home_recent_n=4,
+        away_recent_n=4,
+    )
+    dq = compute_fixture_data_quality(enriched)
+    assert dq["score_pct"] >= 90.0
+    assert "Expected goals" not in dq["weak_fields"]
 
 
 def test_from_row_uses_enrich_recent_n_not_only_last10_len():
@@ -194,7 +222,26 @@ def test_from_row_uses_enrich_recent_n_not_only_last10_len():
     assert dq["score_pct"] >= 88.0
 
 
-def test_ensure_dq_upgrades_enriched_when_rescore_higher():
+def test_ensure_dq_never_downgrades_existing_score():
+    from hibs_predictor.web import _ensure_fixture_data_quality
+
+    rows = [
+        {
+            "home": "Liverpool",
+            "away": "Arsenal",
+            "league": "EPL",
+            "data_quality": {"score_pct": 92.0, "full_scope": True},
+            "home_id": 1,
+            "away_id": 2,
+            "home_last10": [{}],
+            "away_last10": [{}],
+        }
+    ]
+    _ensure_fixture_data_quality(rows)
+    assert float(rows[0]["data_quality"]["score_pct"]) == 92.0
+
+
+def test_ensure_dq_backfills_missing_only():
     from hibs_predictor.web import _ensure_fixture_data_quality
 
     rows = [
@@ -202,8 +249,6 @@ def test_ensure_dq_upgrades_enriched_when_rescore_higher():
             "home": "Morocco",
             "away": "Burundi",
             "league": "INTL_FRIENDLIES",
-            "enriched_at": "2026-05-26T10:00:00Z",
-            "data_quality": {"score_pct": 48.0},
             "home_id": 1,
             "away_id": 2,
             "home_recent_n": 6,

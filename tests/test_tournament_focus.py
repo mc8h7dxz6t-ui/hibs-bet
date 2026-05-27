@@ -11,11 +11,14 @@ from hibs_predictor.tournament_focus import (
     INTL_FRIENDLIES_CODE,
     INTERNATIONAL_FOCUS_LEAGUE_CODES,
     dashboard_default_region,
+    domestic_offseason_active,
     effective_dashboard_league_order,
     friendlies_window_active,
     international_focus_league_codes,
     league_codes_for_fetch,
     prioritize_fixtures_for_focus,
+    active_competition_league_codes,
+    summer_active_league_codes,
     tournament_focus_active,
     tournament_focus_mode,
 )
@@ -29,6 +32,10 @@ def _clear_focus_env(monkeypatch):
     monkeypatch.delenv("HIBS_TOURNAMENT_FOCUS_END", raising=False)
     monkeypatch.delenv("HIBS_TOURNAMENT_INCLUDE_FRIENDLIES", raising=False)
     monkeypatch.delenv("HIBS_FRIENDLIES_FOCUS_START", raising=False)
+    monkeypatch.delenv("HIBS_DOMESTIC_OFFSEASON", raising=False)
+    monkeypatch.delenv("HIBS_DOMESTIC_OFFSEASON_START", raising=False)
+    monkeypatch.delenv("HIBS_DOMESTIC_OFFSEASON_END", raising=False)
+    monkeypatch.delenv("HIBS_FETCH_ALL_DOMESTIC", raising=False)
 
 
 def test_focus_off_outside_auto_window(monkeypatch):
@@ -42,13 +49,26 @@ def test_focus_off_outside_auto_window(monkeypatch):
 
 
 def test_focus_off_before_world_cup_starts(monkeypatch):
-    """Pre-tournament (e.g. May 2026): domestic leagues fetch normally."""
+    """Late May 2026: WC + friendlies + LOI/Nordics + cup finals; no UK/Euro leagues."""
     monkeypatch.setattr(
         "hibs_predictor.tournament_focus._today_utc",
         lambda: date(2026, 5, 31),
     )
     assert tournament_focus_active() is False
-    assert league_codes_for_fetch() == ALL_LEAGUE_CODES
+    assert domestic_offseason_active() is True
+    codes = league_codes_for_fetch()
+    assert "EPL" not in codes
+    assert "LA_LIGA" not in codes
+    assert "NORWAY_ELITESERIEN" in codes
+    assert "FINLAND_VEIKKAUSLIIGA" in codes
+    assert "DENMARK_SL" in codes
+    assert "WORLD_CUP" in codes
+    assert INTL_FRIENDLIES_CODE in codes
+    assert codes[0] == "WORLD_CUP"
+    assert "UCL" in codes
+    assert "FA_CUP" in codes
+    assert "IRELAND_PREMIER" in codes
+    assert codes == active_competition_league_codes()
 
 
 def test_focus_auto_on_early_june(monkeypatch):
@@ -62,11 +82,22 @@ def test_focus_auto_on_early_june(monkeypatch):
 
 
 def test_focus_off_after_world_cup_ends(monkeypatch):
+    """After WC window but before August: still summer trim."""
     monkeypatch.setattr(
         "hibs_predictor.tournament_focus._today_utc",
         lambda: date(2026, 7, 19),
     )
     assert tournament_focus_active() is False
+    assert domestic_offseason_active() is True
+    assert "EPL" not in league_codes_for_fetch()
+
+
+def test_domestic_returns_august(monkeypatch):
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 8, 1),
+    )
+    assert domestic_offseason_active() is False
     assert league_codes_for_fetch() == ALL_LEAGUE_CODES
 
 
@@ -150,15 +181,35 @@ def test_custom_date_window(monkeypatch):
 
 def test_international_comp_codes_in_focus_list():
     assert "WORLD_CUP" in INTERNATIONAL_FOCUS_LEAGUE_CODES
-    assert "NATIONS_LEAGUE" in INTERNATIONAL_FOCUS_LEAGUE_CODES
-    assert "EUROS" in INTERNATIONAL_FOCUS_LEAGUE_CODES
     assert "EPL" not in INTERNATIONAL_FOCUS_LEAGUE_CODES
+    codes = active_competition_league_codes(today=date(2026, 6, 15))
+    assert "WORLD_CUP" in codes
+    assert INTL_FRIENDLIES_CODE in codes
+    assert "NATIONS_LEAGUE" not in codes
+    assert "EUROS" not in codes
 
 
 def test_intl_friendlies_dashboard_region():
     from hibs_predictor.config import league_dashboard_region
 
     assert league_dashboard_region(INTL_FRIENDLIES_CODE) == "international"
+
+
+def test_nordic_dashboard_region():
+    from hibs_predictor.config import league_dashboard_region
+
+    assert league_dashboard_region("NORWAY_ELITESERIEN") == "nordic"
+    assert league_dashboard_region("FINLAND_VEIKKAUSLIIGA") == "nordic"
+    assert league_dashboard_region("DENMARK_SL") == "nordic"
+    assert league_dashboard_region("IRELAND_PREMIER") == "ireland"
+
+
+def test_summer_daily_league_helper():
+    from hibs_predictor.tournament_focus import is_summer_daily_league, summer_daily_league_codes
+
+    assert "DENMARK_SL" in summer_daily_league_codes()
+    assert is_summer_daily_league("denmark_sl")
+    assert not is_summer_daily_league("EPL")
 
 
 def test_friendlies_in_worldcup_auto_window(monkeypatch):
@@ -190,6 +241,8 @@ def test_friendlies_fixture_window_days(monkeypatch):
     )
     assert _fixture_window_days_for_league("EPL") == 7
     assert _fixture_window_days_for_league("INTL_FRIENDLIES") == 14
+    assert _fixture_window_days_for_league("DENMARK_SL") == 7
+    assert _fixture_window_days_for_league("IRELAND_PREMIER") == 7
 
 
 def test_friendlies_in_window_before_worldcup_focus(monkeypatch):
@@ -199,8 +252,9 @@ def test_friendlies_in_window_before_worldcup_focus(monkeypatch):
         lambda: date(2026, 5, 26),
     )
     assert friendlies_window_active() is True
+    assert domestic_offseason_active() is True
     assert INTL_FRIENDLIES_CODE in international_focus_league_codes()
-    assert dashboard_default_region() == "international"
+    assert dashboard_default_region() == ""
 
 
 def test_friendlies_in_international_focus_mode(monkeypatch):
@@ -211,6 +265,15 @@ def test_friendlies_in_international_focus_mode(monkeypatch):
     )
     codes = league_codes_for_fetch()
     assert INTL_FRIENDLIES_CODE in codes
+
+
+def test_world_cup_before_friendlies_in_fetch_order(monkeypatch):
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 6, 15),
+    )
+    codes = active_competition_league_codes()
+    assert codes.index("WORLD_CUP") < codes.index(INTL_FRIENDLIES_CODE)
 
 
 def test_prioritize_friendlies_window_without_tournament_focus(monkeypatch):
@@ -239,13 +302,13 @@ def test_prioritize_fixtures_for_focus():
         {"league": "EPL", "kickoff_sort": "2026-06-10T12:00:00Z"},
         {"league": "WORLD_CUP", "kickoff_sort": "2026-06-11T15:00:00Z"},
         {"league": INTL_FRIENDLIES_CODE, "kickoff_sort": "2026-06-11T14:00:00Z"},
-        {"league": "NATIONS_LEAGUE", "kickoff_sort": "2026-06-10T18:00:00Z"},
+        {"league": "FA_CUP", "kickoff_sort": "2026-06-10T18:00:00Z"},
     ]
     ordered = prioritize_fixtures_for_focus(fixtures, today=date(2026, 6, 20))
     assert [f["league"] for f in ordered] == [
         "WORLD_CUP",
         INTL_FRIENDLIES_CODE,
-        "NATIONS_LEAGUE",
+        "FA_CUP",
         "EPL",
     ]
 

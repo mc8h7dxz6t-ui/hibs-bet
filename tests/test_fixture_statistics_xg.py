@@ -72,6 +72,32 @@ def test_fetch_respects_per_refresh_budget(monkeypatch):
     assert api.fetch_fixture_statistics.call_count == 1
 
 
+def test_priority_league_uses_reserved_budget(monkeypatch):
+    monkeypatch.setenv("HIBS_FETCH_FIXTURE_STATISTICS_XG", "1")
+    monkeypatch.setenv("HIBS_FETCH_FIXTURE_STATISTICS_XG_MAX", "2")
+    reset_statistics_xg_budget()
+
+    api = MagicMock()
+    api.fetch_fixture_statistics.return_value = [
+        {"team": {"id": 1}, "statistics": [{"type": "Expected Goals", "value": "1.1"}]},
+        {"team": {"id": 2}, "statistics": [{"type": "Expected Goals", "value": "0.9"}]},
+    ]
+    cache = MagicMock()
+    cache.get.return_value = None
+
+    for _ in range(3):
+        fetch_fixture_statistics_xg(
+            api,
+            cache,
+            100,
+            home_team_id=1,
+            away_team_id=2,
+            current_source="goals_proxy",
+            league_code="IRELAND_PREMIER",
+        )
+    assert api.fetch_fixture_statistics.call_count == 2
+
+
 def test_disabled_when_env_off(monkeypatch):
     monkeypatch.delenv("HIBS_FETCH_FIXTURE_STATISTICS_XG", raising=False)
     reset_statistics_xg_budget()

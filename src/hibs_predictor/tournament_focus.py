@@ -1,7 +1,11 @@
 """Tournament / international focus mode (World Cup window, date-driven).
 
-Default (no ``HIBS_TOURNAMENT_FOCUS``): domestic leagues outside **2026-06-01 →
-2026-07-18**; international focus ON inside that window (UTC calendar).
+Default summer (**2026-05-20 → 2026-08-01**, before **26/27** domestic seasons): **World Cup**
+is the main target (**2026-06-01 → 2026-07-18** tournament focus on the dashboard),
+plus **international friendlies** (wider fixture window through the summer break),
+**cup / UEFA finals**, and **League of Ireland + Nordics** as peer **5-day** daily options
+(same fixture window as the dashboard — not extended friendlies horizon).
+No SPL, EPL, or European league calendars until the offseason ends.
 
 ``HIBS_TOURNAMENT_FOCUS=worldcup`` (or ``euros`` / ``international``) forces focus
 on anytime. ``HIBS_TOURNAMENT_FOCUS=0`` forces domestic even inside the window.
@@ -20,21 +24,42 @@ from typing import Any, Dict, List, Optional
 
 from hibs_predictor.config import ALL_LEAGUE_CODES, DASHBOARD_LEAGUE_ORDER
 
-# Fetch + display priority during focus (World Cup first, then Nations, then Euros).
+# Core international tournament (always in active summer / WC fetch lists).
 INTERNATIONAL_FOCUS_LEAGUE_CODES = [
     "WORLD_CUP",
-    "NATIONS_LEAGUE",
-    "EUROS",
 ]
 
-# Optional during World Cup window (API-Football league 10); not in base list until enabled.
 INTL_FRIENDLIES_CODE = "INTL_FRIENDLIES"
+
+# Knockout / final-stage cups only (no EPL, La Liga, etc.).
+# In-season through UK/European summer — use dashboard fetch window only (typically 5 days).
+_SUMMER_DAILY_LEAGUE_CODES: tuple[str, ...] = (
+    "IRELAND_PREMIER",
+    "NORWAY_ELITESERIEN",
+    "FINLAND_VEIKKAUSLIIGA",
+    "DENMARK_SL",
+)
+
+_CUP_FINAL_LEAGUE_CODES: tuple[str, ...] = (
+    "UCL",
+    "EUROPA_LEAGUE",
+    "UECL",
+    "FA_CUP",
+    "SCOTTISH_CUP",
+    "LEAGUE_CUP",
+    "COPA_DEL_REY",
+    "COPPA_ITALIA",
+    "DFB_POKAL",
+    "COUPE_DE_FRANCE",
+)
 
 _DEFAULT_AUTO_START = date(2026, 6, 1)
 _DEFAULT_AUTO_END = date(2026, 7, 18)
 # International friendlies window (pre-World Cup block through tournament end).
 _DEFAULT_FRIENDLIES_AUTO_START = date(2026, 5, 20)
-
+# UK + most European domestic leagues are between seasons until ~August (Nordics keep playing).
+_DEFAULT_DOMESTIC_OFFSEASON_START = date(2026, 5, 20)
+_DEFAULT_DOMESTIC_OFFSEASON_END = date(2026, 8, 1)
 
 def _env_truthy(name: str) -> bool:
     return (os.getenv(name) or "").strip().lower() in ("1", "true", "yes", "on")
@@ -59,15 +84,93 @@ def _auto_window() -> tuple[date, date]:
 
 
 def _friendlies_window() -> tuple[date, date]:
-    """Calendar range when INTL_FRIENDLIES are included in international focus fetch."""
+    """Calendar range when INTL_FRIENDLIES are included (through summer break / 26/27 prep)."""
     start = (
         _parse_date(os.getenv("HIBS_FRIENDLIES_FOCUS_START", ""))
         or _DEFAULT_FRIENDLIES_AUTO_START
     )
-    _, end = _auto_window()
+    end = _parse_date(os.getenv("HIBS_FRIENDLIES_FOCUS_END", ""))
+    if end is None:
+        _, off_end = _domestic_offseason_window()
+        end = off_end
     if end < start:
         start, end = end, start
     return start, end
+
+
+def _domestic_offseason_window() -> tuple[date, date]:
+    """UK / European domestic (non-Nordic) typically idle until early August."""
+    start = (
+        _parse_date(os.getenv("HIBS_DOMESTIC_OFFSEASON_START", ""))
+        or _DEFAULT_DOMESTIC_OFFSEASON_START
+    )
+    end = _parse_date(os.getenv("HIBS_DOMESTIC_OFFSEASON_END", "")) or _DEFAULT_DOMESTIC_OFFSEASON_END
+    if end < start:
+        start, end = end, start
+    return start, end
+
+
+def domestic_offseason_active(*, today: Optional[date] = None) -> bool:
+    """
+    True when UK + European domestic leagues should be skipped from default fetch.
+
+    Override: ``HIBS_FETCH_ALL_DOMESTIC=1`` always fetches everything;
+    ``HIBS_DOMESTIC_OFFSEASON=0`` disables the summer trim even in the window.
+    """
+    if _env_truthy("HIBS_FETCH_ALL_DOMESTIC"):
+        return False
+    if _focus_explicitly_disabled():
+        return False
+    raw = (os.getenv("HIBS_DOMESTIC_OFFSEASON") or "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    cur = today if today is not None else _today_utc()
+    start, end = _domestic_offseason_window()
+    return start <= cur < end
+
+
+def summer_daily_league_codes() -> tuple[str, ...]:
+    """LOI + Nordics: peer daily options on the 5-day dashboard window (not friendlies horizon)."""
+    return _SUMMER_DAILY_LEAGUE_CODES
+
+
+def is_summer_daily_league(league_code: str) -> bool:
+    """True for League of Ireland and Nordic codes (summer peer daily leagues)."""
+    return (league_code or "").strip().upper() in _SUMMER_DAILY_LEAGUE_CODES
+
+
+def active_competition_league_codes(*, today: Optional[date] = None) -> List[str]:
+    """
+    Summer / focus fetch list: World Cup first, then friendlies, LOI/Nordics (5-day), cups.
+    """
+    seen: set[str] = set()
+    out: List[str] = []
+
+    def _add(code: str) -> None:
+        c = (code or "").strip().upper()
+        if c and c in ALL_LEAGUE_CODES and c not in seen:
+            seen.add(c)
+            out.append(c)
+
+    for code in INTERNATIONAL_FOCUS_LEAGUE_CODES:
+        _add(code)
+    if _friendlies_in_focus(today=today):
+        _add(INTL_FRIENDLIES_CODE)
+    if domestic_offseason_active(today=today):
+        for code in _SUMMER_DAILY_LEAGUE_CODES:
+            _add(code)
+    for code in _CUP_FINAL_LEAGUE_CODES:
+        _add(code)
+    extra = (os.getenv("HIBS_ACTIVE_EXTRA_LEAGUES") or "").strip()
+    if extra:
+        for raw in extra.split(","):
+            _add(raw.strip().upper())
+    return out
+
+
+def summer_active_league_codes(*, today: Optional[date] = None) -> List[str]:
+    """Alias for active summer / WC fetch list."""
+    return active_competition_league_codes(today=today)
 
 
 def friendlies_window_active(*, today: Optional[date] = None) -> bool:
@@ -108,10 +211,7 @@ def _friendlies_in_focus(*, today: Optional[date] = None) -> bool:
 
 def international_focus_league_codes(*, today: Optional[date] = None) -> List[str]:
     """League codes fetched when tournament focus is on and domestic is excluded."""
-    codes = list(INTERNATIONAL_FOCUS_LEAGUE_CODES)
-    if _friendlies_in_focus(today=today) and INTL_FRIENDLIES_CODE not in codes:
-        codes.insert(1, INTL_FRIENDLIES_CODE)
-    return codes
+    return active_competition_league_codes(today=today)
 
 
 def tournament_focus_mode(*, today: Optional[date] = None) -> Optional[str]:
@@ -152,8 +252,19 @@ def tournament_focus_label(*, today: Optional[date] = None) -> str:
 
 
 def dashboard_default_region(*, today: Optional[date] = None) -> str:
-    if tournament_focus_active(today=today) or friendlies_window_active(today=today):
+    """
+    Default region chip on the dashboard.
+
+    World Cup window: International (friendlies + WC in that chip).
+    Pre-WC summer / domestic offseason: All — UEFA finals (UCL/EL/UECL) are fetched but
+    use the European region slug, so International-only hides Conference League tonight.
+    """
+    if tournament_focus_active(today=today):
         return "international"
+    if domestic_offseason_active(today=today):
+        return ""
+    if friendlies_window_active(today=today):
+        return ""
     return ""
 
 
@@ -162,8 +273,10 @@ def league_codes_for_fetch(
     today: Optional[date] = None,
     include_domestic: bool = False,
 ) -> List[str]:
-    if tournament_focus_active(today=today) and not include_domestic:
-        return international_focus_league_codes(today=today)
+    if include_domestic:
+        return list(ALL_LEAGUE_CODES)
+    if tournament_focus_active(today=today) or domestic_offseason_active(today=today):
+        return active_competition_league_codes(today=today)
     return list(ALL_LEAGUE_CODES)
 
 
@@ -172,8 +285,10 @@ def effective_dashboard_league_order(
     today: Optional[date] = None,
     include_domestic: bool = False,
 ) -> List[str]:
-    if tournament_focus_active(today=today) and not include_domestic:
-        return international_focus_league_codes(today=today)
+    if include_domestic:
+        return list(DASHBOARD_LEAGUE_ORDER)
+    if tournament_focus_active(today=today) or domestic_offseason_active(today=today):
+        return active_competition_league_codes(today=today)
     return list(DASHBOARD_LEAGUE_ORDER)
 
 
@@ -183,9 +298,13 @@ def prioritize_fixtures_for_focus(
     today: Optional[date] = None,
 ) -> List[Dict[str, Any]]:
     """International fixtures first for assistant / summaries when focus or friendlies window is on."""
-    if not tournament_focus_active(today=today) and not friendlies_window_active(today=today):
+    if (
+        not tournament_focus_active(today=today)
+        and not friendlies_window_active(today=today)
+        and not domestic_offseason_active(today=today)
+    ):
         return list(fixtures or [])
-    intl = set(international_focus_league_codes(today=today))
+    intl = set(active_competition_league_codes(today=today))
     primary: List[Dict[str, Any]] = []
     secondary: List[Dict[str, Any]] = []
     for row in fixtures or []:
@@ -193,7 +312,7 @@ def prioritize_fixtures_for_focus(
             primary.append(row)
         else:
             secondary.append(row)
-    order = {code: i for i, code in enumerate(international_focus_league_codes(today=today))}
+    order = {code: i for i, code in enumerate(active_competition_league_codes(today=today))}
     primary.sort(
         key=lambda f: (
             order.get(str(f.get("league") or ""), 99),
@@ -213,7 +332,9 @@ def tournament_focus_context(
     mode = tournament_focus_mode(today=today) or ""
     start, end = _auto_window()
     fr_start, fr_end = _friendlies_window()
-    intl_only = active and not include_domestic
+    off_season = domestic_offseason_active(today=today)
+    off_start, off_end = _domestic_offseason_window()
+    intl_only = (active or off_season) and not include_domestic
     return {
         "active": active,
         "mode": mode,
@@ -222,6 +343,12 @@ def tournament_focus_context(
         "fetch_leagues": list(league_codes_for_fetch(today=today, include_domestic=include_domestic)),
         "include_friendlies": _friendlies_in_focus(today=today),
         "friendlies_window_active": friendlies_window_active(today=today),
+        "domestic_offseason_active": off_season,
+        "domestic_offseason_start": off_start.isoformat(),
+        "domestic_offseason_end": off_end.isoformat(),
+        "active_competition_leagues": active_competition_league_codes(today=today),
+        "summer_daily_leagues": list(_SUMMER_DAILY_LEAGUE_CODES),
+        "cup_final_leagues": list(_CUP_FINAL_LEAGUE_CODES),
         "intl_only_fetch": intl_only,
         "auto_window_start": start.isoformat(),
         "auto_window_end": end.isoformat(),
