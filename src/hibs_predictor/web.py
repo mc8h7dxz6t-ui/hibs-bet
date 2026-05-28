@@ -244,12 +244,13 @@ def _sky_dock_context() -> Dict[str, Any]:
     env_enabled = _show_sky_panel()
     probe = probe_sky_dock_embed()
     embed_ok = bool(probe.get("available"))
-    show = env_enabled and embed_ok
+    # Keep dock visible when enabled; probe now only informs status hints.
+    show = env_enabled
     news_embed = probe.get("news_live_embed_url") or SKY_SPORTS_NEWS_YOUTUBE_LIVE_EMBED_URL
     return {
         "show_sky_panel": show,
         "sky_dock_available": embed_ok,
-        "sky_dock_unavailable_note": env_enabled and not embed_ok,
+        "sky_dock_unavailable_note": False,
         "sky_sports_news_live_embed_url": news_embed,
         "sky_sports_news_preset_url": SKY_SPORTS_NEWS_YOUTUBE_PRESET_DISPLAY,
         "sky_sports_news_open_url": SKY_SPORTS_NEWS_YOUTUBE_LIVE_PAGE_URL,

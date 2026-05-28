@@ -255,6 +255,7 @@
 <script>
 (function () {
     var FILTER_KEY = 'hibs_league_filter_v2';
+    var firstFilterPass = true;
     var activeRegion = '';
     var activeLeague = '';
     var searchQ = '';
@@ -361,7 +362,10 @@
         var dqMin = currentDqMin();
         var hint = document.getElementById('region-filter-hint');
         if (hint && !defaultRegion) hint.hidden = activeRegion !== 'uk' || !!activeLeague;
+        var totalCards = 0;
+        var visibleCards = 0;
         document.querySelectorAll('#dash-fixture-root .fixture-card').forEach(function (card) {
+            totalCards += 1;
             var rg = activeRegion;
             var okR = !rg || card.getAttribute('data-region') === rg;
             var lg = activeLeague;
@@ -374,8 +378,18 @@
             var okD = !fullDataOnly || dq >= dqMin;
             var ok90 = !activeDqMin || dq >= activeDqMin;
             var show = okR && okL && okV && okS && okD && ok90;
+            if (show) visibleCards += 1;
             card.style.display = show ? '' : 'none';
         });
+        if (firstFilterPass && totalCards > 0 && visibleCards === 0 && activeLeague) {
+            activeLeague = '';
+            saveFilterState();
+            restoreFilterChips();
+            firstFilterPass = false;
+            applyDashFilters();
+            return;
+        }
+        firstFilterPass = false;
         document.querySelectorAll('#dash-fixture-root .lg-block').forEach(function (block) {
             var vis = false;
             block.querySelectorAll('.fixture-card').forEach(function (c) {
