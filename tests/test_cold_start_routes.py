@@ -52,16 +52,16 @@ def test_dashboard_refresh_progressive_returns_cold_shell(monkeypatch):
     assert "ETag" not in resp.headers
 
 
-def test_dashboard_cold_shell_keeps_mobile_sky_players_links(monkeypatch):
+def test_dashboard_cold_shell_keeps_players_panel_visible(monkeypatch):
     from hibs_predictor.web import app
 
     monkeypatch.setenv("HIBS_PROGRESSIVE_LOAD", "1")
-    monkeypatch.setenv("HIBS_SHOW_SKY_PANEL", "1")
     with patch("hibs_predictor.web.clear_application_caches"), patch(
         "hibs_predictor.web.fetch_all_fixtures", side_effect=AssertionError("should not block on refresh")
     ), patch("hibs_predictor.web._schedule_dashboard_refresh"):
         client = app.test_client()
         resp = client.get("/?refresh=1")
     body = resp.get_data(as_text=True)
-    assert "Sky panel is available on desktop." in body
-    assert "Players</a>" in body
+    assert 'id="dashboard-players-panel"' in body
+    assert "Players Snapshot" in body
+    assert "Loading players data from cached fixtures" in body

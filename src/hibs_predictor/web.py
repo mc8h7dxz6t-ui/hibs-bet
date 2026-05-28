@@ -221,13 +221,8 @@ def _tournament_focus_context(*, include_domestic: bool = False) -> Dict[str, An
 
 
 def _show_sky_panel() -> bool:
-    """Global Sky Sports dock (set HIBS_SHOW_SKY_PANEL=0 to hide)."""
-    return (os.getenv("HIBS_SHOW_SKY_PANEL") or "1").strip().lower() not in (
-        "0",
-        "false",
-        "no",
-        "off",
-    )
+    """Sky dock is non-essential and no longer part of core UX."""
+    return False
 
 
 def _launch_media_enabled() -> bool:
@@ -241,11 +236,10 @@ def _launch_media_enabled() -> bool:
 
 
 def _sky_dock_context() -> Dict[str, Any]:
-    env_enabled = _show_sky_panel()
     probe = probe_sky_dock_embed()
     embed_ok = bool(probe.get("available"))
-    # Keep dock visible when enabled; probe now only informs status hints.
-    show = env_enabled
+    # Keep Sky endpoints available for links/routes, but hide dock from core UX.
+    show = False
     news_embed = probe.get("news_live_embed_url") or SKY_SPORTS_NEWS_YOUTUBE_LIVE_EMBED_URL
     return {
         "show_sky_panel": show,
@@ -2450,7 +2444,7 @@ def index():
             assistant_packets=assistant_packets,
             assistant_recommendations=assistant_bundle.get("recommendations"),
             sidebar_upcoming=data.get("sidebar_upcoming", []),
-            sky_players_panel=_sky_players_panel(upcoming),
+            dashboard_players_panel=_players_page_rows(upcoming, limit=8),
             recent_results=recent_results.get("all", []),
             recent_results_days=recent_results.get("results_days", 3),
             recent_results_total=recent_results.get("total", 0),
@@ -2537,7 +2531,7 @@ def index():
         assistant_packets=assistant_packets,
         assistant_recommendations=assistant_bundle.get("recommendations"),
         sidebar_upcoming=data.get("sidebar_upcoming", []),
-        sky_players_panel=_sky_players_panel(upcoming),
+        dashboard_players_panel=_players_page_rows(upcoming, limit=8),
         recent_results=recent_results.get("all", []),
         recent_results_days=recent_results.get("results_days", 3),
         recent_results_total=recent_results.get("total", 0),

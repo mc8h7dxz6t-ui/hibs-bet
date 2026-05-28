@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en"{% if show_sky_panel %} class="hibs-sky-dock-enabled"{% endif %}>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1366,15 +1366,6 @@
     <script>
         (function () {
             try {
-                if (localStorage.getItem('hibs_sky_dock_collapsed') === '1') {
-                    document.documentElement.classList.add('sky-dock-collapsed');
-                }
-            } catch (e) {}
-        })();
-    </script>
-    <script>
-        (function () {
-            try {
                 var raw = localStorage.getItem('hibs_user_settings_v1');
                 var s = raw ? JSON.parse(raw) : {};
                 var root = document.documentElement;
@@ -1388,19 +1379,10 @@
 </head>
 <body class="hibs-launch-active">
 {% include '_launch_wait_overlay.html' %}
-<div class="hibs-app-shell container{% block container_class %}{% endblock %}{% if show_sky_panel %} hibs-sky-dock-shell{% endif %}">
+<div class="hibs-app-shell container{% block container_class %}{% endblock %}">
     {% block content %}{% endblock %}
     <footer><p>{% from '_hibs_brand.html' import footer_crest %}{{ footer_crest() }}<span>hibs-bet</span> &mdash; Edinburgh Betting Intelligence &nbsp;|&nbsp; Gamble Responsibly &nbsp;|&nbsp; 18+</p></footer>
 </div>
-{% if show_sky_panel %}
-<div class="sky-mobile-fallback" role="status">
-    Sky panel is available on desktop. On mobile, open
-    <a href="{{ sky_sports_football_open_url }}" target="_blank" rel="noopener noreferrer">Sky Football</a>
-    <a href="{{ sky_sports_news_open_url }}" target="_blank" rel="noopener noreferrer">Sky Sports News</a>
-    <a href="/players">Players</a>
-</div>
-{% include '_sky_dock.html' %}
-{% endif %}
 {% include '_betslip_drawer.html' %}
 <script src="{{ url_for('static', filename='hibs_odds.js') }}"></script>
 <script src="{{ url_for('static', filename='hibs_betslip.js') }}"></script>

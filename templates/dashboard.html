@@ -75,16 +75,6 @@
     </div>
     {% endif %}
 
-    {% if sky_dock_unavailable_note %}
-    <p class="sky-dock-hidden-note" role="status" style="margin:0 0 12px;padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:rgba(30,41,59,0.5);font-size:0.78em;color:var(--muted);">
-        Sky TV dock hidden — stream unavailable on YouTube. Open
-        <a href="{{ sky_sports_news_open_url }}" target="_blank" rel="noopener noreferrer">Sky Sports News live</a>
-        or
-        <a href="{{ sky_sports_football_open_url }}" target="_blank" rel="noopener noreferrer">Sky Sports Football</a>
-        on YouTube instead.
-    </p>
-    {% endif %}
-
     <div class="dash-layout">
         <aside class="dash-sidebar" aria-label="Filters and upcoming fixtures">
             <p class="dash-side-hd">Coming up</p>
@@ -203,6 +193,7 @@
                 {% endfor %}
             </div>
             {% endif %}
+            {% include '_dashboard_players_panel.html' %}
 
             <div id="dash-fixture-root" class="fixtures-full-list" data-dq-min="{{ data_quality_ui_min }}" data-default-region="{{ tournament_focus.default_region }}" data-include-domestic="{{ '1' if include_domestic else '0' }}" data-intl-only-fetch="{{ '1' if tournament_focus.intl_only_fetch else '0' }}">
                 {% if total == 0 %}
@@ -815,4 +806,21 @@
     });
 })();
 </script>
+{% endblock %}
+{% block extra_css %}
+<style>
+.dashboard-players-panel{border:1px solid var(--border);border-radius:12px;background:rgba(10,22,40,0.72);padding:12px;margin:0 0 12px;}
+.dashboard-players-hd{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;font-size:0.78em;font-weight:800;letter-spacing:0.04em;color:var(--accent);}
+.dashboard-players-open{color:var(--blue);font-size:0.88em;font-weight:700;text-decoration:none;}
+.dashboard-players-open:hover{text-decoration:underline;}
+.dashboard-players-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+.dashboard-player-card{border:1px solid var(--border);border-radius:10px;background:rgba(2,6,23,0.45);padding:9px;}
+.dashboard-player-top{display:flex;justify-content:space-between;gap:8px;font-size:0.66em;color:var(--muted);margin-bottom:6px;}
+.dashboard-player-card h3{margin:0 0 7px;font-size:0.82em;line-height:1.35;}
+.dashboard-player-chips{display:flex;flex-wrap:wrap;gap:6px;}
+.dashboard-player-chip{font-size:0.62em;border:1px solid var(--border);border-radius:999px;padding:2px 6px;color:var(--muted);}
+.dashboard-player-chip.ok{border-color:rgba(57,255,20,0.35);color:var(--neon-value);}
+.dashboard-players-empty{margin:0;font-size:0.74em;line-height:1.4;color:var(--muted);}
+@media (max-width: 980px){.dashboard-players-grid{grid-template-columns:1fr;}}
+</style>
 {% endblock %}
