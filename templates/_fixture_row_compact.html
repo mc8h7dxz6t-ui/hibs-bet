@@ -121,7 +121,7 @@
             <button type="button" class="fr-add-slip" title="Add selected pick to betslip"
                 onclick="event.stopPropagation();" onpointerdown="event.stopPropagation();" onmousedown="event.stopPropagation();" onmouseup="event.stopPropagation();" ontouchstart="event.stopPropagation();">+ Slip</button>
             {% endif %}
-            <select class="fr-league-snap" title="{% if fixture.is_cup_competition %}Cup round and form{% else %}Full league table — * marks this fixture's teams{% endif %}"
+            <select class="fr-league-snap" title="{% if fixture.is_cup_competition %}Cup round and form{% else %}League table (* = fixture teams) and last-10 form{% endif %}"
                 onclick="event.stopPropagation();" onpointerdown="event.stopPropagation();" onmousedown="event.stopPropagation();" onmouseup="event.stopPropagation();" onchange="event.stopPropagation();" onkeydown="event.stopPropagation();" ontouchstart="event.stopPropagation();">
                 {% if fixture.is_cup_competition %}
                 <optgroup label="{{ fixture.cup_round_label or fixture.league_name or fixture.league }}">
@@ -129,6 +129,27 @@
                     {% if fixture.home_table_form_warn %}<option disabled>⚠ {{ fixture.home }} table vs form mismatch</option>{% endif %}
                     {% if fixture.away_table_form_warn %}<option disabled>⚠ {{ fixture.away }} table vs form mismatch</option>{% endif %}
                 </optgroup>
+                {% else %}
+                {% set table_rows = fixture.league_table_rows if fixture.league_table_rows is defined else [] %}
+                {% set table_label = fixture.league_table_name if fixture.league_table_name is defined else (fixture.league_name or fixture.league) %}
+                {% if table_rows %}
+                <optgroup label="{{ table_label }}">
+                    {% for row in table_rows %}
+                    <option {% if row.is_focus %}selected{% endif %} class="{% if row.is_home_team %}fr-tbl-home{% elif row.is_away_team %}fr-tbl-away{% endif %}">{% if row.is_focus %}* {% endif %}{% if row.is_home_team %}[H] {% elif row.is_away_team %}[A] {% endif %}{{ row.position|position_rank }}. {{ row.team|table_team_label }} · P {{ row.played }} · GF {{ row.goals_for }} GA {{ row.goals_against }} · GD {% if row.goal_diff > 0 %}+{% endif %}{{ row.goal_diff }} · {{ row.points }} pts{% if row.form %} · {{ row.form[-5:] }}{% endif %}</option>
+                    {% endfor %}
+                </optgroup>
+                {% elif fixture.home_table_snapshot or fixture.away_table_snapshot %}
+                {% set home_snap = fixture.home_table_snapshot if fixture.home_table_snapshot is defined else [] %}
+                {% set away_snap = fixture.away_table_snapshot if fixture.away_table_snapshot is defined else [] %}
+                <optgroup label="{{ table_label }}">
+                    {% for row in home_snap + away_snap %}
+                    <option {% if row.is_focus %}selected{% endif %}>{% if row.is_focus %}* {% endif %}{{ row.position|position_rank }}. {{ row.team|table_team_label }} · GF {{ row.goals_for }} GA {{ row.goals_against }} · {{ row.points }} pts</option>
+                    {% endfor %}
+                </optgroup>
+                {% else %}
+                <option selected>Table N/A</option>
+                {% endif %}
+                {% endif %}
                 {% if hl10 %}
                 <optgroup label="{{ fixture.home }} — last 10">
                     {% for r in hl10 %}
@@ -150,27 +171,6 @@
                 <optgroup label="{{ fixture.away }} — last 10">
                     <option disabled>No recent results loaded</option>
                 </optgroup>
-                {% endif %}
-                {% else %}
-                {% set table_rows = fixture.league_table_rows if fixture.league_table_rows is defined else [] %}
-                {% set table_label = fixture.league_table_name if fixture.league_table_name is defined else (fixture.league_name or fixture.league) %}
-                {% if table_rows %}
-                <optgroup label="{{ table_label }}">
-                    {% for row in table_rows %}
-                    <option {% if row.is_focus %}selected{% endif %} class="{% if row.is_home_team %}fr-tbl-home{% elif row.is_away_team %}fr-tbl-away{% endif %}">{% if row.is_focus %}* {% endif %}{% if row.is_home_team %}[H] {% elif row.is_away_team %}[A] {% endif %}{{ row.position|position_rank }}. {{ row.team|table_team_label }} · P {{ row.played }} · GF {{ row.goals_for }} GA {{ row.goals_against }} · GD {% if row.goal_diff > 0 %}+{% endif %}{{ row.goal_diff }} · {{ row.points }} pts{% if row.form %} · {{ row.form[-5:] }}{% endif %}</option>
-                    {% endfor %}
-                </optgroup>
-                {% elif fixture.home_table_snapshot or fixture.away_table_snapshot %}
-                {% set home_snap = fixture.home_table_snapshot if fixture.home_table_snapshot is defined else [] %}
-                {% set away_snap = fixture.away_table_snapshot if fixture.away_table_snapshot is defined else [] %}
-                <optgroup label="{{ table_label }}">
-                    {% for row in home_snap + away_snap %}
-                    <option {% if row.is_focus %}selected{% endif %}>{% if row.is_focus %}* {% endif %}{{ row.position|position_rank }}. {{ row.team|table_team_label }} · GF {{ row.goals_for }} GA {{ row.goals_against }} · {{ row.points }} pts</option>
-                    {% endfor %}
-                </optgroup>
-                {% else %}
-                <option selected>Table N/A</option>
-                {% endif %}
                 {% endif %}
             </select>
         </div>
