@@ -1525,112 +1525,6 @@ def _find_table_row_index(
     return None
 
 
-def _canonical_team_key(name: Any) -> str:
-    key = _team_key(name)
-    return _TEAM_CANONICAL_ALIASES.get(key, key)
-
-
-def _team_names_match(a: str, b: str) -> bool:
-    """Loose match for fixture display names vs standings (e.g. Hibs vs Hibernian)."""
-    if not a or not b:
-        return False
-    ca, cb = _canonical_team_key(a), _canonical_team_key(b)
-    if ca == cb:
-        return True
-    if ca in cb or cb in ca:
-        return True
-    ap = ca.split()
-    bp = cb.split()
-    if ap and bp and ap[0] == bp[0] and len(ap[0]) > 3:
-        return True
-    for prefix in ("sc ", "fc ", "ac ", "as ", "sv ", "sk ", "rc ", "cd ", "cf "):
-        if ca.startswith(prefix):
-            core = ca[len(prefix) :].strip()
-            if core and (core == cb or core in cb or cb in core):
-                return True
-        if cb.startswith(prefix):
-            core = cb[len(prefix) :].strip()
-            if core and (core == ca or core in ca or ca in core):
-                return True
-    return False
-
-
-def _normalize_table_row(row: Dict[str, Any]) -> Dict[str, Any]:
-    """Ensure table rows use string team names and integer ranks for templates."""
-    out = dict(row)
-    team_raw = out.get("team")
-    tid = out.get("team_id") or _table_team_id(team_raw)
-    if tid is not None:
-        out["team_id"] = tid
-    name = _table_team_display(team_raw) or _table_team_display(out.get("team_name"))
-    if name:
-        out["team"] = name
-    rank = _normalize_position_rank(out.get("position"))
-    if rank is not None:
-        out["position"] = rank
-    elif out.get("position") is not None:
-        out.pop("position", None)
-    for key in ("played", "won", "drawn", "lost", "goals_for", "goals_against", "goal_diff", "points"):
-        if key in out:
-            out[key] = _safe_int_value(out.get(key))
-    form = out.get("form")
-    if form is not None and not isinstance(form, str):
-        out["form"] = str(form)
-    return out
-
-
-def _normalize_position_dict(pos: Any) -> Dict[str, Any]:
-    """Sanitize home/away position blobs attached to fixtures."""
-    return normalize_position_dict(pos)
-
-
-def _table_row_dedupe_key(row: Dict[str, Any]) -> str:
-    tid = row.get("team_id")
-    if tid:
-        return f"id:{tid}"
-    key = _canonical_team_key(row.get("team"))
-    return f"n:{key}" if key else ""
-
-
-def _pick_largest_standings_group(groups: Any) -> List[Any]:
-    """Use the fullest standings group (avoids duplicate home/away split tables)."""
-    best: List[Any] = []
-    for group in groups or []:
-        if isinstance(group, dict):
-            if str(group.get("type") or "").upper() not in ("TOTAL", ""):
-                continue
-            entries = group.get("table") or []
-        elif isinstance(group, list):
-            entries = group
-        else:
-            continue
-        if len(entries) > len(best):
-            best = list(entries)
-    return best
-
-
-def _find_table_row_index(
-    rows: List[Dict[str, Any]],
-    team: str,
-    position_hint: Optional[Dict[str, Any]] = None,
-) -> Optional[int]:
-    key = _canonical_team_key(team)
-    if key:
-        for i, row in enumerate(rows):
-            if _canonical_team_key(row.get("team")) == key:
-                return i
-        for i, row in enumerate(rows):
-            if _team_names_match(key, _team_key(row.get("team"))):
-                return i
-    if position_hint and position_hint.get("position") not in (None, "", "?"):
-        pos = _normalize_position_rank(position_hint.get("position")) or 999
-        if pos != 999:
-            for i, row in enumerate(rows):
-                if _normalize_position_rank(row.get("position")) == pos:
-                    return i
-    return None
-
-
 def _table_row_from_position(team: str, position: Dict[str, Any], source: str = "fixture") -> Optional[Dict[str, Any]]:
     if not isinstance(position, dict):
         return None
@@ -3210,14 +3104,18 @@ def tables_page():
         data = _cold_fixture_bundle(include_domestic=False)
     else:
         data = fetch_all_fixtures(allow_stale=True)
-    tables = _build_league_tables(data["all"], include_live=True)
+    cold = bool(data.get("cold_start"))
+    if cold:
+        tables: List[Dict[str, Any]] = []
+    else:
+        tables = _build_league_tables(data["all"], include_live=True)
     return render_template(
         "tables.html",
         tables=tables,
         total=data["total"],
         fetch_days=data.get("fetch_days", _fetch_window_days()),
         display_tz_label=display_tz_label(),
-        cold_start=bool(data.get("cold_start")),
+        cold_start=cold,
     )
 
 
