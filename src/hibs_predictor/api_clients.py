@@ -4,8 +4,11 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from hibs_predictor.app_logging import get_logger, log_resilience_event
 from hibs_predictor.cache import Cache
 from hibs_predictor.rate_limiter import RateLimiter
+
+_api_log = get_logger("api_clients")
 
 
 _API_SPORTS_MISSING_KEY_WARNED = False
@@ -86,6 +89,35 @@ def _api_football_errors_truthy(errors: Any) -> bool:
     return bool(errors)
 
 
+def _local_guard_stale_response(
+    client: "BaseApiClient",
+    cache_key: str,
+    *,
+    use_cache: bool,
+) -> Optional[Dict[str, Any]]:
+    reason = client.rate_limiter.block_reason(client.service_name)
+    if not reason:
+        return None
+    if use_cache:
+        stale = client.cache.peek(cache_key)
+        if isinstance(stale, dict):
+            log_resilience_event(
+                _api_log,
+                "rate_limit_stale_reuse",
+                service=client.service_name,
+                block_reason=reason,
+                cache_key=cache_key[:80],
+            )
+            return stale
+    log_resilience_event(
+        _api_log,
+        "rate_limit_guard_blocked",
+        service=client.service_name,
+        block_reason=reason,
+    )
+    return None
+
+
 def _api_football_rate_limited(errors: Any) -> bool:
     if not isinstance(errors, dict):
         return False
@@ -116,11 +148,12 @@ class BaseApiClient:
             if cached:
                 return cached
 
-        if not self.rate_limiter.check_rate_limit(self.service_name):
-            if use_cache:
-                stale = self.cache.peek(cache_key)
-                if isinstance(stale, dict):
-                    return stale
+        guarded = _local_guard_stale_response(self, cache_key, use_cache=use_cache)
+        if guarded is not None:
+            if "error" in guarded and len(guarded) == 1:
+                return guarded
+            return guarded
+        if self.rate_limiter.block_reason(self.service_name):
             return {"error": "Rate limit exceeded. Try again later."}
 
         url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
@@ -133,10 +166,18 @@ class BaseApiClient:
         )
         try:
             response.raise_for_status()
-        except requests.HTTPError:
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else None
             if use_cache:
                 stale = self.cache.peek(cache_key)
                 if isinstance(stale, dict):
+                    log_resilience_event(
+                        _api_log,
+                        "provider_http_stale_reuse",
+                        service=self.service_name,
+                        status=status,
+                        endpoint=endpoint,
+                    )
                     return stale
             raise
         try:
@@ -347,12 +388,12 @@ class ApiSportsFootballClient(BaseApiClient):
             if cached is not None:
                 return cached
 
-        if not self.rate_limiter.check_rate_limit(self.service_name):
-            if use_cache:
-                stale = self.cache.peek(cache_key)
-                if isinstance(stale, dict):
-                    return stale
-            return {"response": [], "errors": {"rate_limit": "local guard"}}
+        guarded = _local_guard_stale_response(self, cache_key, use_cache=use_cache)
+        if guarded is not None:
+            return guarded
+        reason = self.rate_limiter.block_reason(self.service_name)
+        if reason:
+            return {"response": [], "errors": {"rate_limit": "local guard", "block_reason": reason}}
 
         url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
         try:
@@ -366,12 +407,37 @@ class ApiSportsFootballClient(BaseApiClient):
                 max_rate_limit_wait=0.0 if soft_rate_limit else None,
             )
             if soft_rate_limit and response.status_code in (429, 503):
-                return {"response": [], "errors": {"rate_limit": response.status_code}}
+                log_resilience_event(
+                    _api_log,
+                    "provider_rate_limited",
+                    service=self.service_name,
+                    endpoint=endpoint,
+                    status=response.status_code,
+                )
+                if use_cache:
+                    stale = self.cache.peek(cache_key)
+                    if isinstance(stale, dict):
+                        return stale
+                return {
+                    "response": [],
+                    "errors": {"rate_limit": response.status_code, "block_reason": "provider"},
+                }
             response.raise_for_status()
             data = response.json()
         except requests.RequestException as exc:
             print(f"[API-Sports HTTP] {endpoint}: {exc}")
-            return {"response": [], "errors": {"http": str(exc)}}
+            if use_cache:
+                stale = self.cache.peek(cache_key)
+                if isinstance(stale, dict):
+                    log_resilience_event(
+                        _api_log,
+                        "provider_http_stale_reuse",
+                        service=self.service_name,
+                        endpoint=endpoint,
+                        error=str(exc)[:120],
+                    )
+                    return stale
+            return {"response": [], "errors": {"http": str(exc), "block_reason": "provider"}}
         except ValueError as exc:
             print(f"[API-Sports JSON] {endpoint}: {exc}")
             return {"response": [], "errors": {"json": str(exc)}}

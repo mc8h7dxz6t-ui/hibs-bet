@@ -1058,6 +1058,11 @@ class DataAggregator:
                     return cached
             return out
 
+        if not cached:
+            stale_disk = self.cache.peek(cache_key)
+            if stale_disk and isinstance(stale_disk, dict) and stale_disk.get("home_stats"):
+                return stale_disk
+
         enriched = dict(cached) if cached else dict(fixture)
 
         league_strength = float(league.get("strength_factor", 1.0))

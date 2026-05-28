@@ -424,6 +424,12 @@ def _hibs_debug_log(message: str) -> None:
         print(f"[HIBS_DEBUG] {message}")
 
 
+def _log_resilience(event: str, **fields: object) -> None:
+    from hibs_predictor.app_logging import get_logger, log_resilience_event
+
+    log_resilience_event(get_logger("resilience"), event, **fields)
+
+
 def _cache_ttl_hours(default: float = 1.0) -> float:
     try:
         return max(0.01, float(os.getenv("HIBS_CACHE_TTL_HOURS", str(default))))
@@ -2105,6 +2111,20 @@ def fetch_all_fixtures(
         cache.set(ck, result, ttl_hours=ttl)
     else:
         _hibs_debug_log(f"not caching empty all_fixtures bundle key={ck}")
+        if allow_stale:
+            stale = cache.peek(ck)
+            if isinstance(stale, dict) and _is_complete_fixture_bundle(stale) and stale.get("all"):
+                bundle = dict(stale)
+                bundle["fetch_days"] = _fetch_window_days()
+                bundle["cache_stale"] = True
+                if attach_live:
+                    _refresh_live_on_bundle(bundle)
+                _log_resilience(
+                    "fixture_bundle_stale_fallback",
+                    key=ck,
+                    total=bundle.get("total"),
+                )
+                return bundle
     return result
 
 
@@ -3125,7 +3145,7 @@ def settings_page():
 @app.route("/acca")
 @login_required
 def acca_builder():
-    data = fetch_all_fixtures()
+    data = fetch_all_fixtures(allow_stale=True)
     return render_template("acca_builder.html", fixtures=_bundle_fixtures(data))
 
 

@@ -393,6 +393,18 @@
             applyDashFilters();
             return;
         }
+        if (firstFilterPass && totalCards > 0 && visibleCards === 0 && activeDqMin) {
+            activeDqMin = 0;
+            var dqRow = document.getElementById('dq-chip-row');
+            if (dqRow) {
+                dqRow.querySelectorAll('.chip-dq').forEach(function (b) { b.classList.remove('active'); });
+                var allDq = dqRow.querySelector('.chip-dq[data-dq-min=""]');
+                if (allDq) allDq.classList.add('active');
+            }
+            firstFilterPass = false;
+            applyDashFilters();
+            return;
+        }
         firstFilterPass = false;
         document.querySelectorAll('#dash-fixture-root .lg-block').forEach(function (block) {
             var vis = false;

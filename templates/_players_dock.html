@@ -90,5 +90,20 @@
             setCollapsed(false);
         });
     }
+
+    {% if players_dock_cold_start %}
+    (function () {
+        var KEY = 'hibs_players_dock_cold_reloads';
+        var MAX = 3;
+        var n = 0;
+        try { n = parseInt(sessionStorage.getItem(KEY) || '0', 10) || 0; } catch (e) {}
+        if (n < MAX) {
+            try { sessionStorage.setItem(KEY, String(n + 1)); } catch (e) {}
+            window.setTimeout(function () { window.location.reload(); }, 15000);
+        }
+    })();
+    {% else %}
+    try { sessionStorage.removeItem('hibs_players_dock_cold_reloads'); } catch (e) {}
+    {% endif %}
 })();
 </script>

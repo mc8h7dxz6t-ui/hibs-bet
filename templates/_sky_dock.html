@@ -69,7 +69,7 @@
                 ></iframe>
             </div>
         </div>
-        <div class="sky-players-empty" id="sky-dock-fallback-note" hidden>
+        <div class="sky-players-empty" id="sky-dock-fallback-note"{% if not sky_dock_unavailable_note %} hidden{% endif %}>
             Sky stream embed is unavailable right now. Use
             <a href="{{ sky_sports_news_open_url }}" target="_blank" rel="noopener noreferrer">Sky Sports News</a>
             or

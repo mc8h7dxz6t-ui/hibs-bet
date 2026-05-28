@@ -1466,7 +1466,8 @@
                 root.setAttribute('data-hibs-theme', s.theme || 'default');
                 root.setAttribute('data-hibs-density', s.density || 'comfortable');
                 root.setAttribute('data-hibs-font', s.font || 'standard');
-                root.setAttribute('data-hibs-ui', s.uiMode || 'home');
+                var ui = String(s.uiMode || 'home').toLowerCase();
+                root.setAttribute('data-hibs-ui', ui === 'away' ? 'away' : 'home');
             } catch (e) {}
         })();
     </script>
@@ -1542,6 +1543,7 @@
         function write(settings) {
             var next = Object.assign({}, DEFAULTS, settings || {});
             next.fetchDays = normalizeFetchDays(next.fetchDays);
+            next.uiMode = normalizeUiMode(next.uiMode);
             try {
                 global.localStorage.setItem(KEY, JSON.stringify(next));
                 global.localStorage.setItem(FETCH_DAYS_KEY, next.fetchDays);
@@ -1551,12 +1553,18 @@
             return next;
         }
 
+        function normalizeUiMode(raw) {
+            var m = String(raw || DEFAULTS.uiMode).toLowerCase();
+            return m === 'away' ? 'away' : 'home';
+        }
+
         function apply(settings) {
             var s = Object.assign({}, DEFAULTS, settings || read());
+            s.uiMode = normalizeUiMode(s.uiMode);
             document.documentElement.setAttribute('data-hibs-theme', s.theme || DEFAULTS.theme);
             document.documentElement.setAttribute('data-hibs-density', s.density || DEFAULTS.density);
             document.documentElement.setAttribute('data-hibs-font', s.font || DEFAULTS.font);
-            document.documentElement.setAttribute('data-hibs-ui', s.uiMode || DEFAULTS.uiMode);
+            document.documentElement.setAttribute('data-hibs-ui', s.uiMode);
             document.querySelectorAll('[data-hibs-setting-label="profile"]').forEach(function (node) {
                 node.textContent = PROFILE_LABELS[s.profile] || PROFILE_LABELS.balanced;
             });

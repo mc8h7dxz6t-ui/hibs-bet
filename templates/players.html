@@ -65,7 +65,7 @@
                 <div>
                     <h4>{{ row.home }} top scorers</h4>
                     <ul>
-                        {% for pl in row.home_top_scorers[:4] %}
+                        {% for pl in (row.home_top_scorers or [])[:4] %}
                         <li>{{ pl.name or 'Unknown' }}{% if pl.goals is defined and pl.goals is not none %} · {{ pl.goals }}g{% endif %}</li>
                         {% else %}
                         <li class="muted">No scorer feed</li>
@@ -78,7 +78,7 @@
                 <div>
                     <h4>{{ row.away }} top scorers</h4>
                     <ul>
-                        {% for pl in row.away_top_scorers[:4] %}
+                        {% for pl in (row.away_top_scorers or [])[:4] %}
                         <li>{{ pl.name or 'Unknown' }}{% if pl.goals is defined and pl.goals is not none %} · {{ pl.goals }}g{% endif %}</li>
                         {% else %}
                         <li class="muted">No scorer feed</li>

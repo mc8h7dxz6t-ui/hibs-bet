@@ -286,6 +286,15 @@ def test_ensure_dq_backfills_missing_only():
     assert float(rows[0]["data_quality"]["score_pct"]) >= 85.0
 
 
+def test_dq_floor_constants_unchanged_for_regression_guard():
+    """Hardening must not silently lower earned domestic / showpiece floors."""
+    from hibs_predictor import data_quality as dq_mod
+
+    assert dq_mod._CORE_DQ_FLOOR >= 88.0
+    assert dq_mod._INTL_DQ_FLOOR >= 85.0
+    assert dq_mod._PREMIUM_DQ_FLOOR >= 95.0
+
+
 def test_from_row_ucl_showpiece_floor_with_league():
     row = {
         "id": 100,

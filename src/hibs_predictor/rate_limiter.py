@@ -4,7 +4,7 @@ import json
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 
 class RateLimiter:
@@ -66,26 +66,32 @@ class RateLimiter:
         with open(self.state_file, "w") as f:
             json.dump(self.state, f)
 
-    def check_rate_limit(self, service: str) -> bool:
-        if service not in self.limits:
-            return True
-
-        entry = self._ensure_entry_shape(service)
+    def _hour_window_active(self, entry: Dict[str, object]) -> bool:
         reset_at = entry.get("reset_at")
+        return bool(reset_at and datetime.fromisoformat(str(reset_at)) > datetime.now())
 
-        if reset_at and datetime.fromisoformat(reset_at) > datetime.now():
-            count = entry.get("count", 0)
+    def _minute_window_active(self, entry: Dict[str, object]) -> bool:
+        minute_reset_at = entry.get("minute_reset_at")
+        return bool(minute_reset_at and datetime.fromisoformat(str(minute_reset_at)) > datetime.now())
+
+    def block_reason(self, service: str) -> Optional[str]:
+        """Why a request is blocked: local guard (minute/hour) or None if allowed."""
+        if service not in self.limits:
+            return None
+        entry = self._ensure_entry_shape(service)
+        if self._hour_window_active(entry):
+            count = int(entry.get("count", 0) or 0)
             if count >= self.limits[service]:
-                return False
-
+                return "guard_hour"
         minute_limit = self.minute_limits.get(service, 0)
-        if minute_limit > 0:
-            minute_reset_at = entry.get("minute_reset_at")
-            if minute_reset_at and datetime.fromisoformat(str(minute_reset_at)) > datetime.now():
-                minute_count = int(entry.get("minute_count", 0) or 0)
-                if minute_count >= minute_limit:
-                    return False
-        return True
+        if minute_limit > 0 and self._minute_window_active(entry):
+            minute_count = int(entry.get("minute_count", 0) or 0)
+            if minute_count >= minute_limit:
+                return "guard_minute"
+        return None
+
+    def check_rate_limit(self, service: str) -> bool:
+        return self.block_reason(service) is None
 
     def record_request(self, service: str) -> None:
         entry = self._ensure_entry_shape(service)
@@ -139,4 +145,20 @@ class RateLimiter:
         self._save_state()
 
     def is_blocked(self, service: str) -> bool:
-        return not self.check_rate_limit(service)
+        return self.block_reason(service) is not None
+
+    def diagnostics(self, service: str) -> Dict[str, object]:
+        """Expose guard state for logs and /status-style probes."""
+        entry = self._ensure_entry_shape(service)
+        reason = self.block_reason(service)
+        return {
+            "service": service,
+            "blocked": reason is not None,
+            "block_reason": reason,
+            "hour_count": int(entry.get("count", 0) or 0),
+            "hour_limit": self.limits.get(service, 0),
+            "hour_reset_at": entry.get("reset_at"),
+            "minute_count": int(entry.get("minute_count", 0) or 0),
+            "minute_limit": self.minute_limits.get(service, 0),
+            "minute_reset_at": entry.get("minute_reset_at"),
+        }

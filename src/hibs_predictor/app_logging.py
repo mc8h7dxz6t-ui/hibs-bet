@@ -113,3 +113,40 @@ def configure_app_logging(base_dir: str, *, tee_stdio: bool = True) -> Optional[
 
 def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(f"hibs.{name}")
+
+
+def resilience_log_enabled() -> bool:
+    """Structured resilience markers (slow paths, stale fallbacks, rate-limit guards)."""
+    return _env_on("HIBS_RESILIENCE_LOG", "1")
+
+
+def log_resilience_event(logger: logging.Logger, event: str, **fields: object) -> None:
+    """Concise structured log for fallback and guard decisions."""
+    if not resilience_log_enabled():
+        return
+    parts = [f"event={event}"]
+    for key, val in sorted(fields.items()):
+        if val is None:
+            continue
+        parts.append(f"{key}={val}")
+    logger.info(" ".join(parts))
+
+
+def log_slow_path(
+    logger: logging.Logger,
+    label: str,
+    elapsed_sec: float,
+    *,
+    threshold_sec: float = 2.0,
+    **fields: object,
+) -> None:
+    if elapsed_sec < threshold_sec:
+        return
+    log_resilience_event(
+        logger,
+        "slow_path",
+        label=label,
+        elapsed_sec=round(elapsed_sec, 2),
+        threshold_sec=threshold_sec,
+        **fields,
+    )
