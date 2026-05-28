@@ -34,6 +34,13 @@ An advanced bet predictor for UK and European football leagues with Edinburgh/Hi
 
 **Work here:** `~/Applications` (also `~/hibs-betting-app` → same folder). See `PROJECT_LOCATIONS.md`.
 
+## Documentation
+
+- **[Product overview](docs/PRODUCT_OVERVIEW.md)** — surfaces, data pipeline, DQ, engine, reliability, deploy
+- **[Betting engine](docs/BETTING_ENGINE.md)** — Poisson/Dixon–Coles, value, calibration
+- **[VPS reliability baseline](docs/RELIABILITY_BASELINE.md)** — production env flags
+- **[Data sources](docs/DATA_SOURCES.md)** — APIs and scrapers
+
 ## Quick Start
 
 ### 1. Install & Setup
