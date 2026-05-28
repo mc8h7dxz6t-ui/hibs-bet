@@ -1270,6 +1270,12 @@ def fetch_next_48h_fixtures(league_code: str, *, allow_stale: bool = False) -> L
     stale_by_key = _stale_fixture_row_index(stale_rows)
     fixtures = []
     for fixture in fetched.values():
+        fix_key = _fixture_key(fixture)
+        if _provider_guard_blocked("api_sports"):
+            stale_row = stale_by_key.get(fix_key)
+            if stale_row:
+                fixtures.append(dict(stale_row))
+                continue
         enriched = _safe_enrich(fixture, league_code)
         try:
             prediction = betting_engine.predict_with_confidence(enriched)
@@ -1404,10 +1410,16 @@ def fetch_next_48h_fixtures(league_code: str, *, allow_stale: bool = False) -> L
         fixtures.append(row)
 
     fixtures.sort(key=lambda x: x.get("date") or "")
-    fixtures = _merge_league_fixture_lists(fixtures, stale_rows)
-    if stale_rows and fixtures:
+    disk_rows = [
+        row
+        for row in fixtures
+        if _slim_row_enrich_fresh(row)
+        or str(row.get("_hibs_prediction_block_reason") or "") != "api_rate_guard"
+    ]
+    disk_rows = _merge_league_fixture_lists(disk_rows, stale_rows)
+    if stale_rows and disk_rows:
         old_fresh = sum(1 for row in stale_rows if _slim_row_enrich_fresh(row))
-        new_fresh = sum(1 for row in fixtures if _slim_row_enrich_fresh(row))
+        new_fresh = sum(1 for row in disk_rows if _slim_row_enrich_fresh(row))
         if old_fresh > new_fresh:
             _log_resilience(
                 "league_fixture_keep_stale_cache",
@@ -1416,11 +1428,12 @@ def fetch_next_48h_fixtures(league_code: str, *, allow_stale: bool = False) -> L
                 new_fresh=new_fresh,
             )
             return stale_rows
-    cache.set(
-        cache_key,
-        fixtures,
-        ttl_hours=ttl if fixtures else _EMPTY_FIXTURE_CACHE_TTL_HOURS,
-    )
+    if disk_rows:
+        cache.set(
+            cache_key,
+            disk_rows,
+            ttl_hours=ttl if disk_rows else _EMPTY_FIXTURE_CACHE_TTL_HOURS,
+        )
     return fixtures
 
 
