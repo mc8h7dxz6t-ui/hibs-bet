@@ -49,6 +49,11 @@
         <h1 class="tables-title">League Tables</h1>
         <p class="tables-sub">Current standings where a full table feed is available, falling back to the table rows already attached to enriched fixtures. Partial tables are labelled so missing leagues or teams do not look more complete than they are.</p>
     </section>
+    {% if cold_start %}
+    <div class="api-missing-banner" role="status" style="margin-bottom:12px;">
+        <strong>Loading tables…</strong> First load can take a minute while fixtures warm in cache. This page will auto-refresh shortly.
+    </div>
+    {% endif %}
 
     <div class="tables-grid">
         {% for table in tables %}
@@ -91,4 +96,24 @@
         {% endfor %}
     </div>
 </div>
+{% endblock %}
+{% block extra_js %}
+{% if cold_start %}
+<script>
+(function () {
+    var KEY = 'hibs_tables_cold_reloads';
+    var MAX_RELOADS = 4;
+    var n = 0;
+    try { n = parseInt(sessionStorage.getItem(KEY) || '0', 10) || 0; } catch (e) {}
+    if (n < MAX_RELOADS) {
+        try { sessionStorage.setItem(KEY, String(n + 1)); } catch (e) {}
+        setTimeout(function () { window.location.reload(); }, 12000);
+    }
+})();
+</script>
+{% else %}
+<script>
+try { sessionStorage.removeItem('hibs_tables_cold_reloads'); } catch (e) {}
+</script>
+{% endif %}
 {% endblock %}

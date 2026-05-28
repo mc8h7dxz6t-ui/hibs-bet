@@ -381,8 +381,9 @@
             if (show) visibleCards += 1;
             card.style.display = show ? '' : 'none';
         });
-        if (firstFilterPass && totalCards > 0 && visibleCards === 0 && activeLeague) {
+        if (firstFilterPass && totalCards > 0 && visibleCards === 0 && (activeLeague || activeRegion)) {
             activeLeague = '';
+            activeRegion = defaultRegion || '';
             saveFilterState();
             restoreFilterChips();
             firstFilterPass = false;

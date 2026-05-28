@@ -117,6 +117,10 @@ class BaseApiClient:
                 return cached
 
         if not self.rate_limiter.check_rate_limit(self.service_name):
+            if use_cache:
+                stale = self.cache.peek(cache_key)
+                if isinstance(stale, dict):
+                    return stale
             return {"error": "Rate limit exceeded. Try again later."}
 
         url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
@@ -127,7 +131,14 @@ class BaseApiClient:
             timeout=20,
             service_label=self.service_name,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError:
+            if use_cache:
+                stale = self.cache.peek(cache_key)
+                if isinstance(stale, dict):
+                    return stale
+            raise
         try:
             data = response.json()
         except ValueError as exc:
@@ -143,13 +154,22 @@ class FootballDataOrgClient(BaseApiClient):
 
     def _get_json(self, endpoint: str, params: Optional[Dict[str, Any]] = None, use_cache: bool = True) -> Dict[str, Any]:
         """Fail-soft on quota/forbidden so enrichment rows still render from API-Sports/scrapers."""
+        cache_key = f"{self.service_name}_{endpoint}_{str(params)}"
+        if use_cache:
+            cached = self.cache.get(cache_key, ttl_hours=0.25)
+            if isinstance(cached, dict) and int(cached.get("errorCode") or 0) in (403, 429):
+                return cached
         try:
             return super()._get_json(endpoint, params=params, use_cache=use_cache)
         except requests.HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else None
             if status in (403, 429):
                 print(f"[Football-Data.org HTTP {status}] {endpoint}: {exc}")
-                return {"errorCode": status, "message": str(exc), "matches": [], "standings": []}
+                payload = {"errorCode": status, "message": str(exc), "matches": [], "standings": []}
+                if use_cache:
+                    # Short deny-cache prevents repeated blocked calls during one refresh window.
+                    self.cache.set(cache_key, payload, ttl_hours=0.25)
+                return payload
             raise
 
     def fetch_fixtures(

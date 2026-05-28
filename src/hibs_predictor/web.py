@@ -2341,6 +2341,14 @@ def _cached_assistant_bundle(
     return bundle
 
 
+def _cold_fixture_bundle(include_domestic: bool) -> Dict[str, Any]:
+    """Non-blocking empty fixture bundle while background warm runs."""
+    data = _finalize_fixture_bundle([], include_domestic=include_domestic)
+    data["cache_stale"] = True
+    data["cold_start"] = True
+    return data
+
+
 def clear_assistant_bundle_cache() -> None:
     with _assistant_bundle_cache_lock:
         _assistant_bundle_cache["bundle"] = None
@@ -2382,7 +2390,8 @@ def logout():
 @login_required
 def index():
     include_domestic = request.args.get("domestic") == "1"
-    if request.args.get("refresh") == "1":
+    force_refresh = request.args.get("refresh") == "1"
+    if force_refresh:
         clear_application_caches(all_disk=request.args.get("all") == "1")
     elif not include_domestic:
         cached_page = _dashboard_page_cache_get(allow_stale=True)
@@ -2400,6 +2409,64 @@ def index():
 
     # Never block the HTML dashboard on live-score + xG enrich (avoids nginx 502 on cold cache).
     progressive = _progressive_load_enabled()
+    if force_refresh and progressive:
+        _schedule_dashboard_refresh()
+        data = _cold_fixture_bundle(include_domestic=include_domestic)
+        upcoming = _bundle_fixtures(data)
+        recent_results = {"all": [], "days": [], "total": 0, "results_days": 3}
+        if _defer_assistant_on_page():
+            assistant_packets = []
+            assistant_bundle = {"packets": [], "recommendations": [], "acca_candidates": [], "count": 0}
+        else:
+            assistant_bundle = _assistant_bundle(upcoming)
+            assistant_packets = assistant_bundle["packets"]
+        fixture_coverage = data.get("fixture_coverage", {})
+        html = render_template(
+            "dashboard.html",
+            all_fixtures=upcoming,
+            by_region=data["by_region"],
+            by_league=data["by_league"],
+            dashboard_days=data["dashboard_days"],
+            value_bets=data["value_bets"],
+            total=data["total"],
+            value_bet_count=data["value_bet_count"],
+            fixture_coverage=fixture_coverage,
+            dashboard_info=_dashboard_info_box(fixture_coverage, data["total"]),
+            league_regions=LEAGUE_REGIONS,
+            dashboard_filter_regions=DASHBOARD_FILTER_REGIONS,
+            leagues_for_filter=_leagues_for_filter(data["by_league"], include_domestic=include_domestic),
+            min_league_chip_fixtures=_min_league_chip_fixtures(),
+            dashboard_league_order=_dashboard_league_order(include_domestic=include_domestic),
+            tournament_focus=_tournament_focus_context(include_domestic=include_domestic),
+            include_domestic=include_domestic,
+            fetch_days=data.get("fetch_days", _fetch_window_days()),
+            has_api_clients=data.get(
+                "has_api_clients",
+                ("api_sports" in aggregator.clients or "football_data_org" in aggregator.clients),
+            ),
+            leagues=LEAGUES,
+            data_quality_ui_min=_ui_data_quality_min_pct(),
+            data_quality_show_90_chip=_ui_show_dq90_chip(),
+            assistant_packets=assistant_packets,
+            assistant_recommendations=assistant_bundle.get("recommendations"),
+            sidebar_upcoming=data.get("sidebar_upcoming", []),
+            sky_players_panel=_sky_players_panel(upcoming),
+            recent_results=recent_results.get("all", []),
+            recent_results_days=recent_results.get("results_days", 3),
+            recent_results_total=recent_results.get("total", 0),
+            recent_results_days_groups=recent_results.get("days", []),
+            display_tz_label=display_tz_label(),
+            progressive_load=progressive,
+            cold_start=bool(data.get("cold_start")),
+        )
+        body = html.encode("utf-8")
+        etag = _dashboard_page_cache_set(body)
+        resp = make_response(body)
+        resp.mimetype = "text/html; charset=utf-8"
+        resp.headers["ETag"] = etag
+        resp.headers["Cache-Control"] = "private, max-age=30"
+        return _set_fetch_days_cookie_if_requested(resp)
+
     ck = _all_fixtures_cache_key(include_domestic=include_domestic)
     disk_bundle = Cache().peek(ck)
     if (
@@ -2644,6 +2711,11 @@ def api_fixtures_live():
     raw_ids = (request.args.get("ids") or "").strip()
     dashboard_ids = [part.strip() for part in raw_ids.split(",") if part.strip()]
     include_domestic = request.args.get("domestic") == "1"
+    ck = _all_fixtures_cache_key(include_domestic=include_domestic)
+    disk_bundle = Cache().peek(ck)
+    if not isinstance(disk_bundle, dict):
+        _schedule_dashboard_refresh()
+        return jsonify({"fixtures": {}, "poll_after_sec": 45, "cache_stale": True, "cold_start": True})
     fixture_rows: List[Dict[str, Any]] = []
     if dashboard_ids:
         data = fetch_all_fixtures(allow_stale=True, include_domestic=include_domestic)
@@ -2814,11 +2886,17 @@ def insights_page():
 
     progressive = _progressive_load_enabled()
     include_domestic = request.args.get("domestic") == "1"
-    data = fetch_all_fixtures(
-        include_domestic=include_domestic,
-        allow_stale=True,
-        attach_live=False,
-    )
+    ck = _all_fixtures_cache_key(include_domestic=include_domestic)
+    disk_bundle = Cache().peek(ck)
+    if progressive and not isinstance(disk_bundle, dict):
+        _schedule_dashboard_refresh()
+        data = _cold_fixture_bundle(include_domestic=include_domestic)
+    else:
+        data = fetch_all_fixtures(
+            include_domestic=include_domestic,
+            allow_stale=True,
+            attach_live=False,
+        )
     if data.get("cache_stale"):
         _schedule_dashboard_refresh()
     upcoming = _bundle_fixtures(data)
@@ -2858,7 +2936,13 @@ def insights_page():
 @login_required
 def tables_page():
     """League tables from available standings feeds, with fixture-row fallback."""
-    data = fetch_all_fixtures(allow_stale=True)
+    ck = _all_fixtures_cache_key(include_domestic=False)
+    disk_bundle = Cache().peek(ck)
+    if not isinstance(disk_bundle, dict):
+        _schedule_dashboard_refresh()
+        data = _cold_fixture_bundle(include_domestic=False)
+    else:
+        data = fetch_all_fixtures(allow_stale=True)
     tables = _build_league_tables(data["all"], include_live=True)
     return render_template(
         "tables.html",
@@ -2866,6 +2950,7 @@ def tables_page():
         total=data["total"],
         fetch_days=data.get("fetch_days", _fetch_window_days()),
         display_tz_label=display_tz_label(),
+        cold_start=bool(data.get("cold_start")),
     )
 
 
@@ -2879,8 +2964,7 @@ def players_page():
     if not isinstance(disk_bundle, dict):
         # Keep players page responsive on cold cache; warm in background like dashboard.
         _schedule_dashboard_refresh()
-        data = _finalize_fixture_bundle([], include_domestic=include_domestic)
-        data["cold_start"] = True
+        data = _cold_fixture_bundle(include_domestic=include_domestic)
     else:
         data = fetch_all_fixtures(allow_stale=True, include_domestic=include_domestic)
     upcoming = _bundle_fixtures(data)

@@ -94,7 +94,20 @@
 {% block extra_js %}
 {% if cold_start %}
 <script>
-setTimeout(function () { window.location.reload(); }, 12000);
+(function () {
+    var KEY = 'hibs_players_cold_reloads';
+    var MAX_RELOADS = 4;
+    var n = 0;
+    try { n = parseInt(sessionStorage.getItem(KEY) || '0', 10) || 0; } catch (e) {}
+    if (n < MAX_RELOADS) {
+        try { sessionStorage.setItem(KEY, String(n + 1)); } catch (e) {}
+        setTimeout(function () { window.location.reload(); }, 12000);
+    }
+})();
+</script>
+{% else %}
+<script>
+try { sessionStorage.removeItem('hibs_players_cold_reloads'); } catch (e) {}
 </script>
 {% endif %}
 {% endblock %}
