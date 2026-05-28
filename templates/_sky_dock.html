@@ -69,6 +69,13 @@
                 ></iframe>
             </div>
         </div>
+        <div class="sky-players-empty" id="sky-dock-fallback-note" hidden>
+            Sky stream embed is unavailable right now. Use
+            <a href="{{ sky_sports_news_open_url }}" target="_blank" rel="noopener noreferrer">Sky Sports News</a>
+            or
+            <a href="{{ sky_sports_football_open_url }}" target="_blank" rel="noopener noreferrer">Sky Football</a>.
+            Players snapshot remains available below.
+        </div>
         <section class="sky-players-panel" aria-label="Players panel">
             <div class="sky-players-hd">Players Snapshot <a href="/players" style="margin-left:8px;color:var(--blue);font-weight:700;text-decoration:none;">Open →</a></div>
             {% if sky_players_panel %}
@@ -168,19 +175,19 @@
         });
     }
 
-    function hideSkyDockClient(reason) {
-        root.classList.remove('hibs-sky-dock-enabled', 'sky-dock-collapsed');
-        if (dock) dock.remove();
-        if (revealBtn) revealBtn.remove();
+    function setSkyEmbedFallback(reason) {
+        var note = document.getElementById('sky-dock-fallback-note');
+        if (note) note.hidden = false;
+        if (browser) browser.style.display = 'none';
         try {
-            document.dispatchEvent(new CustomEvent('hibs-sky-dock-hidden', { detail: { reason: reason || 'client' } }));
+            document.dispatchEvent(new CustomEvent('hibs-sky-dock-hidden', { detail: { reason: reason || 'embed_unavailable' } }));
         } catch (e) {}
     }
 
     var iframes = dock.querySelectorAll('.sky-dock-iframe');
     var loaded = 0;
     var fallbackTimer = window.setTimeout(function () {
-        if (loaded < iframes.length) hideSkyDockClient('iframe_load_timeout');
+        if (loaded < iframes.length) setSkyEmbedFallback('iframe_load_timeout');
     }, 5000);
     iframes.forEach(function (iframe) {
         iframe.addEventListener('load', function () {

@@ -30,6 +30,7 @@ def test_tables_route_shows_loading_banner_on_cold_cache():
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
     assert "Loading tables" in body
+    assert 'href="/players"' in body
     assert sched.called
 
 
@@ -47,3 +48,20 @@ def test_dashboard_refresh_progressive_returns_cold_shell(monkeypatch):
     assert "Loading fixtures" in body
     assert clear_cache.called
     assert sched.called
+    assert resp.headers.get("Cache-Control") == "no-store, private"
+    assert "ETag" not in resp.headers
+
+
+def test_dashboard_cold_shell_keeps_mobile_sky_players_links(monkeypatch):
+    from hibs_predictor.web import app
+
+    monkeypatch.setenv("HIBS_PROGRESSIVE_LOAD", "1")
+    monkeypatch.setenv("HIBS_SHOW_SKY_PANEL", "1")
+    with patch("hibs_predictor.web.clear_application_caches"), patch(
+        "hibs_predictor.web.fetch_all_fixtures", side_effect=AssertionError("should not block on refresh")
+    ), patch("hibs_predictor.web._schedule_dashboard_refresh"):
+        client = app.test_client()
+        resp = client.get("/?refresh=1")
+    body = resp.get_data(as_text=True)
+    assert "Sky panel is available on desktop." in body
+    assert "Players</a>" in body

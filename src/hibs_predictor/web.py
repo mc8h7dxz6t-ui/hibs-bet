@@ -2460,11 +2460,15 @@ def index():
             cold_start=bool(data.get("cold_start")),
         )
         body = html.encode("utf-8")
-        etag = _dashboard_page_cache_set(body)
         resp = make_response(body)
         resp.mimetype = "text/html; charset=utf-8"
-        resp.headers["ETag"] = etag
-        resp.headers["Cache-Control"] = "private, max-age=30"
+        if bool(data.get("cold_start")):
+            # Do not cache a cold shell; otherwise clients can loop on refresh=meta reload.
+            resp.headers["Cache-Control"] = "no-store, private"
+        else:
+            etag = _dashboard_page_cache_set(body)
+            resp.headers["ETag"] = etag
+            resp.headers["Cache-Control"] = "private, max-age=30"
         return _set_fetch_days_cookie_if_requested(resp)
 
     ck = _all_fixtures_cache_key(include_domestic=include_domestic)
@@ -2543,11 +2547,15 @@ def index():
         cold_start=bool(data.get("cold_start")),
     )
     body = html.encode("utf-8")
-    etag = _dashboard_page_cache_set(body)
     resp = make_response(body)
     resp.mimetype = "text/html; charset=utf-8"
-    resp.headers["ETag"] = etag
-    resp.headers["Cache-Control"] = "private, max-age=30"
+    if bool(data.get("cold_start")):
+        # Avoid persisting a temporary loading shell in the page cache.
+        resp.headers["Cache-Control"] = "no-store, private"
+    else:
+        etag = _dashboard_page_cache_set(body)
+        resp.headers["ETag"] = etag
+        resp.headers["Cache-Control"] = "private, max-age=30"
     return _set_fetch_days_cookie_if_requested(resp)
 
 
