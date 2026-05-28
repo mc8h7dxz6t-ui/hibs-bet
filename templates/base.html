@@ -1460,6 +1460,15 @@
     <script>
         (function () {
             try {
+                if (localStorage.getItem('hibs_sky_dock_collapsed') === '1') {
+                    document.documentElement.classList.add('sky-dock-collapsed');
+                }
+            } catch (e) {}
+        })();
+    </script>
+    <script>
+        (function () {
+            try {
                 var raw = localStorage.getItem('hibs_user_settings_v1');
                 var s = raw ? JSON.parse(raw) : {};
                 var root = document.documentElement;

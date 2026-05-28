@@ -212,6 +212,20 @@ def _avoid_watchlist(packets: List[Dict[str, Any]], limit: int = 8) -> List[Dict
     return rows[:limit]
 
 
+def _monitor_snapshot(fixtures: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    try:
+        from hibs_predictor.prediction_log import (
+            backfill_snapshots_from_fixtures,
+            monitor_summary_dict,
+        )
+
+        if fixtures:
+            backfill_snapshots_from_fixtures(fixtures)
+        return monitor_summary_dict()
+    except Exception as exc:
+        return {"ok": False, "message": f"monitor unavailable: {exc!r}"}
+
+
 def _audit_snapshot() -> Dict[str, Any]:
     try:
         report = report_summary_dict()
@@ -262,6 +276,7 @@ def insights_empty_shell() -> Dict[str, Any]:
         "audit": {"message": "Loading calibration snapshot…", "n_used_metrics": 0},
         "performance_url": "/performance",
     }
+    return out_audit
 
 
 def build_insights(

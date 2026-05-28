@@ -736,6 +736,11 @@ class OddsApiClient(BaseApiClient):
         "COPA_DEL_REY": ["soccer_spain_copa_del_rey"],
         "COPPA_ITALIA": ["soccer_italy_copa_italia"],
     }
+    # Legacy / alternate keys tried when the primary sport returns HTTP 404.
+    SPORT_KEY_FALLBACKS: Dict[str, List[str]] = {
+        "CHAMPIONSHIP": ["soccer_england_efl_championship"],
+        "SCOTLAND": ["soccer_scotland_premiership"],
+    }
 
     def __init__(self, api_key: str) -> None:
         super().__init__(api_key, "https://api.the-odds-api.com/v4", "Authorization", "odds_api")
