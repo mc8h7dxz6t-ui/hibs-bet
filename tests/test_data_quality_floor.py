@@ -241,6 +241,37 @@ def test_from_row_uses_enrich_recent_n_not_only_last10_len():
     assert dq["score_pct"] >= 88.0
 
 
+def test_merge_stale_fixture_row_preserves_higher_dq():
+    from hibs_predictor.web import _merge_stale_fixture_row
+
+    row = {
+        "home": "Norway",
+        "away": "Finland",
+        "home_id": 1,
+        "away_id": 2,
+        "home_recent_n": 1,
+        "away_recent_n": 1,
+        "data_quality": {"score_pct": 35.0, "full_scope": False},
+    }
+    stale = {
+        "home": "Norway",
+        "away": "Finland",
+        "home_id": 1,
+        "away_id": 2,
+        "home_recent_n": 8,
+        "away_recent_n": 8,
+        "home_last10": [{}] * 8,
+        "away_last10": [{}] * 8,
+        "home_stats": {"played": 12, "goals_for": 18, "goals_against": 10},
+        "away_stats": {"played": 12, "goals_for": 15, "goals_against": 12},
+        "data_quality": {"score_pct": 91.0, "full_scope": True},
+    }
+    _merge_stale_fixture_row(row, stale)
+    assert float(row["data_quality"]["score_pct"]) == 91.0
+    assert row["home_recent_n"] == 8
+    assert row["home_stats"]["played"] == 12
+
+
 def test_ensure_dq_never_downgrades_existing_score():
     from hibs_predictor.web import _ensure_fixture_data_quality
 

@@ -5,7 +5,7 @@ set -euo pipefail
 HOST="${DEPLOY_HOST:-77.68.89.73}"
 USER="${DEPLOY_USER:-root}"
 APP="${DEPLOY_PATH:-/opt/hibs-bet}"
-CLEAR_CACHE="${CLEAR_CACHE:-1}"
+CLEAR_CACHE="${CLEAR_CACHE:-0}"
 
 echo "==> restart hibs-bet on ${USER}@${HOST}"
 ssh "${USER}@${HOST}" "sudo systemctl restart hibs-bet && sleep 2 && sudo systemctl is-active hibs-bet"

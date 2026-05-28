@@ -432,9 +432,94 @@ def _log_resilience(event: str, **fields: object) -> None:
 
 def _cache_ttl_hours(default: float = 1.0) -> float:
     try:
-        return max(0.01, float(os.getenv("HIBS_CACHE_TTL_HOURS", str(default))))
+        base = max(0.01, float(os.getenv("HIBS_CACHE_TTL_HOURS", str(default))))
     except ValueError:
-        return default
+        base = default
+    try:
+        from hibs_predictor.tournament_focus import domestic_offseason_active
+
+        if domestic_offseason_active():
+            summer_raw = (os.getenv("HIBS_CACHE_TTL_SUMMER_HOURS") or "").strip()
+            if summer_raw:
+                return max(base, float(summer_raw))
+            return max(base, 4.0)
+    except Exception:
+        pass
+    return base
+
+
+def _provider_guard_blocked(service: str = "api_sports") -> bool:
+    """True when the local rate-limit guard would block outbound API calls."""
+    try:
+        from hibs_predictor.rate_limiter import RateLimiter
+
+        return RateLimiter().block_reason(service) is not None
+    except Exception:
+        return False
+
+
+def _stale_league_fixture_rows(cache: Cache, cache_key: str) -> List[Dict[str, Any]]:
+    """Disk league bundle ignoring TTL (post-deploy / guard-blocked warm)."""
+    peeked = cache.peek(cache_key)
+    return peeked if isinstance(peeked, list) else []
+
+
+def _stale_fixture_row_index(rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    return {_fixture_key(row): row for row in rows if isinstance(row, dict) and _fixture_key(row)}
+
+
+def _merge_stale_fixture_row(row: Dict[str, Any], stale: Optional[Dict[str, Any]]) -> None:
+    """Keep richer enrichment and never downgrade an existing DQ score after partial enrich."""
+    if not stale:
+        return
+    stale_dq = stale.get("data_quality") if isinstance(stale.get("data_quality"), dict) else {}
+    new_dq = row.get("data_quality") if isinstance(row.get("data_quality"), dict) else {}
+    try:
+        stale_pct = float(stale_dq.get("score_pct")) if stale_dq.get("score_pct") is not None else None
+    except (TypeError, ValueError):
+        stale_pct = None
+    try:
+        new_pct = float(new_dq.get("score_pct")) if new_dq.get("score_pct") is not None else None
+    except (TypeError, ValueError):
+        new_pct = None
+    if stale_pct is not None and (new_pct is None or stale_pct > new_pct):
+        row["data_quality"] = dict(stale_dq)
+    stale_fresh = _slim_row_enrich_fresh(stale)
+    new_fresh = _slim_row_enrich_fresh(row)
+    if stale_fresh and not new_fresh:
+        for key in (
+            "home_stats",
+            "away_stats",
+            "home_recent_n",
+            "away_recent_n",
+            "home_last10",
+            "away_last10",
+            "home_position",
+            "away_position",
+            "all_bookmaker_odds",
+            "best_odds_1x2",
+            "best_odds_source",
+            "fixture_injuries",
+            "market_odds",
+            "team_news_meta",
+            "fixture_lineups",
+            "lineup_meta",
+            "xg_home",
+            "xg_away",
+            "xg_source",
+            "xg_source_label",
+            "xg_confidence_tier",
+            "xg_source_hint",
+            "scraped_xg_meta",
+            "supplemental",
+            "enriched_at",
+        ):
+            stale_val = stale.get(key)
+            if stale_val in (None, "", [], {}):
+                continue
+            row[key] = stale_val
+        if stale_pct is not None and (new_pct is None or stale_pct > new_pct):
+            row["data_quality"] = dict(stale_dq)
 
 
 def _maybe_prune_cache(cache: Cache) -> None:
@@ -505,7 +590,7 @@ def _schedule_dashboard_refresh() -> None:
     def _run() -> None:
         global _dashboard_refresh_inflight
         try:
-            fetch_all_fixtures(attach_live=False, include_domestic=False)
+            fetch_all_fixtures(attach_live=False, include_domestic=False, allow_stale=True)
             _clear_dashboard_page_cache()
         except Exception as exc:
             print(f"[Dashboard refresh] {exc!r}")
@@ -582,7 +667,7 @@ def _maybe_warm_fixture_cache() -> None:
 
     def _run() -> None:
         try:
-            fetch_all_fixtures(attach_live=False)
+            fetch_all_fixtures(attach_live=False, allow_stale=True)
         except Exception as exc:
             print(f"[Fixture warm] {exc!r}")
 
@@ -984,11 +1069,23 @@ def fetch_next_48h_fixtures(league_code: str, *, allow_stale: bool = False) -> L
     skip_as_fx = _env_truthy("HIBS_SKIP_API_SPORTS_FIXTURES")
     ttl = _cache_ttl_hours(1.0)
     cache_key = f"fixtures_{days}d_{league_code}_{_FIXTURE_CACHE_VERSION}_{int(prefer_fdo)}{int(skip_as_fx)}"
+    guard_blocked = _provider_guard_blocked("api_sports")
+    reuse_stale = allow_stale or guard_blocked
     cached = cache.get(cache_key, ttl_hours=ttl)
+    stale_rows = cached if isinstance(cached, list) else _stale_league_fixture_rows(cache, cache_key)
+    if cached is None and reuse_stale and stale_rows:
+        cached = stale_rows
     if cached:
         if _league_fixture_cache_fresh(cached):
             return cached
-        if allow_stale:
+        if reuse_stale:
+            if guard_blocked or cached is stale_rows:
+                _log_resilience(
+                    "league_fixture_stale_reuse",
+                    league=league_code,
+                    guard_blocked=guard_blocked,
+                    rows=len(cached),
+                )
             return cached
         _hibs_debug_log(f"partial enrich cache bust {league_code} key={cache_key}")
 
@@ -1120,6 +1217,7 @@ def fetch_next_48h_fixtures(league_code: str, *, allow_stale: bool = False) -> L
         f"fixtures {league_code} days={days} count={len(fetched)} api_first={api_first} prefer_fdo={prefer_fdo}"
     )
 
+    stale_by_key = _stale_fixture_row_index(stale_rows)
     fixtures = []
     for fixture in fetched.values():
         enriched = _safe_enrich(fixture, league_code)
@@ -1241,6 +1339,7 @@ def fetch_next_48h_fixtures(league_code: str, *, allow_stale: bool = False) -> L
             ),
         }
         row["data_quality"] = _data_quality_for_enriched(enriched, prediction)
+        _merge_stale_fixture_row(row, stale_by_key.get(_fixture_key(fixture)))
         try:
             from hibs_predictor.xg_source_display import attach_xg_display_fields, compact_fixture_xg
 
@@ -1255,6 +1354,29 @@ def fetch_next_48h_fixtures(league_code: str, *, allow_stale: bool = False) -> L
         fixtures.append(row)
 
     fixtures.sort(key=lambda x: x.get("date") or "")
+    if stale_rows and fixtures:
+        old_fresh = sum(1 for row in stale_rows if _slim_row_enrich_fresh(row))
+        new_fresh = sum(1 for row in fixtures if _slim_row_enrich_fresh(row))
+        if old_fresh > new_fresh:
+            _log_resilience(
+                "league_fixture_keep_stale_cache",
+                league=league_code,
+                old_fresh=old_fresh,
+                new_fresh=new_fresh,
+            )
+            return stale_rows
+    if fixtures:
+        fresh_count = sum(1 for row in fixtures if _slim_row_enrich_fresh(row))
+        min_fresh = max(1, (len(fixtures) + 2) // 3)
+        if fresh_count < min_fresh and (guard_blocked or not stale_rows):
+            _log_resilience(
+                "league_fixture_skip_thin_cache",
+                league=league_code,
+                fresh=fresh_count,
+                total=len(fixtures),
+                guard_blocked=guard_blocked,
+            )
+            return fixtures
     cache.set(
         cache_key,
         fixtures,
