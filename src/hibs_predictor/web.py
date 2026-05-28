@@ -333,6 +333,7 @@ def _fixture_window_days_for_league(league_code: str) -> int:
     """Friendlies: wider horizon; LOI/Nordics and others: dashboard window only (5 or 7 days)."""
     from hibs_predictor.tournament_focus import (
         INTL_FRIENDLIES_CODE,
+        friendlies_fetch_window_days,
         friendlies_window_active,
         summer_daily_league_codes,
     )
@@ -345,12 +346,7 @@ def _fixture_window_days_for_league(league_code: str) -> int:
         return days
     if not friendlies_window_active():
         return days
-    try:
-        want = int(os.getenv("HIBS_FRIENDLIES_FETCH_DAYS", "14"))
-    except ValueError:
-        want = 14
-    want = max(7, min(21, want))
-    return max(days, want)
+    return friendlies_fetch_window_days(dashboard_days=days)
 
 
 def _fetch_window_days() -> int:
@@ -520,6 +516,28 @@ def _merge_stale_fixture_row(row: Dict[str, Any], stale: Optional[Dict[str, Any]
             row[key] = stale_val
         if stale_pct is not None and (new_pct is None or stale_pct > new_pct):
             row["data_quality"] = dict(stale_dq)
+
+
+def _merge_league_fixture_lists(
+    new_rows: List[Dict[str, Any]], stale_rows: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Union league bundles by fixture key; never downgrade row enrichment or DQ."""
+    stale_by_key = _stale_fixture_row_index(stale_rows)
+    merged: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in new_rows:
+        if not isinstance(row, dict):
+            continue
+        key = _fixture_key(row)
+        if key:
+            _merge_stale_fixture_row(row, stale_by_key.get(key))
+            seen.add(key)
+        merged.append(row)
+    for key, stale in stale_by_key.items():
+        if key not in seen:
+            merged.append(stale)
+    merged.sort(key=lambda x: x.get("date") or "")
+    return merged
 
 
 def _merge_stale_all_fixtures_rows(
@@ -865,6 +883,24 @@ def clear_application_caches(*, all_disk: bool = False) -> int:
 
 def _safe_enrich(fixture: Dict[str, Any], league_code: str) -> Dict[str, Any]:
     """Prefer full enrichment; on failure list the fixture without inventing xG/form/odds (unless HIBS_ALLOW_DUMMY=1)."""
+    if _provider_guard_blocked("api_sports") and not _env_truthy("HIBS_ALLOW_DUMMY"):
+        out = dict(fixture)
+        out.setdefault("home_recent", [])
+        out.setdefault("away_recent", [])
+        out.setdefault("home_stats", {})
+        out.setdefault("away_stats", {})
+        out.setdefault("home_position", {})
+        out.setdefault("away_position", {})
+        out.setdefault("odds_home", None)
+        out.setdefault("odds_draw", None)
+        out.setdefault("odds_away", None)
+        out.setdefault("odds_available", False)
+        out.setdefault("all_bookmaker_odds", [])
+        out.setdefault("fixture_injuries", [])
+        out.setdefault("market_odds", {})
+        out["_hibs_prediction_blocked"] = True
+        out["_hibs_prediction_block_reason"] = "api_rate_guard"
+        return out
     try:
         return aggregator.enrich_fixture(fixture, league_code)
     except Exception as exc:
@@ -1368,6 +1404,7 @@ def fetch_next_48h_fixtures(league_code: str, *, allow_stale: bool = False) -> L
         fixtures.append(row)
 
     fixtures.sort(key=lambda x: x.get("date") or "")
+    fixtures = _merge_league_fixture_lists(fixtures, stale_rows)
     if stale_rows and fixtures:
         old_fresh = sum(1 for row in stale_rows if _slim_row_enrich_fresh(row))
         new_fresh = sum(1 for row in fixtures if _slim_row_enrich_fresh(row))
@@ -1379,18 +1416,6 @@ def fetch_next_48h_fixtures(league_code: str, *, allow_stale: bool = False) -> L
                 new_fresh=new_fresh,
             )
             return stale_rows
-    if fixtures:
-        fresh_count = sum(1 for row in fixtures if _slim_row_enrich_fresh(row))
-        min_fresh = max(1, (len(fixtures) + 2) // 3)
-        if fresh_count < min_fresh and (guard_blocked or not stale_rows):
-            _log_resilience(
-                "league_fixture_skip_thin_cache",
-                league=league_code,
-                fresh=fresh_count,
-                total=len(fixtures),
-                guard_blocked=guard_blocked,
-            )
-            return fixtures
     cache.set(
         cache_key,
         fixtures,
