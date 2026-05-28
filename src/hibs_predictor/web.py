@@ -1438,12 +1438,7 @@ def fetch_next_48h_fixtures(league_code: str, *, allow_stale: bool = False) -> L
         fixtures.append(row)
 
     fixtures.sort(key=lambda x: x.get("date") or "")
-    disk_rows = [
-        row
-        for row in fixtures
-        if _slim_row_enrich_fresh(row)
-        or str(row.get("_hibs_prediction_block_reason") or "") != "api_rate_guard"
-    ]
+    disk_rows = [row for row in fixtures if _slim_row_enrich_fresh(row)]
     disk_rows = _merge_league_fixture_lists(disk_rows, stale_rows)
     if stale_rows and disk_rows:
         old_fresh = sum(1 for row in stale_rows if _slim_row_enrich_fresh(row))
@@ -1462,7 +1457,7 @@ def fetch_next_48h_fixtures(league_code: str, *, allow_stale: bool = False) -> L
             disk_rows,
             ttl_hours=ttl if disk_rows else _EMPTY_FIXTURE_CACHE_TTL_HOURS,
         )
-    return fixtures
+    return _merge_league_fixture_lists(fixtures, stale_rows)
 
 
 def _data_quality_for_enriched(enriched: Dict[str, Any], prediction: Dict[str, Any]) -> Dict[str, Any]:
