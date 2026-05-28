@@ -554,6 +554,42 @@ def _bundle_enrich_fresh_count(bundle: Dict[str, Any]) -> int:
     return sum(1 for row in bundle.get("all") or [] if _slim_row_enrich_fresh(row))
 
 
+def _fixture_bundle_fetch_lock_path() -> str:
+    from hibs_predictor.cache import default_cache_dir
+
+    return os.path.join(default_cache_dir(), ".fetch_all_fixtures.lock")
+
+
+def _acquire_fixture_bundle_fetch_lock(*, blocking: bool):
+    """Cross-worker mutex so two gunicorn workers do not double API enrich storms."""
+    import fcntl
+
+    os.makedirs(os.path.dirname(_fixture_bundle_fetch_lock_path()), exist_ok=True)
+    handle = open(_fixture_bundle_fetch_lock_path(), "a+")
+    flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
+    fcntl.flock(handle.fileno(), flags)
+    return handle
+
+
+def _release_fixture_bundle_fetch_lock(handle: Any) -> None:
+    import fcntl
+
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        handle.close()
+
+
+def _bundle_ok_to_persist(result: Dict[str, Any]) -> bool:
+    rows = result.get("all") or []
+    if not rows:
+        return False
+    if _all_fixtures_bundle_fresh(result):
+        return True
+    fresh = _bundle_enrich_fresh_count(result)
+    return fresh >= max(1, len(rows) // 4)
+
+
 def _maybe_prune_cache(cache: Cache) -> None:
     """Lightweight stale prune (throttled) when HIBS_CACHE_PRUNE is enabled."""
     global _cache_prune_last
@@ -626,7 +662,7 @@ def _schedule_dashboard_refresh() -> None:
                 attach_live=False,
                 include_domestic=False,
                 allow_stale=True,
-                force_refresh=True,
+                force_refresh=False,
                 reboost=True,
             )
             _clear_dashboard_page_cache()
@@ -2294,6 +2330,48 @@ def fetch_all_fixtures(
 ) -> Dict:
     from hibs_predictor.fixture_statistics_xg import reset_statistics_xg_budget
 
+    try:
+        lock_handle = _acquire_fixture_bundle_fetch_lock(blocking=False)
+    except BlockingIOError:
+        cache = Cache()
+        ttl = _cache_ttl_hours(1.0)
+        ck = _all_fixtures_cache_key(include_domestic=include_domestic)
+        cached = cache.get(ck, ttl_hours=ttl)
+        if cached and _is_complete_fixture_bundle(cached):
+            bundle = dict(cached)
+            bundle["fetch_days"] = _fetch_window_days()
+            bundle["cache_stale"] = True
+            return bundle
+        stale = cache.peek(ck)
+        if isinstance(stale, dict) and _is_complete_fixture_bundle(stale) and stale.get("all"):
+            bundle = dict(stale)
+            bundle["fetch_days"] = _fetch_window_days()
+            bundle["cache_stale"] = True
+            return bundle
+        return _cold_fixture_bundle(include_domestic=include_domestic)
+
+    try:
+        return _fetch_all_fixtures_locked(
+            attach_live=attach_live,
+            include_domestic=include_domestic,
+            allow_stale=allow_stale,
+            force_refresh=force_refresh,
+            reboost=reboost,
+        )
+    finally:
+        _release_fixture_bundle_fetch_lock(lock_handle)
+
+
+def _fetch_all_fixtures_locked(
+    *,
+    attach_live: bool = False,
+    include_domestic: bool = False,
+    allow_stale: bool = False,
+    force_refresh: bool = False,
+    reboost: bool = False,
+) -> Dict:
+    from hibs_predictor.fixture_statistics_xg import reset_statistics_xg_budget
+
     reset_statistics_xg_budget()
     cache = Cache()
     _maybe_prune_cache(cache)
@@ -2378,8 +2456,22 @@ def fetch_all_fixtures(
                 new_fresh=new_fresh,
             )
             return bundle
-    if result.get("total"):
+    if result.get("total") and _bundle_ok_to_persist(result):
         cache.set(ck, result, ttl_hours=ttl)
+    elif result.get("total"):
+        _log_resilience(
+            "fixture_bundle_skip_thin_cache",
+            key=ck,
+            fresh=_bundle_enrich_fresh_count(result),
+            total=len(result.get("all") or []),
+        )
+        if stale_all and _bundle_enrich_fresh_count(stale_bundle) > _bundle_enrich_fresh_count(result):
+            bundle = dict(stale_bundle)
+            bundle["fetch_days"] = _fetch_window_days()
+            bundle["cache_stale"] = True
+            if attach_live:
+                _refresh_live_on_bundle(bundle)
+            return bundle
     else:
         _hibs_debug_log(f"not caching empty all_fixtures bundle key={ck}")
         if allow_stale:
