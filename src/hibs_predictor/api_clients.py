@@ -125,6 +125,18 @@ def _api_football_rate_limited(errors: Any) -> bool:
         text = f"{key} {val}".lower()
         if "ratelimit" in text.replace("_", "") or "too many requests" in text:
             return True
+        if "request limit for the day" in text or ("daily" in text and "limit" in text):
+            return True
+    return False
+
+
+def _api_football_daily_quota_exhausted(errors: Any) -> bool:
+    if not isinstance(errors, dict):
+        return False
+    for key, val in errors.items():
+        text = f"{key} {val}".lower()
+        if "request limit for the day" in text:
+            return True
     return False
 
 
@@ -459,6 +471,28 @@ class ApiSportsFootballClient(BaseApiClient):
                     )
             else:
                 print(f"[API-Sports errors] {endpoint} params={params}: {errs}")
+            if _api_football_daily_quota_exhausted(errs):
+                try:
+                    entry = self.rate_limiter._ensure_entry_shape(self.service_name)
+                    entry["count"] = self.rate_limiter.limits[self.service_name]
+                    from datetime import datetime, timedelta
+
+                    entry["reset_at"] = (datetime.now() + timedelta(hours=1)).isoformat()
+                    entry["minute_count"] = self.rate_limiter.minute_limits.get(self.service_name, 22)
+                    entry["minute_reset_at"] = (datetime.now() + timedelta(minutes=1)).isoformat()
+                    self.rate_limiter._save_state()
+                    log_resilience_event(
+                        _api_log,
+                        "provider_daily_quota_exhausted",
+                        service=self.service_name,
+                        endpoint=endpoint,
+                    )
+                except Exception:
+                    pass
+                if use_cache:
+                    stale = self.cache.peek(cache_key)
+                    if isinstance(stale, dict):
+                        return stale
             if not _api_football_rate_limited(errs):
                 self.rate_limiter.record_request(self.service_name)
             return {"response": [], "errors": errs, "results": data.get("results", 0)}
