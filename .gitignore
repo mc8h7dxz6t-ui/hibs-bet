@@ -7,6 +7,8 @@ __pycache__/
 *.db
 *.log
 .DS_Store
+# Local launcher shortcut (machine-specific port)
+launch/hibs-bet.url
 # Third-party app — belongs on Desktop / Applications (macOS), not this repo
 Sky Go.app/
 **/Sky Go.app/
