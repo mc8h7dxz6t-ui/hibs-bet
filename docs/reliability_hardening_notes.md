@@ -40,6 +40,22 @@ python3 -m pytest tests/test_stability_routes.py tests/test_cold_start_routes.py
 
 Manual: cold load `/`, `/players`, `/insights`; `?refresh=1` on dashboard; toggle Hibs Home/Away in Settings; collapse/expand Players dock.
 
-## Deploy note
+## Git remotes (canonical layout)
 
-Production on GitLab `c624a43e` predates this work. Push `main` to GitLab and run CI deploy for hibs.co.uk to pick up these changes.
+| Remote | URL | Role |
+|--------|-----|------|
+| `origin` | GitHub `hibs-bet` | Development mirror (push here from laptop) |
+| `gitlab` | `hibsbetting-group/hibsbetting` | CI deploy trigger for production |
+
+**Do not merge** the old GitLab line (`c624a43e`) into `main`. After merge-base `c95cbb9`, GitLab and `main` are **parallel rewrites** (same commit subjects, different hashes). `main` is the superset: all DQ/xG/odds fixes **plus** players panel, stability, UCL DQ, and hardening. Merging would risk duplicate/conflict resolution and DQ regression.
+
+**Sync GitLab to `main` (after SSH key works):**
+
+```bash
+git fetch gitlab
+git push gitlab main --force-with-lease
+```
+
+`--force-with-lease` replaces the stale parallel branch safely (only if no unexpected new commits on GitLab).
+
+**Immediate production deploy without GitLab:** `./scripts/deploy_to_vps.sh` rsyncs local `main` to `/opt/hibs-bet` (same path CI uses).
