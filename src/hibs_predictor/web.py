@@ -713,7 +713,7 @@ def _insights_content_context(
         "insights": insights,
         "total": data.get("total", 0),
         "value_bet_count": data.get("value_bet_count", 0),
-        "fetch_days": data.get("fetch_days", _fetch_window_days()),
+        "fetch_days": _fetch_window_days(),
         "data_quality_ui_min": _ui_data_quality_min_pct(),
         "dashboard_info": _dashboard_info_box(fixture_coverage, data.get("total", 0)),
         "fixture_coverage": fixture_coverage,
@@ -2150,6 +2150,33 @@ def _upcoming_fixtures(all_fixtures: List[Dict[str, Any]]) -> List[Dict[str, Any
     return [f for f in all_fixtures if not is_finished_fixture(f)]
 
 
+def _fixtures_within_dashboard_window(
+    fixtures: List[Dict[str, Any]],
+    *,
+    days: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Clip fixtures to the user-selected dashboard window (5 or 7 days).
+
+    Wider league fetches (e.g. INTL_FRIENDLIES via HIBS_FRIENDLIES_FETCH_DAYS) stay in
+    ``all`` for enrich/DQ; only display lists use this filter.
+    """
+    from hibs_predictor.data_source_policy import parse_fixture_datetime_utc
+
+    window_days = (
+        _normalize_fetch_days(days, default=_fetch_window_days())
+        if days is not None
+        else _fetch_window_days()
+    )
+    start = fixture_window_start_utc()
+    end = fixture_window_end_utc(days=window_days)
+    out: List[Dict[str, Any]] = []
+    for fixture in fixtures:
+        kick = parse_fixture_datetime_utc(fixture)
+        if kick is not None and start <= kick <= end:
+            out.append(fixture)
+    return out
+
+
 def _bundle_fixtures(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Upcoming-only fixture rows for dashboard/insights (finished same-day dropped)."""
     return data.get("upcoming") or _upcoming_fixtures(data.get("all") or [])
@@ -2185,7 +2212,8 @@ def _finalize_fixture_bundle(
     league_tables = _build_league_tables(all_fixtures, include_live=False, include_domestic=include_domestic)
     _attach_table_snapshots(all_fixtures, league_tables)
     _attach_cup_and_form_flags(all_fixtures)
-    upcoming = _upcoming_fixtures(all_fixtures)
+    all_upcoming = _upcoming_fixtures(all_fixtures)
+    upcoming = _fixtures_within_dashboard_window(all_upcoming)
     value_bets_only = [f for f in upcoming if f.get("has_value_bet")]
     value_bets_only.sort(key=lambda x: -(x.get("prediction", {}).get("best_bet_roi") or 0))
     fixtures_by_league: Dict[str, List] = {c: [] for c in _dashboard_league_order(include_domestic=include_domestic)}
@@ -2942,7 +2970,7 @@ def index():
             dashboard_league_order=_dashboard_league_order(include_domestic=include_domestic),
             tournament_focus=_tournament_focus_context(include_domestic=include_domestic),
             include_domestic=include_domestic,
-            fetch_days=data.get("fetch_days", _fetch_window_days()),
+            fetch_days=_fetch_window_days(),
             has_api_clients=data.get(
                 "has_api_clients",
                 ("api_sports" in aggregator.clients or "football_data_org" in aggregator.clients),
@@ -3024,7 +3052,7 @@ def index():
         dashboard_league_order=_dashboard_league_order(include_domestic=include_domestic),
         tournament_focus=_tournament_focus_context(include_domestic=include_domestic),
         include_domestic=include_domestic,
-        fetch_days=data.get("fetch_days", _fetch_window_days()),
+        fetch_days=_fetch_window_days(),
         has_api_clients=data.get(
             "has_api_clients",
             ("api_sports" in aggregator.clients or "football_data_org" in aggregator.clients),
@@ -3447,7 +3475,7 @@ def tables_page():
         "tables.html",
         tables=tables,
         total=data["total"],
-        fetch_days=data.get("fetch_days", _fetch_window_days()),
+        fetch_days=_fetch_window_days(),
         display_tz_label=display_tz_label(),
         cold_start=cold,
     )
@@ -3469,7 +3497,7 @@ def players_page():
             data, include_domestic=include_domestic
         ),
         total=data["total"],
-        fetch_days=data.get("fetch_days", _fetch_window_days()),
+        fetch_days=_fetch_window_days(),
         cold_start=bool(data.get("cold_start")),
         include_domestic=include_domestic,
         tournament_focus=_tournament_focus_context(include_domestic=include_domestic),

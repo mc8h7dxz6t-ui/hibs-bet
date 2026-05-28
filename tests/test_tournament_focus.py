@@ -398,3 +398,54 @@ def test_friendlies_fetch_window_days_respects_env(monkeypatch):
         lambda: date(2026, 5, 28),
     )
     assert friendlies_fetch_window_days(dashboard_days=5) == 14
+
+
+def test_dashboard_display_clips_friendlies_to_user_window(monkeypatch):
+    """Friendlies may fetch 14d internally; dashboard upcoming list uses 5/7-day display window."""
+    from datetime import datetime, timezone
+
+    from hibs_predictor.web import (
+        _finalize_fixture_bundle,
+        _fixture_window_days_for_league,
+        _fixtures_within_dashboard_window,
+        app,
+    )
+
+    monkeypatch.setenv("HIBS_FETCH_DAYS", "5")
+    monkeypatch.setenv("HIBS_FRIENDLIES_FETCH_DAYS", "14")
+    monkeypatch.setenv("HIBS_FRIENDLIES_FOCUS_START", "2026-05-20")
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 5, 28),
+    )
+    assert _fixture_window_days_for_league("INTL_FRIENDLIES") == 14
+
+    now = datetime.now(timezone.utc)
+    inside = (now + __import__("datetime").timedelta(days=2)).replace(
+        hour=15, minute=0, second=0, microsecond=0
+    )
+    outside = (now + __import__("datetime").timedelta(days=10)).replace(
+        hour=15, minute=0, second=0, microsecond=0
+    )
+
+    def _row(kickoff: datetime, fid: int) -> dict:
+        iso = kickoff.isoformat()
+        return {
+            "fixture": {"id": fid, "date": iso},
+            "date": iso,
+            "league": "INTL_FRIENDLIES",
+            "status": "NS",
+            "teams": {"home": {"name": "A"}, "away": {"name": "B"}},
+        }
+
+    rows = [_row(inside, 1), _row(outside, 2)]
+    with app.test_request_context("/?days=5"):
+        clipped = _fixtures_within_dashboard_window(rows)
+        bundle = _finalize_fixture_bundle(rows, include_domestic=False)
+
+    assert len(clipped) == 1
+    assert clipped[0]["fixture"]["id"] == 1
+    assert bundle["fetch_days"] == 5
+    assert bundle["total"] == 1
+    assert len(bundle["upcoming"]) == 1
+    assert len(bundle["all"]) == 2
