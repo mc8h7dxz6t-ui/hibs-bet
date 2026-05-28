@@ -2873,13 +2873,22 @@ def tables_page():
 def players_page():
     """Player availability + form context from existing enrichment."""
     include_domestic = request.args.get("domestic") == "1"
-    data = fetch_all_fixtures(allow_stale=True, include_domestic=include_domestic)
+    ck = _all_fixtures_cache_key(include_domestic=include_domestic)
+    disk_bundle = Cache().peek(ck)
+    if not isinstance(disk_bundle, dict):
+        # Keep players page responsive on cold cache; warm in background like dashboard.
+        _schedule_dashboard_refresh()
+        data = _finalize_fixture_bundle([], include_domestic=include_domestic)
+        data["cold_start"] = True
+    else:
+        data = fetch_all_fixtures(allow_stale=True, include_domestic=include_domestic)
     upcoming = _bundle_fixtures(data)
     return render_template(
         "players.html",
         player_rows=_players_page_rows(upcoming),
         total=data["total"],
         fetch_days=data.get("fetch_days", _fetch_window_days()),
+        cold_start=bool(data.get("cold_start")),
         include_domestic=include_domestic,
         tournament_focus=_tournament_focus_context(include_domestic=include_domestic),
     )

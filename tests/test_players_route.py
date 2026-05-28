@@ -32,7 +32,9 @@ def test_players_route_returns_200(monkeypatch):
         "value_bet_count": 0,
         "sidebar_upcoming": [],
     }
-    with patch("hibs_predictor.web.fetch_all_fixtures", return_value=bundle):
+    with patch("hibs_predictor.web.Cache.peek", return_value={"ok": True}), patch(
+        "hibs_predictor.web.fetch_all_fixtures", return_value=bundle
+    ):
         client = app.test_client()
         response = client.get("/players")
     assert response.status_code == 200

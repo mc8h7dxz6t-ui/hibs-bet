@@ -26,6 +26,11 @@
         <h1 class="hero-title"><span class="hero-brand">hibs-bet</span> Players</h1>
         <p class="hero-meta">Upcoming fixtures across <strong>{{ fetch_days }} days</strong> · player availability and form context only from loaded data (no synthetic stats).</p>
     </div>
+    {% if cold_start %}
+    <div class="api-missing-banner" role="status" style="margin-bottom:12px;">
+        <strong>Loading players data…</strong> First load can take a minute while fixtures warm in cache. This page will auto-refresh shortly.
+    </div>
+    {% endif %}
 
     {% if not player_rows %}
     <div class="empty-state">
@@ -85,6 +90,13 @@
     </section>
     {% endif %}
 </div>
+{% endblock %}
+{% block extra_js %}
+{% if cold_start %}
+<script>
+setTimeout(function () { window.location.reload(); }, 12000);
+</script>
+{% endif %}
 {% endblock %}
 {% block extra_css %}
 <style>
