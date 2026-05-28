@@ -2126,6 +2126,75 @@ def _sidebar_upcoming(all_fixtures: List[Dict[str, Any]], limit: int = 80) -> Li
     return rows[:limit]
 
 
+def _sky_players_panel(all_fixtures: List[Dict[str, Any]], limit: int = 8) -> List[Dict[str, Any]]:
+    """Small player-focused panel for the right dock using existing enriched fixture fields."""
+    rows: List[Dict[str, Any]] = []
+    for f in all_fixtures or []:
+        if len(rows) >= int(limit):
+            break
+        home = fixture_team_name(f, "home") or str(f.get("home") or "?")
+        away = fixture_team_name(f, "away") or str(f.get("away") or "?")
+        injuries = f.get("fixture_injuries") if isinstance(f.get("fixture_injuries"), list) else []
+        hs = f.get("home_top_scorers") if isinstance(f.get("home_top_scorers"), list) else []
+        aws = f.get("away_top_scorers") if isinstance(f.get("away_top_scorers"), list) else []
+        home_star = ""
+        away_star = ""
+        if hs:
+            top = hs[0] if isinstance(hs[0], dict) else {}
+            home_star = str(top.get("name") or "")
+        if aws:
+            top = aws[0] if isinstance(aws[0], dict) else {}
+            away_star = str(top.get("name") or "")
+        rows.append(
+            {
+                "match": f"{home} v {away}",
+                "kickoff_time": str(f.get("kickoff_time") or "—"),
+                "lineup_confirmed": bool(f.get("lineup_confirmed")),
+                "injury_count": len(injuries),
+                "home_star": home_star,
+                "away_star": away_star,
+                "home_recent_n": _safe_int_value(f.get("home_recent_n"), 0),
+                "away_recent_n": _safe_int_value(f.get("away_recent_n"), 0),
+            }
+        )
+    return rows
+
+
+def _players_page_rows(all_fixtures: List[Dict[str, Any]], limit: int = 120) -> List[Dict[str, Any]]:
+    """Build richer player-focused rows from existing fixture enrichment."""
+    rows: List[Dict[str, Any]] = []
+    for f in all_fixtures or []:
+        if len(rows) >= int(limit):
+            break
+        home = fixture_team_name(f, "home") or str(f.get("home") or "?")
+        away = fixture_team_name(f, "away") or str(f.get("away") or "?")
+        lineup_meta = f.get("lineup_meta") if isinstance(f.get("lineup_meta"), dict) else {}
+        home_abs = lineup_meta.get("home_scorers_out_of_xi")
+        away_abs = lineup_meta.get("away_scorers_out_of_xi")
+        home_abs = home_abs if isinstance(home_abs, list) else []
+        away_abs = away_abs if isinstance(away_abs, list) else []
+        injuries = f.get("fixture_injuries") if isinstance(f.get("fixture_injuries"), list) else []
+        rows.append(
+            {
+                "id": f.get("id"),
+                "home": home,
+                "away": away,
+                "kickoff_time": str(f.get("kickoff_time") or "—"),
+                "kickoff_day_local": str(f.get("kickoff_day_local") or ""),
+                "league_name": str(f.get("league_name") or f.get("league") or ""),
+                "lineup_confirmed": bool(f.get("lineup_confirmed")),
+                "home_top_scorers": f.get("home_top_scorers") if isinstance(f.get("home_top_scorers"), list) else [],
+                "away_top_scorers": f.get("away_top_scorers") if isinstance(f.get("away_top_scorers"), list) else [],
+                "home_scorers_out_of_xi": home_abs,
+                "away_scorers_out_of_xi": away_abs,
+                "injury_count": len(injuries),
+                "home_recent_n": _safe_int_value(f.get("home_recent_n"), 0),
+                "away_recent_n": _safe_int_value(f.get("away_recent_n"), 0),
+            }
+        )
+    return rows
+
+
 def _league_block_display_name(league_code: str, fixtures: List[Dict[str, Any]]) -> str:
     """Section heading: shared per-fixture league_name when uniform, else configured league label."""
     names = [(f.get("league_name") or "").strip() for f in fixtures]
@@ -2396,6 +2465,7 @@ def index():
         assistant_packets=assistant_packets,
         assistant_recommendations=assistant_bundle.get("recommendations"),
         sidebar_upcoming=data.get("sidebar_upcoming", []),
+        sky_players_panel=_sky_players_panel(upcoming),
         recent_results=recent_results.get("all", []),
         recent_results_days=recent_results.get("results_days", 3),
         recent_results_total=recent_results.get("total", 0),
@@ -2795,6 +2865,23 @@ def tables_page():
         total=data["total"],
         fetch_days=data.get("fetch_days", _fetch_window_days()),
         display_tz_label=display_tz_label(),
+    )
+
+
+@app.route("/players")
+@login_required
+def players_page():
+    """Player availability + form context from existing enrichment."""
+    include_domestic = request.args.get("domestic") == "1"
+    data = fetch_all_fixtures(allow_stale=True, include_domestic=include_domestic)
+    upcoming = _bundle_fixtures(data)
+    return render_template(
+        "players.html",
+        player_rows=_players_page_rows(upcoming),
+        total=data["total"],
+        fetch_days=data.get("fetch_days", _fetch_window_days()),
+        include_domestic=include_domestic,
+        tournament_focus=_tournament_focus_context(include_domestic=include_domestic),
     )
 
 

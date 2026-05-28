@@ -23,6 +23,9 @@ class RateLimiter:
             "odds_api": 500,
             "stats_api": 150,
         }
+        self.minute_limits = {
+            "api_sports": int(os.getenv("HIBS_API_SPORTS_PER_MIN_LIMIT", "22")),
+        }
         self._load_state()
 
     def _load_state(self) -> None:
@@ -35,7 +38,29 @@ class RateLimiter:
                 return
             except (json.JSONDecodeError, ValueError, OSError):
                 pass
-        self.state = {key: {"count": 0, "reset_at": None} for key in self.limits}
+        self.state = {
+            key: {"count": 0, "reset_at": None, "minute_count": 0, "minute_reset_at": None}
+            for key in self.limits
+        }
+
+    def _ensure_entry_shape(self, service: str) -> Dict[str, object]:
+        if service not in self.state or not isinstance(self.state.get(service), dict):
+            self.state[service] = {
+                "count": 0,
+                "reset_at": None,
+                "minute_count": 0,
+                "minute_reset_at": None,
+            }
+        entry = self.state[service]
+        if "minute_count" not in entry:
+            entry["minute_count"] = 0
+        if "minute_reset_at" not in entry:
+            entry["minute_reset_at"] = None
+        if "count" not in entry:
+            entry["count"] = 0
+        if "reset_at" not in entry:
+            entry["reset_at"] = None
+        return entry
 
     def _save_state(self) -> None:
         with open(self.state_file, "w") as f:
@@ -45,20 +70,25 @@ class RateLimiter:
         if service not in self.limits:
             return True
 
-        entry = self.state.get(service, {})
+        entry = self._ensure_entry_shape(service)
         reset_at = entry.get("reset_at")
 
         if reset_at and datetime.fromisoformat(reset_at) > datetime.now():
             count = entry.get("count", 0)
-            return count < self.limits[service]
+            if count >= self.limits[service]:
+                return False
 
+        minute_limit = self.minute_limits.get(service, 0)
+        if minute_limit > 0:
+            minute_reset_at = entry.get("minute_reset_at")
+            if minute_reset_at and datetime.fromisoformat(str(minute_reset_at)) > datetime.now():
+                minute_count = int(entry.get("minute_count", 0) or 0)
+                if minute_count >= minute_limit:
+                    return False
         return True
 
     def record_request(self, service: str) -> None:
-        if service not in self.state:
-            self.state[service] = {"count": 0, "reset_at": None}
-
-        entry = self.state[service]
+        entry = self._ensure_entry_shape(service)
         reset_at = entry.get("reset_at")
 
         if reset_at is None or datetime.fromisoformat(reset_at) <= datetime.now():
@@ -67,25 +97,45 @@ class RateLimiter:
         else:
             entry["count"] = entry.get("count", 0) + 1
 
+        minute_limit = self.minute_limits.get(service, 0)
+        if minute_limit > 0:
+            minute_reset_at = entry.get("minute_reset_at")
+            if minute_reset_at is None or datetime.fromisoformat(str(minute_reset_at)) <= datetime.now():
+                entry["minute_count"] = 1
+                entry["minute_reset_at"] = (datetime.now() + timedelta(minutes=1)).isoformat()
+            else:
+                entry["minute_count"] = int(entry.get("minute_count", 0) or 0) + 1
+
         self._save_state()
 
     def get_stats(self, service: str) -> Dict[str, any]:
-        entry = self.state.get(service, {})
+        entry = self._ensure_entry_shape(service)
         return {
             "count": entry.get("count", 0),
             "limit": self.limits.get(service, 0),
             "reset_at": entry.get("reset_at"),
+            "minute_count": entry.get("minute_count", 0),
+            "minute_limit": self.minute_limits.get(service, 0),
+            "minute_reset_at": entry.get("minute_reset_at"),
         }
 
     def reset_service(self, service: str) -> None:
         """Clear hourly counter for one provider (e.g. after fixture cache clear)."""
         if service in self.limits:
-            self.state[service] = {"count": 0, "reset_at": None}
+            self.state[service] = {
+                "count": 0,
+                "reset_at": None,
+                "minute_count": 0,
+                "minute_reset_at": None,
+            }
             self._save_state()
 
     def reset_all(self) -> None:
         """Clear all provider counters."""
-        self.state = {key: {"count": 0, "reset_at": None} for key in self.limits}
+        self.state = {
+            key: {"count": 0, "reset_at": None, "minute_count": 0, "minute_reset_at": None}
+            for key in self.limits
+        }
         self._save_state()
 
     def is_blocked(self, service: str) -> bool:

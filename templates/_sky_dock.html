@@ -69,6 +69,36 @@
                 ></iframe>
             </div>
         </div>
+        <section class="sky-players-panel" aria-label="Players panel">
+            <div class="sky-players-hd">Players Snapshot <a href="/players" style="margin-left:8px;color:var(--blue);font-weight:700;text-decoration:none;">Open →</a></div>
+            {% if sky_players_panel %}
+            <div class="sky-players-list">
+                {% for row in sky_players_panel %}
+                <article class="sky-player-card">
+                    <div class="sky-player-match">
+                        <span class="sky-player-ko">{{ row.kickoff_time }}</span>
+                        <span class="sky-player-teams">{{ row.match }}</span>
+                    </div>
+                    <div class="sky-player-meta">
+                        <span class="sky-player-chip{% if row.lineup_confirmed %} ok{% endif %}">
+                            {% if row.lineup_confirmed %}Lineups confirmed{% else %}Lineups pending{% endif %}
+                        </span>
+                        <span class="sky-player-chip">Injuries {{ row.injury_count }}</span>
+                        <span class="sky-player-chip">Form H{{ row.home_recent_n }}/A{{ row.away_recent_n }}</span>
+                    </div>
+                    {% if row.home_star or row.away_star %}
+                    <div class="sky-player-stars">
+                        {% if row.home_star %}<span><strong>H:</strong> {{ row.home_star }}</span>{% endif %}
+                        {% if row.away_star %}<span><strong>A:</strong> {{ row.away_star }}</span>{% endif %}
+                    </div>
+                    {% endif %}
+                </article>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="sky-players-empty">No player data loaded yet. Open fixtures to enrich lineups, injuries, and scorer context.</p>
+            {% endif %}
+        </section>
     </div>
 </aside>
 <button type="button" class="sky-dock-reveal" id="sky-dock-reveal" title="Show Sky Sports Football" aria-label="Show Sky Sports Football" hidden>📺 Sky</button>

@@ -24,3 +24,17 @@ def test_reset_all_clears_blocked_counter(tmp_path, monkeypatch):
     assert rl.is_blocked("api_sports") is True
     rl.reset_all()
     assert rl.is_blocked("api_sports") is False
+
+
+def test_api_sports_minute_limit_blocks_when_exceeded(tmp_path, monkeypatch):
+    monkeypatch.delenv("HIBS_DEV_FULL_DQ", raising=False)
+    monkeypatch.setenv("HIBS_API_SPORTS_HOURLY_LIMIT", "400")
+    monkeypatch.setenv("HIBS_API_SPORTS_PER_MIN_LIMIT", "2")
+    state = tmp_path / "limits.json"
+    monkeypatch.chdir(tmp_path)
+    rl = RateLimiter(state_file=str(state.name))
+    assert rl.check_rate_limit("api_sports") is True
+    rl.record_request("api_sports")
+    assert rl.check_rate_limit("api_sports") is True
+    rl.record_request("api_sports")
+    assert rl.check_rate_limit("api_sports") is False

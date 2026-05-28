@@ -328,6 +328,10 @@ class ApiSportsFootballClient(BaseApiClient):
                 return cached
 
         if not self.rate_limiter.check_rate_limit(self.service_name):
+            if use_cache:
+                stale = self.cache.peek(cache_key)
+                if isinstance(stale, dict):
+                    return stale
             return {"response": [], "errors": {"rate_limit": "local guard"}}
 
         url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
