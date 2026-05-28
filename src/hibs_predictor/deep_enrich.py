@@ -87,10 +87,29 @@ def fixture_within_deep_window(fixture: Dict[str, Any], *, days: int) -> bool:
     return now - timedelta(hours=6) <= kick <= end
 
 
-def deep_enrich_applies_to_fixture(fixture: Dict[str, Any]) -> bool:
+def _deep_enrich_horizon_days(league_code: Optional[str] = None) -> int:
+    from hibs_predictor.tournament_focus import friendlies_fetch_window_days, friendlies_max_data_active
+
+    if league_code and friendlies_max_data_active(league_code=league_code):
+        return friendlies_fetch_window_days()
+    if not deep_enrich_today_only():
+        window = deep_enrich_window_days()
+        return window if window > 0 else 14
+    window = deep_enrich_window_days()
+    return window if window > 0 else 0
+
+
+def deep_enrich_applies_to_fixture(
+    fixture: Dict[str, Any],
+    league_code: Optional[str] = None,
+) -> bool:
     """Whether this kickoff is eligible for a second-pass enrich."""
     if fixture_is_today(fixture):
         return True
+    from hibs_predictor.tournament_focus import friendlies_max_data_active
+
+    if league_code and friendlies_max_data_active(league_code=league_code):
+        return fixture_within_deep_window(fixture, days=_deep_enrich_horizon_days(league_code))
     if not deep_enrich_today_only():
         window = deep_enrich_window_days()
         if window <= 0:
@@ -142,11 +161,14 @@ def deep_enrich_target_pct(league_code: Optional[str] = None) -> float:
 
 
 def deep_enrich_max_retries(league_code: Optional[str] = None) -> int:
-    default = "3" if is_showpiece_league(league_code) else "2"
+    from hibs_predictor.tournament_focus import friendlies_max_data_active
+
+    showpiece = is_showpiece_league(league_code) or friendlies_max_data_active(league_code=league_code)
+    default = "3" if showpiece else "2"
     try:
         return max(1, min(4, int(os.getenv("HIBS_DEEP_ENRICH_MAX_RETRIES", default))))
     except ValueError:
-        return 3 if is_showpiece_league(league_code) else 2
+        return 3 if showpiece else 2
 
 
 def _current_xg_earned(enriched: Dict[str, Any]) -> float:
@@ -470,6 +492,48 @@ def _fill_odds_if_needed(
         pass
 
 
+def _apply_friendlies_supplemental_rescue(
+    aggregator: "DataAggregator",
+    enriched: Dict[str, Any],
+    fixture: Dict[str, Any],
+    league_code: str,
+) -> None:
+    """FotMob calendar + national xG tables + injuries for pre–WC friendlies max-data."""
+    from hibs_predictor.tournament_focus import friendlies_max_data_active
+
+    if not friendlies_max_data_active(league_code=league_code):
+        return
+    home_id = fixture_team_id(fixture, "home") or fixture_team_id(enriched, "home")
+    away_id = fixture_team_id(fixture, "away") or fixture_team_id(enriched, "away")
+    try:
+        from hibs_predictor.scrapers.thin_data_rescue import apply_thin_data_rescue
+
+        enriched.update(
+            apply_thin_data_rescue(
+                enriched,
+                fixture,
+                league_code,
+                home_id=home_id,
+                away_id=away_id,
+                supplemental=enriched.get("supplemental"),
+                force=True,
+            )
+        )
+    except Exception:
+        pass
+    try:
+        from hibs_predictor.scrapers.supplemental import collect_supplemental
+
+        sup = collect_supplemental(fixture, league_code, enriched)
+        if isinstance(sup, dict) and sup:
+            merged = dict(enriched.get("supplemental") or {})
+            merged.update(sup)
+            enriched["supplemental"] = merged
+    except Exception:
+        pass
+    _fill_injuries_if_needed(aggregator, enriched, fixture)
+
+
 def _fill_injuries_if_needed(aggregator: "DataAggregator", enriched: Dict[str, Any], fixture: Dict[str, Any]) -> None:
     if isinstance(enriched.get("fixture_injuries"), list) and enriched["fixture_injuries"]:
         return
@@ -564,6 +628,8 @@ def deep_enrich_pass(
         if "injuries" in weak:
             _fill_injuries_if_needed(aggregator, enriched, fixture)
 
+        _apply_friendlies_supplemental_rescue(aggregator, enriched, fixture, league_code)
+
         try:
             from hibs_predictor.scraped_xg import apply_scraped_xg_to_enriched
 
@@ -592,7 +658,7 @@ def deep_enrich_plan(
         target = SHOWPIECE_DEEP_TARGET
     if target <= 0:
         return None
-    if not deep_enrich_applies_to_fixture(fixture):
+    if not deep_enrich_applies_to_fixture(fixture, league_code):
         return None
     dq = enriched.get("data_quality") or compute_fixture_data_quality(enriched)
     pct = float(dq.get("score_pct") or 0)
@@ -729,7 +795,7 @@ def reboost_dashboard_data_quality(
         if not league:
             continue
         fixture = _dashboard_row_as_enrich_fixture(row)
-        if not deep_enrich_applies_to_fixture(fixture):
+        if not deep_enrich_applies_to_fixture(fixture, league):
             continue
         dq = row.get("data_quality") if isinstance(row.get("data_quality"), dict) else {}
         try:

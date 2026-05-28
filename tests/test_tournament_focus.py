@@ -10,9 +10,13 @@ from hibs_predictor.config import ALL_LEAGUE_CODES
 from hibs_predictor.tournament_focus import (
     INTL_FRIENDLIES_CODE,
     INTERNATIONAL_FOCUS_LEAGUE_CODES,
+    before_world_cup_start,
     dashboard_default_region,
     domestic_offseason_active,
     effective_dashboard_league_order,
+    friendlies_fetch_window_days,
+    friendlies_max_data_active,
+    friendlies_max_data_profile_enabled,
     friendlies_window_active,
     international_focus_league_codes,
     league_codes_for_fetch,
@@ -359,3 +363,38 @@ def test_fotmob_nations_league_comp_mapping():
     assert "NATIONS_LEAGUE" in FOTMOB_LEAGUE_IDS
     assert 9806 in FOTMOB_LEAGUE_IDS["NATIONS_LEAGUE"]
     assert primary_league_id("NATIONS_LEAGUE") == 9806
+
+
+def test_friendlies_max_data_active_pre_wc(monkeypatch):
+    monkeypatch.setenv("HIBS_FRIENDLIES_MAX_DATA", "1")
+    monkeypatch.setenv("HIBS_FRIENDLIES_FOCUS_START", "2026-05-20")
+    monkeypatch.delenv("HIBS_TOURNAMENT_FOCUS", raising=False)
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 5, 28),
+    )
+    assert friendlies_window_active() is True
+    assert before_world_cup_start() is True
+    assert friendlies_max_data_profile_enabled() is True
+    assert friendlies_max_data_active(league_code=INTL_FRIENDLIES_CODE) is True
+    assert friendlies_max_data_active(league_code="EPL") is False
+
+
+def test_friendlies_max_data_inactive_after_wc_start(monkeypatch):
+    monkeypatch.setenv("HIBS_FRIENDLIES_MAX_DATA", "1")
+    monkeypatch.setenv("HIBS_TOURNAMENT_FOCUS_START", "2026-06-11")
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 6, 12),
+    )
+    assert friendlies_max_data_profile_enabled() is False
+
+
+def test_friendlies_fetch_window_days_respects_env(monkeypatch):
+    monkeypatch.setenv("HIBS_FRIENDLIES_FETCH_DAYS", "14")
+    monkeypatch.setenv("HIBS_FRIENDLIES_FOCUS_START", "2026-05-20")
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 5, 28),
+    )
+    assert friendlies_fetch_window_days(dashboard_days=5) == 14

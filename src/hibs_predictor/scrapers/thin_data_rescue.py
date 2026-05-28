@@ -173,12 +173,16 @@ def apply_thin_data_rescue(
     home_id: Optional[int],
     away_id: Optional[int],
     supplemental: Optional[Dict[str, Any]] = None,
+    force: bool = False,
 ) -> Dict[str, Any]:
     """Fill thin blocks from FotMob calendar + league tables and supplemental standings."""
     if not thin_data_scrape_enabled():
         return enriched
-    if not enriched_needs_thin_rescue(enriched, home_id, away_id):
-        return enriched
+    from hibs_predictor.tournament_focus import friendlies_max_data_active
+
+    if not force and not friendlies_max_data_active(league_code=league_code):
+        if not enriched_needs_thin_rescue(enriched, home_id, away_id):
+            return enriched
 
     meta = enriched.setdefault("thin_data_rescue", {})
     home_nm = fixture_team_name(fixture, "home") or fixture_team_name(enriched, "home")

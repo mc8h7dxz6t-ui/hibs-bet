@@ -149,6 +149,16 @@ def fotmob_xg_enabled(league_code: str = "") -> bool:
     if raw in ("1", "true", "yes", "on"):
         return True
     code = (league_code or "").strip().upper()
+    if code == "INTL_FRIENDLIES":
+        if _env_on("HIBS_ENABLE_FOTMOB_FRIENDLIES", "0"):
+            return True
+        try:
+            from hibs_predictor.tournament_focus import friendlies_max_data_profile_enabled
+
+            if friendlies_max_data_profile_enabled():
+                return True
+        except Exception:
+            pass
     if code in FOTMOB_XG_CUP_DEFAULT_ON:
         return True
     return _env_on("HIBS_MAX_DATA", "0")

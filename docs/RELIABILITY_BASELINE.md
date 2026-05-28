@@ -32,7 +32,7 @@ Prioritises **consistency over new features** — enables player/injury/lineup l
 | `HIBS_RESULTS_FETCH_EVENTS` | `1` | Goal scorers on Recent results via API-Football `fixtures/events` (default on). |
 | `HIBS_RESULTS_MAX_EVENT_FETCHES` | `12` | Max new events API calls per results refresh (24h per-fixture cache). |
 
-Also set by the script (not injury/lineup specific): `HIBS_FETCH_DAYS=7`, `HIBS_MAX_DATA=1`, `HIBS_ENABLE_FOTMOB_XG=1`, `HIBS_FETCH_FIXTURE_STATISTICS_XG=1`, `HIBS_DASHBOARD_LITE=0`, `HIBS_WARM_FIXTURE_CACHE=1`.
+Also set by the script (not injury/lineup specific): `HIBS_FETCH_DAYS=5`, `HIBS_FRIENDLIES_FETCH_DAYS=14`, `HIBS_MAX_DATA=1`, `HIBS_FRIENDLIES_MAX_DATA=1`, `HIBS_ENABLE_FOTMOB_XG=1`, `HIBS_ENABLE_FOTMOB_FRIENDLIES=1`, `HIBS_FETCH_FIXTURE_STATISTICS_XG=1`, `HIBS_DEEP_ENRICH_WINDOW_DAYS=5`, `HIBS_DASHBOARD_LITE=0`, `HIBS_WARM_FIXTURE_CACHE=1`.
 
 ## xG (post–81af3d5 beef-up)
 
@@ -118,3 +118,22 @@ HIBS_TOURNAMENT_FOCUS=worldcup
 Install cron if missing: `sudo bash /opt/hibs-bet/deploy/cron-hibs-calibration.sh --install` (daily `pred-log-sync`, weekly `calibration-fit`).
 
 FotMob xG league ids: `WORLD_CUP` 77, `EUROS` 50, `NATIONS_LEAGUE` 9806–9809 (friendlies use API xG / form paths when FotMob has no table).
+
+## Pre–World Cup friendlies max-data (May–Jun 2026)
+
+Until the World Cup auto-focus window opens (**2026-06-11** by default), `INTL_FRIENDLIES` is the primary international calendar. With `HIBS_FRIENDLIES_MAX_DATA=1` (set by `apply-vps-safe-production.sh` alongside `HIBS_MAX_DATA=1`):
+
+| Flag | Purpose |
+|------|---------|
+| `HIBS_FRIENDLIES_MAX_DATA=1` | Window-wide deep enrich for friendlies (14-day fetch horizon, not today-only) |
+| `HIBS_DEEP_ENRICH_WINDOW_DAYS=5` | Other leagues: today + 5-day deep pass when `HIBS_DEEP_ENRICH_TODAY_ONLY=1` |
+| `HIBS_DEEP_ENRICH_MAX_RETRIES=3` | Showpiece/friendlies second pass (injuries, FotMob, xG ladder) |
+| `HIBS_ENABLE_FOTMOB_FRIENDLIES=1` | FotMob national-team xG via Nations/WC/Euros fallback tables |
+| `HIBS_FRIENDLIES_STATISTICS_XG_RESERVE=8` | Extra `fixtures/statistics` xG budget slice for friendlies |
+| `HIBS_FETCH_FIXTURE_STATISTICS_XG=1` | Measured fixture xG when API publishes Expected Goals |
+
+**Scrapers for friendlies (supplemental only — API-Sports remains primary):** API-Football fixtures/form/stats/injuries → FotMob calendar recent + national xG tables → thin-data rescue → `fixtures/statistics` xG → StatsBomb goals proxy. FBref, Transfermarkt, WhoScored, and DataMB are **not** used on VPS (`HIBS_FBREF_BLOCKED=1`).
+
+**Expected DQ (earned, floors unchanged):** 85%+ without book odds; 88–90%+ with measured or season xG; 90%+ with odds + measured xG (`test_data_quality_floor.py`).
+
+After deploy during the friendlies block, clear fixture cache once so enriched rows pick up the wider deep pass.

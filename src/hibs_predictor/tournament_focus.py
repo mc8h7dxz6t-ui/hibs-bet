@@ -233,6 +233,54 @@ def friendlies_window_active(*, today: Optional[date] = None) -> bool:
     return start <= cur <= end
 
 
+def before_world_cup_start(*, today: Optional[date] = None) -> bool:
+    """True on calendar dates strictly before the World Cup auto-focus window opens."""
+    cur = today if today is not None else _today_utc()
+    wc_start, _ = _auto_window()
+    return cur < wc_start
+
+
+def friendlies_max_data_profile_enabled(*, today: Optional[date] = None) -> bool:
+    """
+    Pre–World Cup international friendlies run a wider max-data enrich profile.
+
+    On when ``HIBS_FRIENDLIES_MAX_DATA=1``, or ``HIBS_MAX_DATA=1`` during the
+    friendlies calendar block before the WC opening match.
+    """
+    if not friendlies_window_active(today=today):
+        return False
+    if not before_world_cup_start(today=today):
+        return False
+    if _env_truthy("HIBS_FRIENDLIES_MAX_DATA"):
+        return True
+    return _env_truthy("HIBS_MAX_DATA")
+
+
+def friendlies_max_data_active(
+    *,
+    league_code: Optional[str] = None,
+    today: Optional[date] = None,
+) -> bool:
+    """Max-data deep enrich / supplemental scrapers for ``INTL_FRIENDLIES`` before WC."""
+    if not friendlies_max_data_profile_enabled(today=today):
+        return False
+    if league_code is None:
+        return True
+    return (league_code or "").strip().upper() == INTL_FRIENDLIES_CODE
+
+
+def friendlies_fetch_window_days(*, dashboard_days: int = 5) -> int:
+    """Fixture horizon for INTL_FRIENDLIES during the pre–World Cup friendlies block."""
+    if not friendlies_window_active():
+        return max(1, int(dashboard_days))
+    try:
+        want = int(os.getenv("HIBS_FRIENDLIES_FETCH_DAYS", "14"))
+    except ValueError:
+        want = 14
+    want = max(7, min(21, want))
+    return max(max(1, int(dashboard_days)), want)
+
+
 def _today_utc() -> date:
     return datetime.now(timezone.utc).date()
 
@@ -403,6 +451,7 @@ def tournament_focus_context(
         "fetch_leagues": list(league_codes_for_fetch(today=today, include_domestic=include_domestic)),
         "include_friendlies": _friendlies_in_focus(today=today),
         "friendlies_window_active": friendlies_window_active(today=today),
+        "friendlies_max_data_active": friendlies_max_data_profile_enabled(today=today),
         "domestic_offseason_active": off_season,
         "domestic_offseason_start": off_start.isoformat(),
         "domestic_offseason_end": off_end.isoformat(),

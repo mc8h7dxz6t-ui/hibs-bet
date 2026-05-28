@@ -258,3 +258,58 @@ def test_deep_enrich_pass_respects_max_retries(monkeypatch):
     with patch("hibs_predictor.deep_enrich._fill_recent_if_needed") as mock_fill:
         deep_enrich_pass(aggregator, fixture, "EPL", enriched, target_pct=90.0, max_retries=1)
         assert mock_fill.call_count >= 1
+
+
+def test_friendlies_max_data_deep_enrich_uses_fetch_window(monkeypatch):
+    monkeypatch.setenv("HIBS_FRIENDLIES_MAX_DATA", "1")
+    monkeypatch.setenv("HIBS_FRIENDLIES_FETCH_DAYS", "14")
+    monkeypatch.setenv("HIBS_FRIENDLIES_FOCUS_START", "2026-05-20")
+    monkeypatch.setenv("HIBS_TARGET_DQ_PCT", "90")
+    monkeypatch.setenv("HIBS_DEEP_ENRICH_TODAY_ONLY", "1")
+    monkeypatch.setenv("HIBS_DEEP_ENRICH_WINDOW_DAYS", "5")
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: __import__("datetime").date(2026, 5, 28),
+    )
+    kick = "2026-06-05T18:00:00+00:00"
+    fixture = {"fixture": {"id": 1, "date": kick}, "date": kick}
+    assert deep_enrich_applies_to_fixture(fixture, "INTL_FRIENDLIES") is True
+    far_fixture = {"fixture": {"id": 2, "date": "2026-06-20T18:00:00+00:00"}, "date": "2026-06-20T18:00:00+00:00"}
+    assert deep_enrich_applies_to_fixture(far_fixture, "INTL_FRIENDLIES") is False
+
+
+def test_friendlies_max_data_retries_use_showpiece_default(monkeypatch):
+    monkeypatch.setenv("HIBS_FRIENDLIES_MAX_DATA", "1")
+    monkeypatch.setenv("HIBS_FRIENDLIES_FOCUS_START", "2026-05-20")
+    monkeypatch.delenv("HIBS_DEEP_ENRICH_MAX_RETRIES", raising=False)
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: __import__("datetime").date(2026, 5, 28),
+    )
+    from hibs_predictor.deep_enrich import deep_enrich_max_retries
+
+    assert deep_enrich_max_retries("INTL_FRIENDLIES") == 3
+
+
+def test_apply_friendlies_supplemental_rescue_runs_thin_data(monkeypatch):
+    monkeypatch.setenv("HIBS_FRIENDLIES_MAX_DATA", "1")
+    monkeypatch.setenv("HIBS_FRIENDLIES_FOCUS_START", "2026-05-20")
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: __import__("datetime").date(2026, 5, 28),
+    )
+    from hibs_predictor.deep_enrich import _apply_friendlies_supplemental_rescue
+
+    aggregator = MagicMock()
+    aggregator.clients = {"api_sports": MagicMock()}
+    fixture = {
+        "fixture": {"id": 42},
+        "teams": {"home": {"id": 1, "name": "Scotland"}, "away": {"id": 2, "name": "Wales"}},
+    }
+    enriched = {"teams": fixture["teams"], "home_recent_n": 0, "away_recent_n": 0}
+    with patch("hibs_predictor.scrapers.thin_data_rescue.apply_thin_data_rescue") as mock_rescue:
+        mock_rescue.return_value = {**enriched, "thin_data_rescue": {"applied": ["home_recent"]}}
+        with patch("hibs_predictor.scrapers.supplemental.collect_supplemental", return_value={"fotmob_xg": {}}):
+            _apply_friendlies_supplemental_rescue(aggregator, enriched, fixture, "INTL_FRIENDLIES")
+    mock_rescue.assert_called_once()
+    assert mock_rescue.call_args.kwargs.get("force") is True

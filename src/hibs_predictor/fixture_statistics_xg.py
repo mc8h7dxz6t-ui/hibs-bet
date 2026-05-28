@@ -46,6 +46,17 @@ def reset_statistics_xg_budget() -> None:
     global _statistics_budget_remaining, _priority_xg_budget_remaining
     total = max_statistics_fetches_per_refresh()
     reserve = min(16, max(4, total // 3))
+    try:
+        from hibs_predictor.tournament_focus import friendlies_max_data_profile_enabled
+
+        if friendlies_max_data_profile_enabled():
+            extra = (os.getenv("HIBS_FRIENDLIES_STATISTICS_XG_RESERVE") or "8").strip()
+            try:
+                reserve = min(total - 2, reserve + max(0, int(extra)))
+            except ValueError:
+                reserve = min(total - 2, reserve + 8)
+    except Exception:
+        pass
     if total <= reserve + 2:
         reserve = max(0, total // 2)
     _priority_xg_budget_remaining = reserve
