@@ -2230,6 +2230,38 @@ def _players_page_groups(
     return groups
 
 
+def _fixtures_from_dashboard_bundle(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Fixture rows aligned with rendered dashboard day/league blocks (not a stale ``upcoming`` key)."""
+    out: List[Dict[str, Any]] = []
+    for day in data.get("dashboard_days") or []:
+        if not isinstance(day, dict):
+            continue
+        for lg in day.get("leagues") or []:
+            if not isinstance(lg, dict):
+                continue
+            for fx in lg.get("fixtures") or []:
+                if isinstance(fx, dict):
+                    out.append(fx)
+    if out:
+        return out
+    return _bundle_fixtures(data)
+
+
+def _players_groups_for_ui_data(
+    data: Dict[str, Any],
+    *,
+    limit: int = 120,
+    include_domestic: bool = False,
+) -> List[Dict[str, Any]]:
+    """Players panel/page groups; fall back to on-disk bundle when HTML is a cold shell."""
+    fixtures = _fixtures_from_dashboard_bundle(data)
+    if not fixtures and (data.get("cold_start") or data.get("cache_stale")):
+        disk = Cache().peek(_all_fixtures_cache_key(include_domestic=include_domestic))
+        if isinstance(disk, dict) and disk.get("all"):
+            fixtures = _fixtures_from_dashboard_bundle(disk)
+    return _players_page_groups(fixtures, limit=limit)
+
+
 def _league_block_display_name(league_code: str, fixtures: List[Dict[str, Any]]) -> str:
     """Section heading: shared per-fixture league_name when uniform, else configured league label."""
     names = [(f.get("league_name") or "").strip() for f in fixtures]
@@ -2441,9 +2473,9 @@ def index():
             _schedule_dashboard_refresh()
             return _set_fetch_days_cookie_if_requested(resp)
 
-    # Never block the HTML dashboard on live-score + xG enrich (avoids nginx 502 on cold cache).
+    # Never block the HTML dashboard on a full refetch after Refresh (avoids nginx 502/500).
     progressive = _progressive_load_enabled()
-    if force_refresh and progressive:
+    if force_refresh:
         _schedule_dashboard_refresh()
         data = _cold_fixture_bundle(include_domestic=include_domestic)
         upcoming = _bundle_fixtures(data)
@@ -2484,7 +2516,9 @@ def index():
             assistant_packets=assistant_packets,
             assistant_recommendations=assistant_bundle.get("recommendations"),
             sidebar_upcoming=data.get("sidebar_upcoming", []),
-            dashboard_players_groups=_players_page_groups(upcoming, limit=8),
+            dashboard_players_groups=_players_groups_for_ui_data(
+                data, limit=8, include_domestic=include_domestic
+            ),
             recent_results=recent_results.get("all", []),
             recent_results_days=recent_results.get("results_days", 3),
             recent_results_total=recent_results.get("total", 0),
@@ -2571,7 +2605,9 @@ def index():
         assistant_packets=assistant_packets,
         assistant_recommendations=assistant_bundle.get("recommendations"),
         sidebar_upcoming=data.get("sidebar_upcoming", []),
-        dashboard_players_groups=_players_page_groups(upcoming, limit=8),
+        dashboard_players_groups=_players_groups_for_ui_data(
+            data, limit=8, include_domestic=include_domestic
+        ),
         recent_results=recent_results.get("all", []),
         recent_results_days=recent_results.get("results_days", 3),
         recent_results_total=recent_results.get("total", 0),
@@ -3009,10 +3045,11 @@ def players_page():
         data = _cold_fixture_bundle(include_domestic=include_domestic)
     else:
         data = fetch_all_fixtures(allow_stale=True, include_domestic=include_domestic)
-    upcoming = _bundle_fixtures(data)
     return render_template(
         "players.html",
-        player_row_groups=_players_page_groups(upcoming),
+        player_row_groups=_players_groups_for_ui_data(
+            data, include_domestic=include_domestic
+        ),
         total=data["total"],
         fetch_days=data.get("fetch_days", _fetch_window_days()),
         cold_start=bool(data.get("cold_start")),

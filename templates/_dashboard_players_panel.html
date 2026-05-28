@@ -27,6 +27,25 @@
         </div>
     </div>
     {% endfor %}
+    {% elif dashboard_players_panel is defined and dashboard_players_panel %}
+    <div class="dashboard-players-grid">
+        {% for row in dashboard_players_panel %}
+        <article class="dashboard-player-card">
+            <div class="dashboard-player-top">
+                <span>{{ row.kickoff_day_local }} {{ row.kickoff_time }}</span>
+                <span>{{ row.league_name }}</span>
+            </div>
+            <h4>{{ row.home }} <span class="fr-vs">v</span> {{ row.away }}</h4>
+            <div class="dashboard-player-chips">
+                <span class="dashboard-player-chip{% if row.lineup_confirmed %} ok{% endif %}">
+                    {% if row.lineup_confirmed %}Lineups confirmed{% else %}Lineups pending{% endif %}
+                </span>
+                <span class="dashboard-player-chip">Injuries {{ row.injury_count }}</span>
+                <span class="dashboard-player-chip">Form H{{ row.home_recent_n }}/A{{ row.away_recent_n }}</span>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
     {% elif cold_start %}
     <p class="dashboard-players-empty">Loading players data from cached fixtures…</p>
     {% else %}
