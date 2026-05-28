@@ -401,6 +401,70 @@ ALL_LEAGUE_CODES = [
 
 DASHBOARD_LEAGUE_ORDER = list(ALL_LEAGUE_CODES)
 
+# Players page / dashboard panel: EPL → SPL → top Europe → lower England → lower Scotland → remainder.
+PLAYERS_PANEL_LEAGUE_BUCKETS = [
+    ("Premier League", ["EPL"]),
+    ("Scottish Premiership", ["SCOTLAND"]),
+    (
+        "European leagues",
+        [
+            "LA_LIGA",
+            "COPA_DEL_REY",
+            "SERIE_A",
+            "COPPA_ITALIA",
+            "BUNDESLIGA",
+            "DFB_POKAL",
+            "LIGUE_1",
+            "COUPE_DE_FRANCE",
+            "EREDIVISIE",
+            "PRIMEIRA",
+            "BELGIUM_FIRST",
+            "GREECE_SL",
+            "AUSTRIA_BL",
+            "UCL",
+            "EUROPA_LEAGUE",
+            "UECL",
+        ],
+    ),
+    (
+        "Lower English leagues",
+        ["CHAMPIONSHIP", "LEAGUE_ONE", "LEAGUE_TWO", "FA_CUP", "LEAGUE_CUP"],
+    ),
+    (
+        "Lower Scottish leagues",
+        ["SCOTLAND_CHAMP", "SCOTLAND_L1", "SCOTLAND_L2", "SCOTTISH_CUP"],
+    ),
+]
+
+_PLAYERS_PANEL_LEAGUE_ALIASES = {
+    "SCOTLAND_PREMIERSHIP": "SCOTLAND",
+}
+
+
+def players_panel_league_code(league_code: str) -> str:
+    code = (league_code or "").strip().upper()
+    return _PLAYERS_PANEL_LEAGUE_ALIASES.get(code, code)
+
+
+def players_panel_league_order() -> list:
+    ordered = []
+    seen = set()
+    for _title, codes in PLAYERS_PANEL_LEAGUE_BUCKETS:
+        for code in codes:
+            if code not in seen:
+                ordered.append(code)
+                seen.add(code)
+    for code in ALL_LEAGUE_CODES:
+        if code not in seen:
+            ordered.append(code)
+            seen.add(code)
+    return ordered
+
+
+def players_panel_league_order_index() -> dict:
+    return {code: index for index, code in enumerate(players_panel_league_order())}
+
+
 LEAGUE_REGIONS = {
     "🏴󠁧󠁢󠁳󠁣󠁴󠁿 Scotland": ["SCOTLAND", "SCOTLAND_CHAMP", "SCOTLAND_L1", "SCOTLAND_L2", "SCOTTISH_CUP"],
     "🏴󠁧󠁢󠁥󠁮󠁧󠁿 England": ["EPL", "CHAMPIONSHIP", "LEAGUE_ONE", "LEAGUE_TWO", "FA_CUP", "LEAGUE_CUP"],

@@ -32,13 +32,17 @@
     </div>
     {% endif %}
 
-    {% if not player_rows %}
+    {% if not player_row_groups %}
     <div class="empty-state">
         <p>No player data available yet. Refresh dashboard fixtures first.</p>
     </div>
     {% else %}
-    <section class="players-grid" aria-label="Players by fixture">
-        {% for row in player_rows %}
+    <section class="players-page" aria-label="Players by league">
+        {% for group in player_row_groups %}
+        <div class="players-league-block" data-league-section="{{ group.league }}">
+            <h2 class="players-league-hd">{{ group.section_title|upper }}</h2>
+            <div class="players-grid">
+        {% for row in group.rows %}
         <article class="players-card">
             <div class="players-card-top">
                 <span class="players-ko">{{ row.kickoff_day_local }} {{ row.kickoff_time }}</span>
@@ -87,6 +91,9 @@
             </div>
         </article>
         {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
     </section>
     {% endif %}
 </div>
@@ -113,6 +120,8 @@ try { sessionStorage.removeItem('hibs_players_cold_reloads'); } catch (e) {}
 {% endblock %}
 {% block extra_css %}
 <style>
+.players-league-block{margin-bottom:18px;}
+.players-league-hd{margin:0 0 10px;font-size:0.82em;letter-spacing:0.08em;color:var(--accent);}
 .players-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
 .players-card{border:1px solid var(--border);border-radius:12px;background:rgba(10,22,40,0.72);padding:12px;}
 .players-card-top{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:0.72em;}
