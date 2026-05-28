@@ -276,7 +276,6 @@ def insights_empty_shell() -> Dict[str, Any]:
         "audit": {"message": "Loading calibration snapshot…", "n_used_metrics": 0},
         "performance_url": "/performance",
     }
-    return out_audit
 
 
 def build_insights(

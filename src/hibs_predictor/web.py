@@ -622,7 +622,13 @@ def _schedule_dashboard_refresh() -> None:
     def _run() -> None:
         global _dashboard_refresh_inflight
         try:
-            fetch_all_fixtures(attach_live=False, include_domestic=False, allow_stale=True)
+            fetch_all_fixtures(
+                attach_live=False,
+                include_domestic=False,
+                allow_stale=True,
+                force_refresh=True,
+                reboost=True,
+            )
             _clear_dashboard_page_cache()
         except Exception as exc:
             print(f"[Dashboard refresh] {exc!r}")
@@ -695,15 +701,37 @@ def _maybe_warm_fixture_cache() -> None:
     """Background warm of all_fixtures disk cache (production cold start)."""
     if not _env_truthy("HIBS_WARM_FIXTURE_CACHE"):
         return
-    import threading
+    _schedule_dashboard_refresh()
 
-    def _run() -> None:
-        try:
-            fetch_all_fixtures(attach_live=False, allow_stale=True)
-        except Exception as exc:
-            print(f"[Fixture warm] {exc!r}")
 
-    threading.Thread(target=_run, name="hibs-fixture-warm", daemon=True).start()
+def _load_fixtures_for_http(
+    *,
+    attach_live: bool = False,
+    include_domestic: bool = False,
+) -> Dict[str, Any]:
+    """Request-path fixture load: cached, stale, or cold shell — never block on cold rebuild."""
+    ck = _all_fixtures_cache_key(include_domestic=include_domestic)
+    cache = Cache()
+    ttl = _cache_ttl_hours(1.0)
+    cached = cache.get(ck, ttl_hours=ttl)
+    if cached and _is_complete_fixture_bundle(cached):
+        bundle = dict(cached)
+        bundle["fetch_days"] = _fetch_window_days()
+        if not _all_fixtures_bundle_fresh(cached):
+            bundle["cache_stale"] = True
+        if attach_live:
+            _refresh_live_on_bundle(bundle)
+        return bundle
+
+    stale = _stale_fixture_bundle_for_refresh(include_domestic=include_domestic)
+    if stale:
+        if attach_live:
+            _refresh_live_on_bundle(stale)
+        _schedule_dashboard_refresh()
+        return stale
+
+    _schedule_dashboard_refresh()
+    return _cold_fixture_bundle(include_domestic=include_domestic)
 
 
 def _slim_row_enrich_fresh(row: Dict[str, Any]) -> bool:
@@ -2101,6 +2129,7 @@ def _finalize_fixture_bundle(
     *,
     attach_live: bool = False,
     include_domestic: bool = False,
+    reboost: bool = False,
 ) -> Dict[str, Any]:
     from hibs_predictor.display_tz import enrich_fixtures_kickoff
 
@@ -2112,7 +2141,8 @@ def _finalize_fixture_bundle(
     if attach_live:
         _refresh_live_on_bundle({"all": all_fixtures})
     _ensure_fixture_data_quality(all_fixtures)
-    _reboost_bundle_data_quality(all_fixtures)
+    if reboost:
+        _reboost_bundle_data_quality(all_fixtures)
     try:
         from hibs_predictor.betting_engine import apply_portfolio_kelly
 
@@ -2264,6 +2294,8 @@ def fetch_all_fixtures(
     attach_live: bool = False,
     include_domestic: bool = False,
     allow_stale: bool = False,
+    force_refresh: bool = False,
+    reboost: bool = False,
 ) -> Dict:
     from hibs_predictor.fixture_statistics_xg import reset_statistics_xg_budget
 
@@ -2280,7 +2312,7 @@ def fetch_all_fixtures(
             if attach_live:
                 _refresh_live_on_bundle(bundle)
             return bundle
-        if allow_stale and _is_complete_fixture_bundle(cached):
+        if allow_stale and not force_refresh and _is_complete_fixture_bundle(cached):
             bundle = dict(cached)
             bundle["fetch_days"] = _fetch_window_days()
             bundle["cache_stale"] = True
@@ -2293,7 +2325,12 @@ def fetch_all_fixtures(
         if not all_f and isinstance(cached, list):
             all_f = cached
         if all_f:
-            bundle = _finalize_fixture_bundle(all_f, attach_live=attach_live, include_domestic=include_domestic)
+            bundle = _finalize_fixture_bundle(
+                all_f,
+                attach_live=attach_live,
+                include_domestic=include_domestic,
+                reboost=reboost,
+            )
             if bundle.get("total"):
                 cache.set(ck, bundle, ttl_hours=ttl)
             return bundle
@@ -2305,12 +2342,31 @@ def fetch_all_fixtures(
         if isinstance(stale_bundle, dict) and _is_complete_fixture_bundle(stale_bundle)
         else None
     )
+    if (
+        allow_stale
+        and not force_refresh
+        and isinstance(stale_bundle, dict)
+        and _is_complete_fixture_bundle(stale_bundle)
+        and stale_bundle.get("all")
+    ):
+        bundle = dict(stale_bundle)
+        bundle["fetch_days"] = _fetch_window_days()
+        bundle["cache_stale"] = True
+        if attach_live:
+            _refresh_live_on_bundle(bundle)
+        return bundle
+
     all_fixtures = _fetch_all_league_fixtures_parallel(
         include_domestic=include_domestic, allow_stale=allow_stale
     )
     if stale_all:
         _merge_stale_all_fixtures_rows(all_fixtures, stale_all)
-    result = _finalize_fixture_bundle(all_fixtures, attach_live=attach_live, include_domestic=include_domestic)
+    result = _finalize_fixture_bundle(
+        all_fixtures,
+        attach_live=attach_live,
+        include_domestic=include_domestic,
+        reboost=reboost,
+    )
     if stale_all and result.get("all"):
         old_fresh = _bundle_enrich_fresh_count(stale_bundle)
         new_fresh = _bundle_enrich_fresh_count(result)
@@ -2671,9 +2727,8 @@ def _cached_assistant_bundle(
         ):
             return hit
 
-    data = fetch_all_fixtures(
+    data = _load_fixtures_for_http(
         attach_live=attach_live,
-        allow_stale=allow_stale,
         include_domestic=include_domestic,
     )
     bundle = _assistant_bundle(_bundle_fixtures(data))
@@ -2836,16 +2891,8 @@ def index():
         return _set_fetch_days_cookie_if_requested(resp)
 
     ck = _all_fixtures_cache_key(include_domestic=include_domestic)
-    disk_bundle = Cache().peek(ck)
-    if (
-        progressive
-        and request.args.get("refresh") != "1"
-        and not isinstance(disk_bundle, dict)
-    ):
-        _schedule_dashboard_refresh()
-        data = _finalize_fixture_bundle([], include_domestic=include_domestic)
-        data["cache_stale"] = True
-        data["cold_start"] = True
+    if progressive and request.args.get("refresh") != "1":
+        data = _load_fixtures_for_http(include_domestic=include_domestic)
     else:
         data = fetch_all_fixtures(
             attach_live=False,
@@ -3093,13 +3140,13 @@ def api_fixtures_live():
         return jsonify({"fixtures": {}, "poll_after_sec": 45, "cache_stale": True, "cold_start": True})
     fixture_rows: List[Dict[str, Any]] = []
     if dashboard_ids:
-        data = fetch_all_fixtures(allow_stale=True, include_domestic=include_domestic)
+        data = _load_fixtures_for_http(include_domestic=include_domestic)
         want = set(dashboard_ids)
         fixture_rows = [
             f for f in (data.get("all") or []) if str(f.get("id")) in want
         ]
     else:
-        data = fetch_all_fixtures(allow_stale=True, include_domestic=include_domestic)
+        data = _load_fixtures_for_http(include_domestic=include_domestic)
         all_rows = data.get("all") or []
         dashboard_ids = fixture_ids_likely_in_play(all_rows)
         fixture_rows = [
@@ -3128,7 +3175,7 @@ def api_fixtures():
 @app.route("/api/value-bets")
 @login_required
 def api_value_bets():
-    data = fetch_all_fixtures(allow_stale=True)
+    data = _load_fixtures_for_http()
     return jsonify({"value_bets": data["value_bets"], "count": data["value_bet_count"]})
 
 
@@ -3138,7 +3185,7 @@ def api_insights():
     """Handicapper-style insight digest for the current fixture window."""
     from hibs_predictor.insights import build_insights
 
-    data = fetch_all_fixtures(allow_stale=True)
+    data = _load_fixtures_for_http()
     upcoming = _bundle_fixtures(data)
     all_rows = data.get("all") or []
     return jsonify(
@@ -3156,10 +3203,8 @@ def api_insights_content():
     from hibs_predictor.insights import build_insights
 
     include_domestic = request.args.get("domestic") == "1"
-    data = fetch_all_fixtures(
+    data = _load_fixtures_for_http(
         include_domestic=include_domestic,
-        allow_stale=True,
-        attach_live=False,
     )
     if data.get("cache_stale"):
         _schedule_dashboard_refresh()
@@ -3217,7 +3262,7 @@ def api_acca_recommendations():
     from hibs_predictor.acca_recommender import build_acca_recommendations
     from hibs_predictor.match_insight import build_assistant_packet
 
-    data = fetch_all_fixtures(allow_stale=True)
+    data = _load_fixtures_for_http()
     upcoming = _bundle_fixtures(data)
     packets = [build_assistant_packet(f) for f in upcoming]
     return jsonify(build_acca_recommendations(packets))
@@ -3261,17 +3306,7 @@ def insights_page():
 
     progressive = _progressive_load_enabled()
     include_domestic = request.args.get("domestic") == "1"
-    ck = _all_fixtures_cache_key(include_domestic=include_domestic)
-    disk_bundle = Cache().peek(ck)
-    if progressive and not isinstance(disk_bundle, dict):
-        _schedule_dashboard_refresh()
-        data = _cold_fixture_bundle(include_domestic=include_domestic)
-    else:
-        data = fetch_all_fixtures(
-            include_domestic=include_domestic,
-            allow_stale=True,
-            attach_live=False,
-        )
+    data = _load_fixtures_for_http(include_domestic=include_domestic)
     if data.get("cache_stale"):
         _schedule_dashboard_refresh()
     upcoming = _bundle_fixtures(data)
@@ -3311,13 +3346,11 @@ def insights_page():
 @login_required
 def tables_page():
     """League tables from available standings feeds, with fixture-row fallback."""
-    ck = _all_fixtures_cache_key(include_domestic=False)
-    disk_bundle = Cache().peek(ck)
-    if not isinstance(disk_bundle, dict):
+    if not isinstance(Cache().peek(_all_fixtures_cache_key(include_domestic=False)), dict):
         _schedule_dashboard_refresh()
         data = _cold_fixture_bundle(include_domestic=False)
     else:
-        data = fetch_all_fixtures(allow_stale=True)
+        data = _load_fixtures_for_http(include_domestic=False)
     cold = bool(data.get("cold_start"))
     if cold:
         tables: List[Dict[str, Any]] = []
@@ -3338,14 +3371,11 @@ def tables_page():
 def players_page():
     """Player availability + form context from existing enrichment."""
     include_domestic = request.args.get("domestic") == "1"
-    ck = _all_fixtures_cache_key(include_domestic=include_domestic)
-    disk_bundle = Cache().peek(ck)
-    if not isinstance(disk_bundle, dict):
-        # Keep players page responsive on cold cache; warm in background like dashboard.
+    if not isinstance(Cache().peek(_all_fixtures_cache_key(include_domestic=include_domestic)), dict):
         _schedule_dashboard_refresh()
         data = _cold_fixture_bundle(include_domestic=include_domestic)
     else:
-        data = fetch_all_fixtures(allow_stale=True, include_domestic=include_domestic)
+        data = _load_fixtures_for_http(include_domestic=include_domestic)
     return render_template(
         "players.html",
         player_row_groups=_players_groups_for_ui_data(
@@ -3381,7 +3411,7 @@ def settings_page():
 @app.route("/acca")
 @login_required
 def acca_builder():
-    data = fetch_all_fixtures(allow_stale=True)
+    data = _load_fixtures_for_http()
     return render_template("acca_builder.html", fixtures=_bundle_fixtures(data))
 
 
