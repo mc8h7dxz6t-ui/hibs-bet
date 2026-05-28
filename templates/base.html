@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en"{% if show_players_dock or show_sky_panel %} class="hibs-right-dock-enabled{% if show_players_dock %} hibs-players-dock-enabled{% endif %}{% if show_sky_panel %} hibs-sky-dock-enabled{% endif %}"{% endif %}>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -441,10 +441,15 @@
         .chip-lg:hover{color:var(--text);border-color:rgba(148,163,184,0.28);}
         .chip-dq.active{background:rgba(0,122,51,0.12);color:var(--neon-value);border-color:rgba(0,122,51,0.4);}
         .chip-hint{width:100%;font-size:0.65em;color:var(--muted);line-height:1.35;margin:-4px 0 2px;}
-        :root{--sky-dock-width:320px;}
+        :root{--right-dock-width:320px;--sky-dock-width:var(--right-dock-width);--players-dock-width:var(--right-dock-width);}
         .hibs-app-shell{min-width:0;transition:padding-right 0.22s ease;}
-        html.hibs-sky-dock-enabled:not(.sky-dock-collapsed) .hibs-app-shell{
-            padding-right:calc(var(--sky-dock-width) + 20px);
+        html.hibs-right-dock-enabled:not(.players-dock-collapsed):not(.sky-dock-collapsed) .hibs-app-shell,
+        html.hibs-right-dock-enabled.players-dock-collapsed:not(.sky-dock-collapsed) .hibs-app-shell,
+        html.hibs-right-dock-enabled:not(.players-dock-collapsed).sky-dock-collapsed .hibs-app-shell{
+            padding-right:calc(var(--right-dock-width) + 20px);
+        }
+        html.hibs-right-dock-enabled.players-dock-collapsed.sky-dock-collapsed .hibs-app-shell{
+            padding-right:0;
         }
         .sky-dock{
             position:fixed;top:10px;right:10px;z-index:50;
@@ -473,7 +478,7 @@
         }
         .sky-dock-collapse:hover{border-color:var(--blue);color:var(--blue);}
         .sky-dock-body{flex:1;min-height:0;display:flex;flex-direction:column;padding:8px;}
-        .sky-dock-browser{flex:0 0 52%;min-height:0;display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:rgba(2,6,23,0.6);}
+        .sky-dock-browser{flex:1;min-height:0;display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:rgba(2,6,23,0.6);}
         .sky-dock-tabs .tab-btn{font-size:0.68em;padding:5px 10px;}
         .sky-dock-tab-news{font-size:0.62em!important;opacity:0.9;}
         .sky-dock-viewport{flex:1;min-height:0;display:flex;flex-direction:column;}
@@ -506,8 +511,96 @@
             box-shadow:-8px 0 24px rgba(0,0,0,0.35);font-family:'Inter',sans-serif;
         }
         .sky-dock-reveal:hover{border-color:rgba(124,252,0,0.35);}
-        html.hibs-sky-dock-enabled:not(.sky-dock-collapsed) .hibs-assistant-fab{right:calc(var(--sky-dock-width) + 28px);}
-        html.hibs-sky-dock-enabled:not(.sky-dock-collapsed) .betslip-fab{right:calc(var(--sky-dock-width) + 90px);}
+        html.hibs-right-dock-enabled:not(.players-dock-collapsed):not(.sky-dock-collapsed) .hibs-assistant-fab,
+        html.hibs-right-dock-enabled.players-dock-collapsed:not(.sky-dock-collapsed) .hibs-assistant-fab,
+        html.hibs-right-dock-enabled:not(.players-dock-collapsed).sky-dock-collapsed .hibs-assistant-fab{
+            right:calc(var(--right-dock-width) + 28px);
+        }
+        html.hibs-right-dock-enabled:not(.players-dock-collapsed):not(.sky-dock-collapsed) .betslip-fab,
+        html.hibs-right-dock-enabled.players-dock-collapsed:not(.sky-dock-collapsed) .betslip-fab,
+        html.hibs-right-dock-enabled:not(.players-dock-collapsed).sky-dock-collapsed .betslip-fab{
+            right:calc(var(--right-dock-width) + 90px);
+        }
+        .players-dock{
+            position:fixed;top:10px;right:10px;z-index:50;
+            width:var(--players-dock-width);height:calc(100vh - 20px);
+            display:flex;flex-direction:column;
+            border:1px solid var(--border);border-radius:14px;
+            background:rgba(15,23,42,0.97);
+            box-shadow:0 16px 48px rgba(0,0,0,0.45);
+            overflow:hidden;
+            transition:transform 0.22s ease,opacity 0.22s ease;
+        }
+        html.players-dock-collapsed .players-dock{
+            transform:translateX(calc(100% + 24px));
+            opacity:0;pointer-events:none;
+        }
+        .players-dock-hd{
+            display:flex;align-items:center;justify-content:space-between;gap:8px;
+            padding:10px 12px;border-bottom:1px solid var(--border);
+            background:rgba(2,6,23,0.65);flex-shrink:0;
+        }
+        .players-dock-title{font-size:0.78em;font-weight:800;color:var(--hibs-neon);letter-spacing:0.06em;display:flex;align-items:center;gap:6px;flex:1;min-width:0;}
+        .players-dock-ico{font-size:1.05em;}
+        .players-dock-open{
+            font-size:0.66em;font-weight:700;color:var(--blue);text-decoration:none;white-space:nowrap;
+        }
+        .players-dock-open:hover{text-decoration:underline;}
+        .players-dock-collapse{
+            flex:0 0 auto;width:28px;height:28px;border:1px solid var(--border);border-radius:8px;
+            background:rgba(30,41,59,0.9);color:var(--muted);font-size:1.1em;line-height:1;cursor:pointer;
+        }
+        .players-dock-collapse:hover{border-color:var(--blue);color:var(--blue);}
+        .players-dock-body{flex:1;min-height:0;overflow:auto;padding:8px;}
+        .players-dock-league{margin-bottom:10px;}
+        .players-dock-league-hd{margin:0 0 6px;font-size:0.64em;letter-spacing:0.08em;color:var(--accent);}
+        .players-dock-list{display:flex;flex-direction:column;gap:8px;}
+        .players-dock-card{border:1px solid rgba(148,163,184,0.2);border-radius:8px;padding:8px;background:rgba(15,23,42,0.6);}
+        .players-dock-card-top{display:flex;justify-content:space-between;gap:6px;font-size:0.58em;color:var(--muted);margin-bottom:4px;}
+        .players-dock-league{text-transform:uppercase;letter-spacing:0.04em;}
+        .players-dock-match{margin:0 0 6px;font-size:0.7em;line-height:1.3;font-weight:700;}
+        .players-dock-chips{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px;}
+        .players-dock-chip{font-size:0.56em;border:1px solid var(--border);border-radius:999px;padding:2px 5px;color:var(--muted);}
+        .players-dock-chip.ok{border-color:rgba(57,255,20,0.38);color:var(--neon-value);}
+        .players-dock-scorers{display:flex;flex-direction:column;gap:2px;font-size:0.58em;color:var(--muted);}
+        .players-dock-alert{margin:4px 0 0;font-size:0.56em;color:#fde68a;line-height:1.35;}
+        .players-dock-empty{padding:10px;font-size:0.66em;color:var(--muted);line-height:1.35;}
+        .players-dock-reveal{
+            position:fixed;right:0;top:52%;z-index:49;
+            transform:translateY(-50%);
+            padding:10px 8px 10px 10px;border:1px solid var(--border);border-right:none;
+            border-radius:12px 0 0 12px;background:rgba(15,23,42,0.96);
+            color:var(--hibs-neon);font-size:0.68em;font-weight:800;cursor:pointer;
+            box-shadow:-8px 0 24px rgba(0,0,0,0.35);font-family:'Inter',sans-serif;
+        }
+        .players-dock-reveal:hover{border-color:rgba(124,252,0,0.35);}
+        html.hibs-sky-dock-enabled.hibs-players-dock-enabled:not(.sky-dock-collapsed) .sky-dock{
+            height:calc(42vh - 12px);
+        }
+        html.hibs-sky-dock-enabled.hibs-players-dock-enabled:not(.players-dock-collapsed) .players-dock{
+            top:calc(42vh + 4px);
+            height:calc(58vh - 24px);
+        }
+        html.hibs-sky-dock-enabled.hibs-players-dock-enabled .players-dock-reveal{top:72%;}
+        .players-mobile-fallback{
+            display:none;
+            margin:0 0 12px;
+            padding:10px 12px;
+            border:1px solid var(--border);
+            border-radius:10px;
+            background:rgba(2,6,23,0.7);
+            color:var(--muted);
+            font-size:0.72em;
+            line-height:1.4;
+        }
+        .players-mobile-fallback a{
+            color:var(--blue);
+            font-weight:700;
+            text-decoration:none;
+            margin-left:8px;
+            white-space:nowrap;
+        }
+        .players-mobile-fallback a:hover{text-decoration:underline;}
         .sky-mobile-fallback{
             display:none;
             margin:0 0 12px;
@@ -528,10 +621,11 @@
         }
         .sky-mobile-fallback a:hover{text-decoration:underline;}
         @media(max-width:1100px){
-            html.hibs-sky-dock-enabled .hibs-app-shell{padding-right:0!important;}
-            .sky-dock,.sky-dock-reveal{display:none!important;}
-            html.hibs-sky-dock-enabled .hibs-assistant-fab{right:20px;}
-            html.hibs-sky-dock-enabled .betslip-fab{right:82px;}
+            html.hibs-right-dock-enabled .hibs-app-shell{padding-right:0!important;}
+            .sky-dock,.sky-dock-reveal,.players-dock,.players-dock-reveal{display:none!important;}
+            html.hibs-right-dock-enabled .hibs-assistant-fab{right:20px;}
+            html.hibs-right-dock-enabled .betslip-fab{right:82px;}
+            .players-mobile-fallback{display:block;}
             .sky-mobile-fallback{display:block;}
         }
         .sky-browser{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:rgba(2,6,23,0.6);}
@@ -1383,6 +1477,21 @@
     {% block content %}{% endblock %}
     <footer><p>{% from '_hibs_brand.html' import footer_crest %}{{ footer_crest() }}<span>hibs-bet</span> &mdash; Edinburgh Betting Intelligence &nbsp;|&nbsp; Gamble Responsibly &nbsp;|&nbsp; 18+</p></footer>
 </div>
+{% if show_players_dock %}
+<div class="players-mobile-fallback" role="status">
+    Players panel is on the right on desktop.
+    <a href="/players">Open Players</a>
+</div>
+{% include '_players_dock.html' %}
+{% endif %}
+{% if show_sky_panel %}
+<div class="sky-mobile-fallback" role="status">
+    Sky panel is available on desktop. On mobile, open
+    <a href="{{ sky_sports_football_open_url }}" target="_blank" rel="noopener noreferrer">Sky Football</a>
+    <a href="{{ sky_sports_news_open_url }}" target="_blank" rel="noopener noreferrer">Sky Sports News</a>
+</div>
+{% include '_sky_dock.html' %}
+{% endif %}
 {% include '_betslip_drawer.html' %}
 <script src="{{ url_for('static', filename='hibs_odds.js') }}"></script>
 <script src="{{ url_for('static', filename='hibs_betslip.js') }}"></script>

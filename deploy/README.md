@@ -93,7 +93,8 @@ Local dev (no systemd): `PORT=5002 PYTHONPATH=src python3 src/hibs_predictor/web
 
 - [ ] `HIBS_PREDICTION_LOG_ENABLED=1` + `HIBS_CLV_LOG_ENABLED=1` (+ daily `pred-log-sync`, weekly `calibration-fit` via `deploy/cron-hibs-calibration.sh`)
 - [ ] Scrape flags aligned with quota: `HIBS_MAX_DATA`, `HIBS_ENABLE_HEAVY_SCRAPERS`, `HIBS_ENABLE_FOTMOB_FIXTURES` (default on)
-- [ ] Sky dock: `HIBS_SHOW_SKY_PANEL=1` (default); panel hides automatically if YouTube embed probe fails
+- [ ] Players dock: on by default (right rail); hide with `HIBS_SHOW_PLAYERS_DOCK=0`
+- [ ] Optional Sky dock: `HIBS_SHOW_SKY_PANEL=1` (off by default); hides automatically if YouTube embed probe fails
 - [ ] Deep enrich: safe production sets `HIBS_TARGET_DQ_PCT=90`, `HIBS_DEEP_ENRICH_TODAY_ONLY=1`, `HIBS_DEEP_ENRICH_MAX_RETRIES=2` (today’s fixtures only; stays within API budget)
 
 ### Nice-to-have (defer)

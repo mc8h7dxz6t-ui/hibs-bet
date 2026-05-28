@@ -115,7 +115,7 @@ def test_players_route_returns_200(monkeypatch):
     assert "SCOTTISH PREMIERSHIP" in html
 
 
-def test_dashboard_players_panel_is_always_visible(monkeypatch):
+def test_players_dock_is_visible_on_dashboard(monkeypatch):
     from hibs_predictor.web import app
 
     fixture = {
@@ -126,6 +126,7 @@ def test_dashboard_players_panel_is_always_visible(monkeypatch):
         "league_name": "Scottish Premiership",
         "kickoff_time": "19:45",
         "kickoff_day_local": "2026-05-30",
+        "kickoff_sort": "2026-05-30T19:45:00",
         "lineup_confirmed": True,
         "home_top_scorers": [{"name": "Player A", "goals": 14}],
         "away_top_scorers": [{"name": "Player B", "goals": 11}],
@@ -151,8 +152,10 @@ def test_dashboard_players_panel_is_always_visible(monkeypatch):
         response = client.get("/")
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert 'id="dashboard-players-panel"' in html
-    assert "Players Snapshot" in html
-    assert "Open Players" in html
+    assert 'id="players-dock"' in html
+    assert "hibs-players-dock-enabled" in html
+    assert "hibs_players_dock_collapsed" in html
+    assert "players-dock-collapse" in html
     assert "Lineups confirmed" in html
-    assert "dashboard-players-league-hd" in html
+    assert "players-dock-league-hd" in html
+    assert 'id="sky-dock"' not in html

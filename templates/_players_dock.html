@@ -1,0 +1,94 @@
+<aside class="players-dock" id="players-dock" aria-label="Players snapshot">
+    <div class="players-dock-hd">
+        <span class="players-dock-title"><span class="players-dock-ico" aria-hidden="true">👥</span> Players</span>
+        <a href="/players" class="players-dock-open">Open →</a>
+        <button type="button" class="players-dock-collapse" id="players-dock-collapse" title="Hide Players panel" aria-label="Hide Players panel" aria-expanded="true">›</button>
+    </div>
+    <div class="players-dock-body">
+        {% if players_dock_groups %}
+        {% for group in players_dock_groups %}
+        <div class="players-dock-league" data-league-section="{{ group.league }}">
+            <h3 class="players-dock-league-hd">{{ group.section_title|upper }}</h3>
+            <div class="players-dock-list">
+                {% for row in group.rows %}
+                <article class="players-dock-card">
+                    <div class="players-dock-card-top">
+                        <span class="players-dock-ko">{{ row.kickoff_day_local }} {{ row.kickoff_time }}</span>
+                        <span class="players-dock-league">{{ row.league_name }}</span>
+                    </div>
+                    <h4 class="players-dock-match">{{ row.home }} <span class="fr-vs">v</span> {{ row.away }}</h4>
+                    <div class="players-dock-chips">
+                        <span class="players-dock-chip{% if row.lineup_confirmed %} ok{% endif %}">
+                            {% if row.lineup_confirmed %}Lineups confirmed{% else %}Lineups pending{% endif %}
+                        </span>
+                        <span class="players-dock-chip">Injuries {{ row.injury_count }}</span>
+                        <span class="players-dock-chip">Form H{{ row.home_recent_n }}/A{{ row.away_recent_n }}</span>
+                    </div>
+                    {% if row.home_top_scorers or row.away_top_scorers %}
+                    <div class="players-dock-scorers">
+                        {% if row.home_top_scorers %}
+                        <span><strong>H:</strong> {{ row.home_top_scorers[0].name }}{% if row.home_top_scorers[0].goals is defined %} ({{ row.home_top_scorers[0].goals }}){% endif %}</span>
+                        {% endif %}
+                        {% if row.away_top_scorers %}
+                        <span><strong>A:</strong> {{ row.away_top_scorers[0].name }}{% if row.away_top_scorers[0].goals is defined %} ({{ row.away_top_scorers[0].goals }}){% endif %}</span>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    {% if row.home_scorers_out_of_xi or row.away_scorers_out_of_xi %}
+                    <p class="players-dock-alert">
+                        {% if row.home_scorers_out_of_xi %}H out: {{ row.home_scorers_out_of_xi|map(attribute='name')|join(', ') }}{% endif %}
+                        {% if row.home_scorers_out_of_xi and row.away_scorers_out_of_xi %} · {% endif %}
+                        {% if row.away_scorers_out_of_xi %}A out: {{ row.away_scorers_out_of_xi|map(attribute='name')|join(', ') }}{% endif %}
+                    </p>
+                    {% endif %}
+                </article>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+        {% elif players_dock_cold_start %}
+        <p class="players-dock-empty">Loading players data from cached fixtures…</p>
+        {% else %}
+        <p class="players-dock-empty">No player data loaded yet. Refresh fixtures to enrich lineups, injuries, and scorer context.</p>
+        {% endif %}
+    </div>
+</aside>
+<button type="button" class="players-dock-reveal" id="players-dock-reveal" title="Show Players panel" aria-label="Show Players panel" hidden>👥 Players</button>
+<script>
+(function () {
+    var DOCK_KEY = 'hibs_players_dock_collapsed';
+    var root = document.documentElement;
+    var dock = document.getElementById('players-dock');
+    var collapseBtn = document.getElementById('players-dock-collapse');
+    var revealBtn = document.getElementById('players-dock-reveal');
+    if (!dock) return;
+
+    function isCollapsed() {
+        try { return localStorage.getItem(DOCK_KEY) === '1'; } catch (e) { return false; }
+    }
+
+    function setCollapsed(collapsed) {
+        root.classList.toggle('players-dock-collapsed', collapsed);
+        if (collapseBtn) {
+            collapseBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            collapseBtn.textContent = collapsed ? '‹' : '›';
+            collapseBtn.title = collapsed ? 'Show Players panel' : 'Hide Players panel';
+        }
+        if (revealBtn) revealBtn.hidden = !collapsed;
+        try { localStorage.setItem(DOCK_KEY, collapsed ? '1' : '0'); } catch (e) {}
+    }
+
+    setCollapsed(isCollapsed());
+
+    if (collapseBtn) {
+        collapseBtn.addEventListener('click', function () {
+            setCollapsed(!root.classList.contains('players-dock-collapsed'));
+        });
+    }
+    if (revealBtn) {
+        revealBtn.addEventListener('click', function () {
+            setCollapsed(false);
+        });
+    }
+})();
+</script>

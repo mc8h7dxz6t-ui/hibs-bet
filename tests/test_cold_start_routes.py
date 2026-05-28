@@ -58,10 +58,11 @@ def test_dashboard_cold_shell_keeps_players_panel_visible(monkeypatch):
     monkeypatch.setenv("HIBS_PROGRESSIVE_LOAD", "1")
     with patch("hibs_predictor.web.clear_application_caches"), patch(
         "hibs_predictor.web.fetch_all_fixtures", side_effect=AssertionError("should not block on refresh")
-    ), patch("hibs_predictor.web._schedule_dashboard_refresh"):
+    ), patch("hibs_predictor.web._schedule_dashboard_refresh"), patch(
+        "hibs_predictor.web.Cache.peek", return_value=None
+    ):
         client = app.test_client()
         resp = client.get("/?refresh=1")
     body = resp.get_data(as_text=True)
-    assert 'id="dashboard-players-panel"' in body
-    assert "Players Snapshot" in body
+    assert 'id="players-dock"' in body
     assert "Loading players data from cached fixtures" in body

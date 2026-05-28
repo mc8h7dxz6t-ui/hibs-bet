@@ -221,8 +221,23 @@ def _tournament_focus_context(*, include_domestic: bool = False) -> Dict[str, An
 
 
 def _show_sky_panel() -> bool:
-    """Sky dock is non-essential and no longer part of core UX."""
-    return False
+    """Optional Sky Sports iframe dock (HIBS_SHOW_SKY_PANEL=1). Players dock is the default right rail."""
+    return (os.getenv("HIBS_SHOW_SKY_PANEL") or "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _show_players_dock() -> bool:
+    """Permanent players snapshot in the right dock (set HIBS_SHOW_PLAYERS_DOCK=0 to hide)."""
+    return (os.getenv("HIBS_SHOW_PLAYERS_DOCK") or "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
 
 
 def _launch_media_enabled() -> bool:
@@ -238,13 +253,13 @@ def _launch_media_enabled() -> bool:
 def _sky_dock_context() -> Dict[str, Any]:
     probe = probe_sky_dock_embed()
     embed_ok = bool(probe.get("available"))
-    # Keep Sky endpoints available for links/routes, but hide dock from core UX.
-    show = False
+    env_enabled = _show_sky_panel()
+    show = env_enabled and embed_ok
     news_embed = probe.get("news_live_embed_url") or SKY_SPORTS_NEWS_YOUTUBE_LIVE_EMBED_URL
     return {
         "show_sky_panel": show,
         "sky_dock_available": embed_ok,
-        "sky_dock_unavailable_note": False,
+        "sky_dock_unavailable_note": env_enabled and not embed_ok,
         "sky_sports_news_live_embed_url": news_embed,
         "sky_sports_news_preset_url": SKY_SPORTS_NEWS_YOUTUBE_PRESET_DISPLAY,
         "sky_sports_news_open_url": SKY_SPORTS_NEWS_YOUTUBE_LIVE_PAGE_URL,
@@ -254,11 +269,33 @@ def _sky_dock_context() -> Dict[str, Any]:
     }
 
 
+def _players_dock_context(*, include_domestic: bool = False) -> Dict[str, Any]:
+    """Right-rail players snapshot from cached fixture bundle (no blocking fetch)."""
+    show = _show_players_dock()
+    groups: List[Dict[str, Any]] = []
+    cold = False
+    if show:
+        disk = Cache().peek(_all_fixtures_cache_key(include_domestic=include_domestic))
+        if isinstance(disk, dict) and disk.get("all"):
+            groups = _players_groups_for_ui_data(disk, limit=12, include_domestic=include_domestic)
+        elif isinstance(disk, dict) and (disk.get("cold_start") or disk.get("cache_stale")):
+            cold = True
+        elif disk is None:
+            cold = True
+    return {
+        "show_players_dock": show,
+        "players_dock_groups": groups,
+        "players_dock_cold_start": cold,
+    }
+
+
 @app.context_processor
 def inject_sky_dock():
     from hibs_predictor.hibs_brand import hibs_brand_context
 
+    include_domestic = request.args.get("domestic") == "1"
     ctx = _sky_dock_context()
+    ctx.update(_players_dock_context(include_domestic=include_domestic))
     ctx["launch_media_enabled"] = _launch_media_enabled()
     ctx["hibs_auth_enabled"] = auth_enabled()
     ctx["hibs_logged_in"] = is_logged_in()
@@ -2519,6 +2556,10 @@ def index():
             dashboard_players_groups=_players_groups_for_ui_data(
                 data, limit=8, include_domestic=include_domestic
             ),
+            players_dock_groups=_players_groups_for_ui_data(
+                data, limit=12, include_domestic=include_domestic
+            ),
+            players_dock_cold_start=bool(data.get("cold_start") or data.get("cache_stale")),
             recent_results=recent_results.get("all", []),
             recent_results_days=recent_results.get("results_days", 3),
             recent_results_total=recent_results.get("total", 0),
@@ -2608,6 +2649,10 @@ def index():
         dashboard_players_groups=_players_groups_for_ui_data(
             data, limit=8, include_domestic=include_domestic
         ),
+        players_dock_groups=_players_groups_for_ui_data(
+            data, limit=12, include_domestic=include_domestic
+        ),
+        players_dock_cold_start=bool(data.get("cold_start") or data.get("cache_stale")),
         recent_results=recent_results.get("all", []),
         recent_results_days=recent_results.get("results_days", 3),
         recent_results_total=recent_results.get("total", 0),

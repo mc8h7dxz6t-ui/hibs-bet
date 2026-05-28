@@ -20,6 +20,15 @@ def _reload_web(monkeypatch, **env):
     web = importlib.reload(web_mod)
     monkeypatch.setattr(web, "_sky_dock_context", lambda: {"show_sky_panel": False})
     monkeypatch.setattr(
+        web,
+        "_players_dock_context",
+        lambda **kwargs: {
+            "show_players_dock": False,
+            "players_dock_groups": [],
+            "players_dock_cold_start": False,
+        },
+    )
+    monkeypatch.setattr(
         "hibs_predictor.web.gather_health",
         lambda: {"ok": True, "sources": []},
     )

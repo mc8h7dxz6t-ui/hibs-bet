@@ -1853,6 +1853,9 @@ def test_settings_fixture_window_ui():
         assert "Fixture window" in body
         assert 'data-hibs-setting="fetchDays"' in body
         assert "7 days" in body
+        assert 'data-hibs-setting="uiMode"' in body
+        assert "Hibs Home UI" in body
+        assert "Hibs Away UI" in body
         print("  ✓ Settings fixture window UI present")
         return True
     except Exception as e:
@@ -1872,8 +1875,49 @@ def _sky_dock_probe_ok():
     }
 
 
+def test_players_right_dock():
+    """Permanent players dock on the right; Sky optional via HIBS_SHOW_SKY_PANEL=1."""
+    print("\nTesting Players right dock...")
+    try:
+        from unittest.mock import patch
+        from hibs_predictor.web import app
+
+        bundle = _sample_table_fixture_bundle()
+        with patch("hibs_predictor.web.fetch_all_fixtures", return_value=bundle), patch(
+            "hibs_predictor.web._fetch_full_table_rows", return_value=[]
+        ), patch.dict("os.environ", {"HIBS_SHOW_SKY_PANEL": "0"}, clear=False):
+            client = app.test_client()
+            dashboard = client.get("/")
+            settings = client.get("/settings")
+
+            assert dashboard.status_code == 200
+            dbody = dashboard.get_data(as_text=True)
+            assert 'id="players-dock"' in dbody
+            assert "hibs-players-dock-enabled" in dbody
+            assert "hibs_players_dock_collapsed" in dbody
+            assert "players-dock-collapse" in dbody
+            assert 'id="sky-dock"' not in dbody
+            assert "--right-dock-width:320px" in dbody
+
+            assert settings.status_code == 200
+            assert 'id="players-dock"' in settings.get_data(as_text=True)
+            print("  ✓ Players dock enabled by default (Sky off)")
+
+            with patch.dict("os.environ", {"HIBS_SHOW_PLAYERS_DOCK": "0"}, clear=False):
+                hidden = client.get("/?refresh=1")
+            hidden_body = hidden.get_data(as_text=True)
+            assert 'id="players-dock"' not in hidden_body
+            html_open = hidden_body.split(">", 1)[0]
+            assert "hibs-players-dock-enabled" not in html_open
+            print("  ✓ Players dock hide via HIBS_SHOW_PLAYERS_DOCK=0")
+        return True
+    except Exception as e:
+        print(f"  ✗ Players right dock test failed: {e}")
+        return False
+
+
 def test_sky_youtube_panel():
-    """Fixed Sky dock in base layout; persists on settings; hide via env."""
+    """Optional Sky dock when HIBS_SHOW_SKY_PANEL=1; hide via env or embed probe."""
     print("\nTesting Sky Sports YouTube dock...")
     try:
         from unittest.mock import patch
@@ -1884,6 +1928,10 @@ def test_sky_youtube_panel():
             "hibs_predictor.web._fetch_full_table_rows", return_value=[]
         ), patch(
             "hibs_predictor.web.probe_sky_dock_embed", return_value=_sky_dock_probe_ok()
+        ), patch.dict(
+            "os.environ",
+            {"HIBS_SHOW_SKY_PANEL": "1", "HIBS_SHOW_PLAYERS_DOCK": "1"},
+            clear=False,
         ):
             client = app.test_client()
             settings = client.get("/settings")
@@ -1896,13 +1944,14 @@ def test_sky_youtube_panel():
             assert "I have Sky / Sky Go" not in sbody
             assert "Sky Sports</h2>" not in sbody
             assert 'id="sky-dock"' in sbody
-            assert '<html lang="en" class="hibs-sky-dock-enabled">' in sbody
+            assert "hibs-sky-dock-enabled" in sbody
             assert "hibs_sky_dock_collapsed" in sbody
             assert "sky-dock-collapse" in sbody
 
             assert dashboard.status_code == 200
             dbody = dashboard.get_data(as_text=True)
             assert 'id="sky-dock"' in dbody
+            assert 'id="players-dock"' in dbody
             assert "sky-sports-news" not in dbody
             assert "sky-browser-url" in dbody
             assert "youtube.com/@SkySportsNews/live" in dbody
@@ -1916,7 +1965,7 @@ def test_sky_youtube_panel():
             assert "Watch on Sky" not in dbody
             assert "Sky Go" not in dbody
             assert "hibs-app-shell" in dbody
-            assert "--sky-dock-width:320px" in dbody
+            assert "--right-dock-width:320px" in dbody
 
             assert guide.status_code == 200
             assert 'id="sky-dock"' in guide.get_data(as_text=True)
@@ -1926,10 +1975,10 @@ def test_sky_youtube_panel():
             assert hidden.status_code == 200
             hidden_body = hidden.get_data(as_text=True)
             assert 'id="sky-dock"' not in hidden_body
-            assert '<html lang="en" class="hibs-sky-dock-enabled">' not in hidden_body
-            print("  ✓ Sky Sports fixed dock (hide via HIBS_SHOW_SKY_PANEL=0)")
+            assert "hibs-sky-dock-enabled" not in hidden_body.split(">", 1)[0]
+            print("  ✓ Sky Sports dock (hide via HIBS_SHOW_SKY_PANEL=0)")
 
-            with patch(
+            with patch.dict("os.environ", {"HIBS_SHOW_SKY_PANEL": "1"}, clear=False), patch(
                 "hibs_predictor.web.probe_sky_dock_embed",
                 return_value={
                     "available": False,
@@ -1945,10 +1994,11 @@ def test_sky_youtube_panel():
             assert blocked.status_code == 200
             blocked_body = blocked.get_data(as_text=True)
             assert 'id="sky-dock"' not in blocked_body
-            assert '<html lang="en" class="hibs-sky-dock-enabled">' not in blocked_body
+            assert "hibs-sky-dock-enabled" not in blocked_body.split(">", 1)[0]
             assert "sky-dock-hidden-note" in blocked_body
             assert "Sky TV dock hidden" in blocked_body
-            print("  ✓ Sky dock hidden when embed probe unavailable")
+            assert 'id="players-dock"' in blocked_body
+            print("  ✓ Sky dock hidden when embed probe unavailable (players dock remains)")
         return True
     except Exception as e:
         print(f"  ✗ Sky Sports YouTube dock test failed: {e}")
@@ -2358,6 +2408,7 @@ def main():
         test_live_statistics_xg_mocked,
         test_europa_league_live_merge_freiburg_villa,
         test_live_merge_non_nordic_by_teams,
+        test_players_right_dock,
         test_sky_youtube_panel,
         test_sky_dock_embed_probe,
         test_sky_sports_news_media_config,

@@ -75,6 +75,16 @@
     </div>
     {% endif %}
 
+    {% if sky_dock_unavailable_note %}
+    <p class="sky-dock-hidden-note" role="status" style="margin:0 0 12px;padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:rgba(30,41,59,0.5);font-size:0.78em;color:var(--muted);">
+        Sky TV dock hidden — stream unavailable on YouTube. Open
+        <a href="{{ sky_sports_news_open_url }}" target="_blank" rel="noopener noreferrer">Sky Sports News live</a>
+        or
+        <a href="{{ sky_sports_football_open_url }}" target="_blank" rel="noopener noreferrer">Sky Sports Football</a>
+        on YouTube instead.
+    </p>
+    {% endif %}
+
     <div class="dash-layout">
         <aside class="dash-sidebar" aria-label="Filters and upcoming fixtures">
             <p class="dash-side-hd">Coming up</p>
@@ -193,7 +203,9 @@
                 {% endfor %}
             </div>
             {% endif %}
+            <div class="dashboard-players-mobile-only">
             {% include '_dashboard_players_panel.html' %}
+            </div>
 
             <div id="dash-fixture-root" class="fixtures-full-list" data-dq-min="{{ data_quality_ui_min }}" data-default-region="{{ tournament_focus.default_region }}" data-include-domestic="{{ '1' if include_domestic else '0' }}" data-intl-only-fetch="{{ '1' if tournament_focus.intl_only_fetch else '0' }}">
                 {% if total == 0 %}
@@ -809,6 +821,8 @@
 {% endblock %}
 {% block extra_css %}
 <style>
+.dashboard-players-mobile-only{display:none;}
+@media (max-width: 1100px){.dashboard-players-mobile-only{display:block;}}
 .dashboard-players-panel{border:1px solid var(--border);border-radius:12px;background:rgba(10,22,40,0.72);padding:12px;margin:0 0 12px;}
 .dashboard-players-hd{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;font-size:0.78em;font-weight:800;letter-spacing:0.04em;color:var(--accent);}
 .dashboard-players-open{color:var(--blue);font-size:0.88em;font-weight:700;text-decoration:none;}
