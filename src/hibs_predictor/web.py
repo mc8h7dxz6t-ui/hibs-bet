@@ -522,6 +522,20 @@ def _merge_stale_fixture_row(row: Dict[str, Any], stale: Optional[Dict[str, Any]
             row["data_quality"] = dict(stale_dq)
 
 
+def _merge_stale_all_fixtures_rows(
+    rows: List[Dict[str, Any]],
+    stale_rows: List[Dict[str, Any]],
+) -> None:
+    """Merge richer per-fixture disk rows into a fresh bundle build (never downgrade DQ)."""
+    stale_by_key = _stale_fixture_row_index(stale_rows)
+    for row in rows:
+        _merge_stale_fixture_row(row, stale_by_key.get(_fixture_key(row)))
+
+
+def _bundle_enrich_fresh_count(bundle: Dict[str, Any]) -> int:
+    return sum(1 for row in bundle.get("all") or [] if _slim_row_enrich_fresh(row))
+
+
 def _maybe_prune_cache(cache: Cache) -> None:
     """Lightweight stale prune (throttled) when HIBS_CACHE_PRUNE is enabled."""
     global _cache_prune_last
@@ -1428,11 +1442,27 @@ def _ensure_fixture_data_quality(all_fixtures: List[Dict[str, Any]]) -> None:
     for f in all_fixtures:
         existing = f.get("data_quality") if isinstance(f.get("data_quality"), dict) else {}
         if existing.get("score_pct") is not None:
-            continue
+            try:
+                existing_pct = float(existing["score_pct"])
+            except (TypeError, ValueError):
+                existing_pct = None
+            if existing_pct is not None and existing_pct >= 85.0:
+                continue
+            if existing_pct is not None and not _slim_row_enrich_fresh(f):
+                continue
         if not f.get("xg_source_hint"):
             attach_xg_display_fields(f)
         try:
-            f["data_quality"] = compute_fixture_data_quality_from_row(f)
+            fresh_dq = compute_fixture_data_quality_from_row(f)
+            if existing.get("score_pct") is not None:
+                try:
+                    old_pct = float(existing["score_pct"])
+                    new_pct = float(fresh_dq.get("score_pct") or 0)
+                    if new_pct <= old_pct:
+                        continue
+                except (TypeError, ValueError):
+                    pass
+            f["data_quality"] = fresh_dq
         except Exception as exc:
             print(f"[Data quality] {f.get('home')} v {f.get('away')}: {exc!r}")
 
@@ -2231,10 +2261,34 @@ def fetch_all_fixtures(
             return bundle
         _hibs_debug_log(f"skip empty all_fixtures cache key={ck}")
 
+    stale_bundle = cache.peek(ck)
+    stale_all = (
+        stale_bundle.get("all")
+        if isinstance(stale_bundle, dict) and _is_complete_fixture_bundle(stale_bundle)
+        else None
+    )
     all_fixtures = _fetch_all_league_fixtures_parallel(
         include_domestic=include_domestic, allow_stale=allow_stale
     )
+    if stale_all:
+        _merge_stale_all_fixtures_rows(all_fixtures, stale_all)
     result = _finalize_fixture_bundle(all_fixtures, attach_live=attach_live, include_domestic=include_domestic)
+    if stale_all and result.get("all"):
+        old_fresh = _bundle_enrich_fresh_count(stale_bundle)
+        new_fresh = _bundle_enrich_fresh_count(result)
+        if old_fresh > new_fresh:
+            bundle = dict(stale_bundle)
+            bundle["fetch_days"] = _fetch_window_days()
+            bundle["cache_stale"] = True
+            if attach_live:
+                _refresh_live_on_bundle(bundle)
+            _log_resilience(
+                "fixture_bundle_keep_stale_cache",
+                key=ck,
+                old_fresh=old_fresh,
+                new_fresh=new_fresh,
+            )
+            return bundle
     if result.get("total"):
         cache.set(ck, result, ttl_hours=ttl)
     else:

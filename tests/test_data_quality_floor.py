@@ -272,6 +272,81 @@ def test_merge_stale_fixture_row_preserves_higher_dq():
     assert row["home_stats"]["played"] == 12
 
 
+def test_finalize_ucl_rich_row_stays_above_90():
+    """Regression: bundle finalize must not cliff UCL showpiece rows with stored premium DQ."""
+    from hibs_predictor.web import _finalize_fixture_bundle
+
+    row = {
+        "id": 900100,
+        "home": "Paris Saint Germain",
+        "away": "Inter",
+        "home_id": 85,
+        "away_id": 505,
+        "date": "2026-05-31T19:00:00+00:00",
+        "kickoff_sort": "2026-05-31T19:00:00+00:00",
+        "league": "UCL",
+        "home_recent_n": 8,
+        "away_recent_n": 8,
+        "home_last10": [{}] * 8,
+        "away_last10": [{}] * 8,
+        "home_stats": {"played": 12, "goals_for": 22, "goals_against": 8},
+        "away_stats": {"played": 12, "goals_for": 18, "goals_against": 11},
+        "home_position": {},
+        "away_position": {},
+        "xg_source": "api_statistics_xg",
+        "scraped_xg_meta": {"home_n": 8, "away_n": 8},
+        "prediction": {
+            "bookmaker_odds": {"home": 2.05, "draw": 3.5, "away": 3.4},
+            "home_btts_rate": 0.55,
+            "away_btts_rate": 0.5,
+            "home_over25_rate": 0.6,
+            "away_over25_rate": 0.55,
+        },
+        "market_odds": {"btts": {"yes": 1.75}, "totals_2_5": {"over": 1.85}},
+        "data_quality": {"score_pct": 97.0, "full_scope": True, "premium_scope": True},
+    }
+    bundle = _finalize_fixture_bundle([row], include_domestic=False)
+    ucl = next(r for r in bundle["all"] if r.get("league") == "UCL")
+    assert float(ucl["data_quality"]["score_pct"]) >= 90.0
+
+
+def test_finalize_ucl_rescores_thin_cached_score_when_row_is_rich():
+    from hibs_predictor.web import _finalize_fixture_bundle
+
+    row = {
+        "id": 900101,
+        "home": "Liverpool",
+        "away": "Barcelona",
+        "home_id": 40,
+        "away_id": 529,
+        "date": "2026-05-31T19:00:00+00:00",
+        "kickoff_sort": "2026-05-31T19:00:00+00:00",
+        "league": "UCL",
+        "home_recent_n": 8,
+        "away_recent_n": 8,
+        "home_last10": [{}] * 8,
+        "away_last10": [{}] * 8,
+        "home_stats": {"played": 12, "goals_for": 22, "goals_against": 8, "api_season_xg_measured": True},
+        "away_stats": {"played": 12, "goals_for": 18, "goals_against": 11},
+        "home_position": {},
+        "away_position": {},
+        "xg_source": "api_statistics_xg",
+        "scraped_xg_meta": {"home_n": 8, "away_n": 8},
+        "prediction": {
+            "bookmaker_odds": {"home": 2.05, "draw": 3.5, "away": 3.4},
+            "home_btts_rate": 0.55,
+            "away_btts_rate": 0.5,
+            "home_over25_rate": 0.6,
+            "away_over25_rate": 0.55,
+        },
+        "market_odds": {"btts": {"yes": 1.75}, "totals_2_5": {"over": 1.85}},
+        "data_quality": {"score_pct": 42.0, "full_scope": False},
+    }
+    bundle = _finalize_fixture_bundle([row], include_domestic=False)
+    ucl = next(r for r in bundle["all"] if r.get("league") == "UCL")
+    assert float(ucl["data_quality"]["score_pct"]) >= 90.0
+
+
 def test_ensure_dq_never_downgrades_existing_score():
     from hibs_predictor.web import _ensure_fixture_data_quality
 

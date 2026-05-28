@@ -1060,8 +1060,11 @@ class DataAggregator:
 
         if not cached:
             stale_disk = self.cache.peek(cache_key)
-            if stale_disk and isinstance(stale_disk, dict) and stale_disk.get("home_stats"):
-                return stale_disk
+            if stale_disk and isinstance(stale_disk, dict):
+                from hibs_predictor.data_quality import _has_stats
+
+                if _has_stats(stale_disk.get("home_stats")) and _has_stats(stale_disk.get("away_stats")):
+                    return stale_disk
 
         enriched = dict(cached) if cached else dict(fixture)
 
