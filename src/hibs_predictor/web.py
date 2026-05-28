@@ -2029,6 +2029,12 @@ def _finalize_fixture_bundle(
         _refresh_live_on_bundle({"all": all_fixtures})
     _ensure_fixture_data_quality(all_fixtures)
     _reboost_bundle_data_quality(all_fixtures)
+    try:
+        from hibs_predictor.betting_engine import apply_portfolio_kelly
+
+        apply_portfolio_kelly(all_fixtures)
+    except Exception as exc:
+        print(f"[Portfolio Kelly] {exc!r}")
     _ensure_fixture_pick_menus(all_fixtures)
     all_fixtures.sort(key=lambda x: x.get("kickoff_sort") or x.get("date") or "")
     league_tables = _build_league_tables(all_fixtures, include_live=False, include_domestic=include_domestic)
@@ -2578,6 +2584,19 @@ def _cold_fixture_bundle(include_domestic: bool) -> Dict[str, Any]:
     return data
 
 
+def _stale_fixture_bundle_for_refresh(*, include_domestic: bool) -> Optional[Dict[str, Any]]:
+    """Last on-disk bundle kept in memory after refresh=1 clears caches (avoids blank dashboard)."""
+    ck = _all_fixtures_cache_key(include_domestic=include_domestic)
+    disk = Cache().peek(ck)
+    if not isinstance(disk, dict) or not _is_complete_fixture_bundle(disk) or not disk.get("all"):
+        return None
+    bundle = dict(disk)
+    bundle["fetch_days"] = _fetch_window_days()
+    bundle["cache_stale"] = True
+    bundle.pop("cold_start", None)
+    return bundle
+
+
 def clear_assistant_bundle_cache() -> None:
     with _assistant_bundle_cache_lock:
         _assistant_bundle_cache["bundle"] = None
@@ -2620,7 +2639,9 @@ def logout():
 def index():
     include_domestic = request.args.get("domestic") == "1"
     force_refresh = request.args.get("refresh") == "1"
+    refresh_stale_bundle: Optional[Dict[str, Any]] = None
     if force_refresh:
+        refresh_stale_bundle = _stale_fixture_bundle_for_refresh(include_domestic=include_domestic)
         clear_application_caches(all_disk=request.args.get("all") == "1")
     elif not include_domestic:
         cached_page = _dashboard_page_cache_get(allow_stale=True)
@@ -2640,7 +2661,10 @@ def index():
     progressive = _progressive_load_enabled()
     if force_refresh:
         _schedule_dashboard_refresh()
-        data = _cold_fixture_bundle(include_domestic=include_domestic)
+        if refresh_stale_bundle is not None:
+            data = refresh_stale_bundle
+        else:
+            data = _cold_fixture_bundle(include_domestic=include_domestic)
         upcoming = _bundle_fixtures(data)
         recent_results = {"all": [], "days": [], "total": 0, "results_days": 3}
         if _defer_assistant_on_page():
@@ -2679,9 +2703,6 @@ def index():
             assistant_packets=assistant_packets,
             assistant_recommendations=assistant_bundle.get("recommendations"),
             sidebar_upcoming=data.get("sidebar_upcoming", []),
-            dashboard_players_groups=_players_groups_for_ui_data(
-                data, limit=8, include_domestic=include_domestic
-            ),
             players_dock_groups=_players_groups_for_ui_data(
                 data, limit=12, include_domestic=include_domestic
             ),
@@ -2772,9 +2793,6 @@ def index():
         assistant_packets=assistant_packets,
         assistant_recommendations=assistant_bundle.get("recommendations"),
         sidebar_upcoming=data.get("sidebar_upcoming", []),
-        dashboard_players_groups=_players_groups_for_ui_data(
-            data, limit=8, include_domestic=include_domestic
-        ),
         players_dock_groups=_players_groups_for_ui_data(
             data, limit=12, include_domestic=include_domestic
         ),

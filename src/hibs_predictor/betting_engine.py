@@ -1652,3 +1652,150 @@ class BettingEngine:
         self.gb_model.fit(X_scaled, y_train)
         self.is_trained = True
         return self.rf_model.score(X_scaled, y_train), self.gb_model.score(X_scaled, y_train)
+
+
+def portfolio_kickoff_window_minutes() -> int:
+    try:
+        return max(1, int(os.getenv("HIBS_PORTFOLIO_KICKOFF_WINDOW_MIN", "60")))
+    except ValueError:
+        return 60
+
+
+def portfolio_stake_cap_pct() -> float:
+    return max(0.0, _env_float("HIBS_PORTFOLIO_STAKE_CAP_PCT", 10.0))
+
+
+def _fixture_kickoff_dt(fixture: Dict[str, Any]) -> Optional[datetime]:
+    raw = fixture.get("kickoff_sort") or fixture.get("date")
+    if not raw:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            from datetime import timezone
+
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (TypeError, ValueError):
+        return None
+
+
+def _value_bet_kelly_percent(row: Dict[str, Any]) -> float:
+    kelly = row.get("kelly") if isinstance(row.get("kelly"), dict) else {}
+    try:
+        return float(kelly.get("suggested_percent") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _kelly_label_and_explanation(suggested_percent: float) -> Tuple[str, str]:
+    example_stake = round(suggested_percent, 2)
+    if suggested_percent >= 5.0:
+        return (
+            "Strong",
+            f"Strong edge. Stake ~{suggested_percent:.1f}% of bankroll (e.g. \u00a3{example_stake:.2f} per \u00a3100).",
+        )
+    if suggested_percent >= 2.5:
+        return (
+            "Moderate",
+            f"Moderate edge. Stake ~{suggested_percent:.1f}% of bankroll (e.g. \u00a3{example_stake:.2f} per \u00a3100).",
+        )
+    if suggested_percent > 0:
+        return (
+            "Cautious",
+            f"Small edge. Stake ~{suggested_percent:.1f}% of bankroll (e.g. \u00a3{example_stake:.2f} per \u00a3100).",
+        )
+    return "Skip", "No positive edge \u2014 skip this bet."
+
+
+def _apply_portfolio_kelly_row(
+    row: Dict[str, Any],
+    scaled_percent: float,
+    *,
+    window_n: int,
+    cap_scaled: bool,
+) -> None:
+    kelly = row.setdefault("kelly", {})
+    if kelly.get("portfolio_kelly_original_pct") is None:
+        kelly["portfolio_kelly_original_pct"] = round(_value_bet_kelly_percent(row), 1)
+    scaled_percent = round(max(0.0, scaled_percent), 1)
+    kelly["suggested_percent"] = scaled_percent
+    kelly["portfolio_window_n"] = window_n
+    kelly["portfolio_cap_scaled"] = bool(cap_scaled)
+    label, explanation = _kelly_label_and_explanation(scaled_percent)
+    kelly["confidence_label"] = label
+    kelly["explanation"] = explanation
+    kelly["example_stake"] = f"\u00a3{scaled_percent:.2f}"
+
+
+def apply_portfolio_kelly(fixtures: List[Dict[str, Any]]) -> None:
+    """Scale Kelly stakes across value bets sharing a kickoff window (capital exhaustion guard)."""
+    if not fixtures:
+        return
+    window_min = portfolio_kickoff_window_minutes()
+    cap = portfolio_stake_cap_pct()
+    entries: List[Dict[str, Any]] = []
+    for fx in fixtures:
+        pred = fx.get("prediction")
+        if not isinstance(pred, dict):
+            continue
+        ko = _fixture_kickoff_dt(fx)
+        if ko is None:
+            continue
+        for pool_name in ("value_bets", "value_bets_alt"):
+            pool = pred.get(pool_name)
+            if not isinstance(pool, dict):
+                continue
+            for outcome, row in pool.items():
+                if not isinstance(row, dict):
+                    continue
+                pct = _value_bet_kelly_percent(row)
+                if pct <= 0:
+                    continue
+                entries.append({"kickoff": ko, "row": row, "outcome": str(outcome), "pool": pool_name})
+
+    if not entries:
+        return
+
+    entries.sort(key=lambda e: e["kickoff"])
+    clusters: List[List[Dict[str, Any]]] = []
+    cluster: List[Dict[str, Any]] = []
+    cluster_start: Optional[datetime] = None
+    for ent in entries:
+        if not cluster:
+            cluster = [ent]
+            cluster_start = ent["kickoff"]
+            continue
+        assert cluster_start is not None
+        if (ent["kickoff"] - cluster_start).total_seconds() <= window_min * 60:
+            cluster.append(ent)
+        else:
+            clusters.append(cluster)
+            cluster = [ent]
+            cluster_start = ent["kickoff"]
+    if cluster:
+        clusters.append(cluster)
+
+    for group in clusters:
+        n = len(group)
+        if n <= 0:
+            continue
+        denom = math.sqrt(float(n))
+        scaled_pcts = [_value_bet_kelly_percent(ent["row"]) / denom for ent in group]
+        total = sum(scaled_pcts)
+        factor = 1.0
+        if cap > 0 and total > cap:
+            factor = cap / total
+        cap_scaled = factor < 0.999
+        for ent, pct in zip(group, scaled_pcts):
+            _apply_portfolio_kelly_row(
+                ent["row"],
+                pct * factor,
+                window_n=n,
+                cap_scaled=cap_scaled,
+            )

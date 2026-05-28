@@ -23,6 +23,8 @@ Prioritises **consistency over new features** — enables player/injury/lineup l
 | `HIBS_CLV_LOG_ENABLED` | `1` | Store opening odds for closing-line value tracking. |
 | `HIBS_FBREF_BLOCKED` | `1` | Skip FBref HTML (datacenter IPs usually 403). |
 | `HIBS_API_SPORTS_HOURLY_LIMIT` | `400` | Client-side hourly cap (matches data-drop fix). |
+| `HIBS_DEV_FULL_DQ` | `0` | **Production only** — do not run full-window deep DQ on VPS (local dev may use `1`). |
+| `HIBS_PROGRESSIVE_LOAD` | `1` | Fast dashboard HTML; insights/results load after paint. |
 | `HIBS_FIXTURE_FETCH_WORKERS` | `2` | Parallel league fetches (gentle on 2GB). |
 | `HIBS_ENRICH_API_SEM` | `1` | One team-history API call at a time per worker. |
 | `HIBS_SKIP_HEAVY_WHEN_API_STRONG` | `1` | Skip Understat/FBref when APIs already strong. |
