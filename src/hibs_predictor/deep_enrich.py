@@ -30,11 +30,33 @@ def is_showpiece_league(league_code: Optional[str]) -> bool:
     return str(league_code or "").strip().upper() in _SHOWPIECE_LEAGUES
 
 
+def _deep_showpiece_league(league_code: Optional[str]) -> bool:
+    """Showpiece deep target (95%%) — friendlies use standard international target instead."""
+    lc = str(league_code or "").strip().upper()
+    if lc == "INTL_FRIENDLIES":
+        return False
+    return is_showpiece_league(lc)
+
+
+def friendlies_standard_deep_target_pct(league_code: Optional[str]) -> Optional[float]:
+    """Good-but-not-max deep pass for friendlies (squad rotation)."""
+    if str(league_code or "").strip().upper() == "INTL_FRIENDLIES":
+        return 86.0
+    return None
+
+
+def world_cup_deep_target_pct(league_code: Optional[str]) -> Optional[float]:
+    """Every World Cup match targets flagship DQ when deep enrich runs."""
+    if str(league_code or "").strip().upper() == "WORLD_CUP":
+        return SHOWPIECE_DEEP_TARGET
+    return None
+
+
 def deep_band_min(league_code: Optional[str]) -> float:
     """Minimum raw DQ before deep pass runs; showpieces allow rescue from any score."""
     if deep_enrich_rescue_low_enabled():
         return SHOWPIECE_DEEP_BAND_MIN
-    return SHOWPIECE_DEEP_BAND_MIN if is_showpiece_league(league_code) else DEEP_BAND_MIN
+    return SHOWPIECE_DEEP_BAND_MIN if _deep_showpiece_league(league_code) else DEEP_BAND_MIN
 
 
 def _env_truthy(name: str) -> bool:
@@ -127,25 +149,36 @@ def summer_daily_deep_target_pct(league_code: str) -> Optional[float]:
 
     if not domestic_offseason_active() or not is_summer_daily_league(league_code):
         return None
-    return 88.0
+    return 90.0
 
 
 def deep_enrich_target_pct(league_code: Optional[str] = None) -> float:
     """Return target DQ %% when deep pass is enabled; 0 disables."""
+    if league_code:
+        wc = world_cup_deep_target_pct(league_code)
+        if wc is not None:
+            return wc
+        friendly = friendlies_standard_deep_target_pct(league_code)
+        if friendly is not None:
+            return friendly
     if dev_full_dq_enabled() and not (os.getenv("HIBS_TARGET_DQ_PCT") or "").strip():
         if league_code:
             summer = summer_daily_deep_target_pct(league_code)
             if summer is not None:
                 return summer
-            if is_showpiece_league(league_code):
+            if _deep_showpiece_league(league_code):
                 return SHOWPIECE_DEEP_TARGET
         return 90.0
     raw = (os.getenv("HIBS_TARGET_DQ_PCT") or "").strip()
     if raw:
         try:
             target = max(DEEP_BAND_MIN, min(100.0, float(raw)))
-            if league_code and is_showpiece_league(league_code):
+            if league_code and _deep_showpiece_league(league_code):
                 return max(target, SHOWPIECE_DEEP_TARGET)
+            if league_code:
+                wc = world_cup_deep_target_pct(league_code)
+                if wc is not None:
+                    return max(target, wc)
             return target
         except ValueError:
             pass
@@ -154,7 +187,7 @@ def deep_enrich_target_pct(league_code: Optional[str] = None) -> float:
             summer = summer_daily_deep_target_pct(league_code)
             if summer is not None:
                 return summer
-            if is_showpiece_league(league_code):
+            if _deep_showpiece_league(league_code):
                 return SHOWPIECE_DEEP_TARGET
         return 90.0
     return 0.0
@@ -163,7 +196,7 @@ def deep_enrich_target_pct(league_code: Optional[str] = None) -> float:
 def deep_enrich_max_retries(league_code: Optional[str] = None) -> int:
     from hibs_predictor.tournament_focus import friendlies_max_data_active
 
-    showpiece = is_showpiece_league(league_code) or friendlies_max_data_active(league_code=league_code)
+    showpiece = _deep_showpiece_league(league_code) or friendlies_max_data_active(league_code=league_code)
     default = "3" if showpiece else "2"
     try:
         return max(1, min(4, int(os.getenv("HIBS_DEEP_ENRICH_MAX_RETRIES", default))))

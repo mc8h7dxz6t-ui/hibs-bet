@@ -380,6 +380,20 @@ def test_friendlies_max_data_active_pre_wc(monkeypatch):
     assert friendlies_max_data_active(league_code="EPL") is False
 
 
+def test_friendlies_max_data_not_implied_by_max_data(monkeypatch):
+    """HIBS_MAX_DATA alone must not enable friendlies window-wide max enrich."""
+    monkeypatch.setenv("HIBS_MAX_DATA", "1")
+    monkeypatch.delenv("HIBS_FRIENDLIES_MAX_DATA", raising=False)
+    monkeypatch.setenv("HIBS_FRIENDLIES_FOCUS_START", "2026-05-20")
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 5, 28),
+    )
+    assert friendlies_window_active() is True
+    assert friendlies_max_data_profile_enabled() is False
+    assert friendlies_max_data_active(league_code=INTL_FRIENDLIES_CODE) is False
+
+
 def test_friendlies_max_data_inactive_after_wc_start(monkeypatch):
     monkeypatch.setenv("HIBS_FRIENDLIES_MAX_DATA", "1")
     monkeypatch.setenv("HIBS_TOURNAMENT_FOCUS_START", "2026-06-11")

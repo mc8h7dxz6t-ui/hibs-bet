@@ -54,15 +54,21 @@ def _rich_enriched(**overrides):
 def test_deep_enrich_target_pct_from_env(monkeypatch):
     monkeypatch.delenv("HIBS_TARGET_DQ_PCT", raising=False)
     monkeypatch.delenv("HIBS_DEEP_ENRICH", raising=False)
+    monkeypatch.delenv("HIBS_DEEP_ENRICH_RESCUE_LOW", raising=False)
+    monkeypatch.delenv("HIBS_DEV_FULL_DQ", raising=False)
     assert deep_enrich_target_pct() == 0.0
     monkeypatch.setenv("HIBS_TARGET_DQ_PCT", "90")
     assert deep_enrich_target_pct() == 90.0
+    assert deep_enrich_target_pct("INTL_FRIENDLIES") == 86.0
+    assert deep_enrich_target_pct("WORLD_CUP") == SHOWPIECE_DEEP_TARGET
     monkeypatch.delenv("HIBS_TARGET_DQ_PCT", raising=False)
     monkeypatch.setenv("HIBS_DEEP_ENRICH", "1")
     assert deep_enrich_target_pct("UECL") == SHOWPIECE_DEEP_TARGET
 
 
-def test_showpiece_deep_band_allows_rescue_from_thin_scores():
+def test_showpiece_deep_band_allows_rescue_from_thin_scores(monkeypatch):
+    monkeypatch.delenv("HIBS_DEEP_ENRICH_RESCUE_LOW", raising=False)
+    monkeypatch.delenv("HIBS_DEV_FULL_DQ", raising=False)
     assert is_showpiece_league("UECL")
     assert deep_band_min("UECL") == 0.0
     assert deep_band_min("EPL") == DEEP_BAND_MIN
@@ -105,6 +111,8 @@ def test_dev_full_dq_disables_today_only_and_sets_target(monkeypatch):
 
 
 def test_deep_enrich_today_only_skips_future_kickoff(monkeypatch):
+    monkeypatch.delenv("HIBS_DEV_FULL_DQ", raising=False)
+    monkeypatch.delenv("HIBS_DEEP_ENRICH_RESCUE_LOW", raising=False)
     monkeypatch.setenv("HIBS_TARGET_DQ_PCT", "90")
     monkeypatch.setenv("HIBS_DEEP_ENRICH_TODAY_ONLY", "1")
     assert deep_enrich_today_only() is True

@@ -242,18 +242,16 @@ def before_world_cup_start(*, today: Optional[date] = None) -> bool:
 
 def friendlies_max_data_profile_enabled(*, today: Optional[date] = None) -> bool:
     """
-    Pre–World Cup international friendlies run a wider max-data enrich profile.
+    Optional window-wide max-data for ``INTL_FRIENDLIES`` (heavy scrapers, 14-day horizon).
 
-    On when ``HIBS_FRIENDLIES_MAX_DATA=1``, or ``HIBS_MAX_DATA=1`` during the
-    friendlies calendar block before the WC opening match.
+    Off by default — friendlies have high squad rotation; standard enrich still targets
+    85%+ DQ. Enable only with ``HIBS_FRIENDLIES_MAX_DATA=1`` (not implied by ``HIBS_MAX_DATA``).
     """
+    if not _env_truthy("HIBS_FRIENDLIES_MAX_DATA"):
+        return False
     if not friendlies_window_active(today=today):
         return False
-    if not before_world_cup_start(today=today):
-        return False
-    if _env_truthy("HIBS_FRIENDLIES_MAX_DATA"):
-        return True
-    return _env_truthy("HIBS_MAX_DATA")
+    return before_world_cup_start(today=today)
 
 
 def friendlies_max_data_active(

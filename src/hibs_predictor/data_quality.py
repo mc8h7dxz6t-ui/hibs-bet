@@ -1,5 +1,6 @@
 """Per-fixture data coverage score (0–100) for prediction confidence / UI gating."""
 
+import re
 from typing import Any, Dict, List, Optional
 
 from hibs_predictor.config import ALL_LEAGUE_CODES, _DASHBOARD_REGION_EUROPEAN
@@ -32,7 +33,9 @@ _CORE_DQ_FLOOR = 88.0
 _CALENDAR_DQ_FLOOR = 85.0
 _MEASURED_DQ_FLOOR = 90.0
 _PREMIUM_DQ_FLOOR = 95.0
+_FLAGSHIP_DQ_FLOOR = 95.0
 _INTL_DQ_FLOOR = 85.0
+_WORLD_CUP_LEAGUE = "WORLD_CUP"
 
 # Mapped domestic leagues (excludes internationals) — 3+ recent games + stats + odds floor path.
 _DOMESTIC_STANDARD_LEAGUES = frozenset(c for c in ALL_LEAGUE_CODES if c not in _INTERNATIONAL_LEAGUES)
@@ -130,6 +133,19 @@ def _knockout_round_meta(enriched: Dict[str, Any]) -> bool:
         "leg",
     )
     return any(m in rnd for m in markers)
+
+
+def _is_competition_final_round(enriched: Dict[str, Any]) -> bool:
+    """True for knockout finals only (not quarter-/semi-finals)."""
+    meta = enriched.get("competition_meta") if isinstance(enriched.get("competition_meta"), dict) else {}
+    rnd = str(meta.get("api_round") or meta.get("round") or "").lower().strip()
+    if not rnd or "regular season" in rnd:
+        return False
+    if re.search(r"\b(quarter|semi|play-?off|playoff|qualif)\b", rnd):
+        return False
+    if rnd in ("final", "grand final") or rnd.endswith(" final"):
+        return True
+    return bool(re.search(r"\b(final|grand final)\b", rnd))
 
 
 def _cup_competition_code(league_code: str) -> bool:
@@ -268,8 +284,54 @@ def _premium_ready(enriched: Dict[str, Any], *, league_code: Optional[str] = Non
     return _position_ok(hp) and _position_ok(ap)
 
 
+def _world_cup_flagship_ready(enriched: Dict[str, Any], *, league_code: Optional[str] = None) -> bool:
+    """Every World Cup match: 95% band when odds + form + measured xG story is present."""
+    lc = str(league_code or enriched.get("league") or "").strip().upper()
+    if lc != _WORLD_CUP_LEAGUE:
+        return False
+    if not _international_match_ready(enriched, league_code=lc):
+        return False
+    if not _book_odds_ready(enriched):
+        return False
+    n_h, n_a = _recent_n(enriched)
+    if n_h < 4.0 or n_a < 4.0:
+        return False
+    if not _has_stats(enriched.get("home_stats")) or not _has_stats(enriched.get("away_stats")):
+        return False
+    src = _effective_xg_source(enriched)
+    if _strong_xg_tier(src):
+        return True
+    return n_h >= 5.0 and n_a >= 5.0 and src not in ("unknown", "", "goals_proxy")
+
+
+def _uefa_club_final_flagship_ready(enriched: Dict[str, Any], *, league_code: Optional[str] = None) -> bool:
+    """Champions / Europa / Conference League final — 95% when premium blocks are met."""
+    lc = str(league_code or enriched.get("league") or "").strip().upper()
+    if lc not in _UEFA_SHOWPIECE_NORMALIZED_LEAGUES:
+        return False
+    if not _is_competition_final_round(enriched):
+        return False
+    return _premium_ready(enriched, league_code=lc) or (
+        _showpiece_ready(enriched, league_code=lc)
+        and _strong_xg_tier(_effective_xg_source(enriched))
+        and _side_markets_pts(enriched) >= 4.0
+    )
+
+
+def _flagship_dq_floor_pct(enriched: Dict[str, Any], *, league_code: Optional[str] = None) -> Optional[float]:
+    """95% floor for World Cup fixtures and UEFA club finals."""
+    if _world_cup_flagship_ready(enriched, league_code=league_code):
+        return _FLAGSHIP_DQ_FLOOR
+    if _uefa_club_final_flagship_ready(enriched, league_code=league_code):
+        return _FLAGSHIP_DQ_FLOOR
+    return None
+
+
 def _international_dq_floor_pct(enriched: Dict[str, Any], *, league_code: Optional[str] = None) -> Optional[float]:
     """Target floor for international competitions (85%+ UI band when enrich is solid)."""
+    lc = str(league_code or enriched.get("league") or "").strip().upper()
+    if lc == _WORLD_CUP_LEAGUE:
+        return None
     if not _international_match_ready(enriched, league_code=league_code):
         return None
     if _book_odds_ready(enriched):
@@ -606,6 +668,7 @@ def compute_fixture_data_quality(enriched: Dict[str, Any]) -> Dict[str, Any]:
     showpiece_ready = _showpiece_ready(enriched, league_code=league_code or None)
     domestic_standard_ready = _domestic_standard_ready(enriched, league_code=league_code or None)
     intl_floor = _international_dq_floor_pct(enriched, league_code=league_code or None)
+    flagship_floor = _flagship_dq_floor_pct(enriched, league_code=league_code or None)
     strong_xg = _strong_xg_tier(src)
     premium_ready = _premium_ready(enriched, league_code=league_code or None)
     cup_premium = premium_ready and _cup_competition_code(league_code)
@@ -615,7 +678,9 @@ def compute_fixture_data_quality(enriched: Dict[str, Any]) -> Dict[str, Any]:
         showpiece_norm_pct = _showpiece_earnable_pct(score, blocks)
         if showpiece_norm_pct > pct:
             pct = showpiece_norm_pct
-    if premium_ready and not cup_premium and pct < _PREMIUM_DQ_FLOOR:
+    if flagship_floor is not None and pct < flagship_floor:
+        pct = flagship_floor
+    elif premium_ready and not cup_premium and pct < _PREMIUM_DQ_FLOOR:
         pct = _PREMIUM_DQ_FLOOR
     elif cup_premium and not uefa_normalized and pct < _PREMIUM_DQ_FLOOR:
         pct = _PREMIUM_DQ_FLOOR
@@ -666,7 +731,9 @@ def compute_fixture_data_quality(enriched: Dict[str, Any]) -> Dict[str, Any]:
             weak_fields = [w for w in weak_fields if w != "Expected goals"]
         if not _book_odds_ready(enriched) and "Odds markets" not in weak_fields:
             weak_fields = (weak_fields + ["Odds markets"])[:5]
-    if pct >= _PREMIUM_DQ_FLOOR and not weak_fields:
+    if flagship_floor is not None and pct >= _FLAGSHIP_DQ_FLOOR and not weak_fields:
+        trust_label = "Flagship data"
+    elif pct >= _PREMIUM_DQ_FLOOR and not weak_fields:
         trust_label = "Premium data"
     elif pct >= 85 and not weak_fields:
         trust_label = "Strong data"

@@ -392,6 +392,69 @@ def test_ensure_dq_backfills_missing_only():
     assert float(rows[0]["data_quality"]["score_pct"]) >= 85.0
 
 
+def test_world_cup_flagship_floor_95():
+    enriched = _rich_enriched(
+        league="WORLD_CUP",
+        xg_source="api_statistics_xg",
+        home_position={},
+        away_position={},
+        home_recent_n=6,
+        away_recent_n=6,
+        competition_meta={"api_round": "Group Stage - 1"},
+    )
+    dq = compute_fixture_data_quality(enriched)
+    assert dq["score_pct"] >= 95.0
+    assert dq["trust_label"] == "Flagship data"
+
+
+def test_ucl_semi_final_does_not_get_flagship_floor():
+    enriched = _rich_enriched(
+        league="UCL",
+        xg_source="fotmob_league_xg",
+        home_position={},
+        away_position={},
+        home_recent_n=6,
+        away_recent_n=6,
+        competition_meta={"api_round": "Semi-finals"},
+    )
+    dq = compute_fixture_data_quality(enriched)
+    assert dq["score_pct"] < 95.0
+
+
+def test_ucl_final_flagship_floor_95():
+    enriched = _rich_enriched(
+        league="UCL",
+        xg_source="api_statistics_xg",
+        home_position={},
+        away_position={},
+        home_recent_n=8,
+        away_recent_n=8,
+        competition_meta={"api_round": "Final"},
+        market_odds={"btts": {"yes": 1.75}, "totals_2_5": {"over": 1.85}},
+    )
+    dq = compute_fixture_data_quality(enriched)
+    assert dq["score_pct"] >= 95.0
+
+
+def test_friendlies_floor_85_without_odds():
+    enriched = _rich_enriched(
+        league="INTL_FRIENDLIES",
+        xg_source="api_season_team_xg",
+        scraped_xg_meta={"api_season_xg_measured": True},
+        home_position={},
+        away_position={},
+        odds_available=False,
+        odds_home=None,
+        odds_draw=None,
+        odds_away=None,
+        home_recent_n=4,
+        away_recent_n=4,
+    )
+    dq = compute_fixture_data_quality(enriched)
+    assert dq["score_pct"] >= 85.0
+    assert dq["score_pct"] < 95.0
+
+
 def test_dq_floor_constants_unchanged_for_regression_guard():
     """Hardening must not silently lower earned domestic / showpiece floors."""
     from hibs_predictor import data_quality as dq_mod
