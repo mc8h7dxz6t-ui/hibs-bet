@@ -3,7 +3,7 @@
 import json
 import os
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 from dotenv import load_dotenv
@@ -103,37 +103,91 @@ def gather_health() -> Dict[str, Any]:
             }
         )
 
-    # --- Football-Data.org (same aliases as DataAggregator) ---
+    # --- Football-Data.org (cached probe — respect 10 req/min) ---
     fdo = _env_first_usable("FOOTBALL_DATA_ORG_KEY", "FOOTBALL_DATA_KEY")
-    t0 = time.perf_counter()
+    fdo_probe_ttl_min = 30.0
+    try:
+        fdo_probe_ttl_min = max(5.0, float(os.getenv("HIBS_FOOTBALL_DATA_HEALTH_PROBE_MIN", "30")))
+    except ValueError:
+        pass
+    fdo_cached_ok: Optional[bool] = None
+    fdo_cached_err: Optional[str] = None
     if fdo:
         try:
-            r = requests.get(
-                "https://api.football-data.org/v4/competitions",
-                headers={"X-Auth-Token": fdo},
-                timeout=15,
-            )
-            ms = _ms_since(t0)
-            ok = r.status_code == 200
-            apis.append(
-                {
-                    "id": "football_data_org",
-                    "label": "Football-Data.org",
-                    "ms": ms,
-                    "ok": ok,
-                    "error": None if ok else f"HTTP {r.status_code}",
-                }
-            )
-        except Exception as exc:
+            from hibs_predictor.cache import Cache
+
+            probe_row = Cache().get("health_probe_football_data_org", ttl_hours=fdo_probe_ttl_min / 60.0)
+            if isinstance(probe_row, dict) and "ok" in probe_row:
+                fdo_cached_ok = bool(probe_row.get("ok"))
+                fdo_cached_err = probe_row.get("error")
+        except Exception:
+            pass
+    t0 = time.perf_counter()
+    if fdo:
+        if fdo_cached_ok is not None:
             apis.append(
                 {
                     "id": "football_data_org",
                     "label": "Football-Data.org",
                     "ms": None,
-                    "ok": False,
-                    "error": str(exc)[:160],
+                    "ok": fdo_cached_ok,
+                    "error": fdo_cached_err,
                 }
             )
+        else:
+            try:
+                from hibs_predictor.api_clients import football_data_requests_allowed
+
+                if not football_data_requests_allowed():
+                    apis.append(
+                        {
+                            "id": "football_data_org",
+                            "label": "Football-Data.org",
+                            "ms": None,
+                            "ok": False,
+                            "error": "local rate guard (10 req/min)",
+                        }
+                    )
+                else:
+                    r = requests.get(
+                        "https://api.football-data.org/v4/competitions",
+                        headers={"X-Auth-Token": fdo},
+                        timeout=15,
+                    )
+                    ms = _ms_since(t0)
+                    ok = r.status_code == 200
+                    err = None if ok else f"HTTP {r.status_code}"
+                    apis.append(
+                        {
+                            "id": "football_data_org",
+                            "label": "Football-Data.org",
+                            "ms": ms,
+                            "ok": ok,
+                            "error": err,
+                        }
+                    )
+                    try:
+                        from hibs_predictor.cache import Cache
+                        from hibs_predictor.rate_limiter import RateLimiter
+
+                        RateLimiter().record_request("football_data_org")
+                        Cache().set(
+                            "health_probe_football_data_org",
+                            {"ok": ok, "error": err},
+                            ttl_hours=fdo_probe_ttl_min / 60.0,
+                        )
+                    except Exception:
+                        pass
+            except Exception as exc:
+                apis.append(
+                    {
+                        "id": "football_data_org",
+                        "label": "Football-Data.org",
+                        "ms": None,
+                        "ok": False,
+                        "error": str(exc)[:160],
+                    }
+                )
     else:
         apis.append(
             {

@@ -973,10 +973,17 @@ class DataAggregator:
         competition_code: Optional[str],
         season: int,
     ) -> Dict[str, Any]:
+        from hibs_predictor.api_clients import football_data_requests_allowed
+
         if not competition_code or "football_data_org" not in self.clients:
             return {}
+        if not football_data_requests_allowed():
+            return {}
         client = self.clients["football_data_org"]
-        for sy in [season, season - 1]:
+        seasons = [season]
+        if (os.getenv("HIBS_FOOTBALL_DATA_PRIOR_SEASON") or "").strip().lower() in ("1", "true", "yes", "on"):
+            seasons.append(season - 1)
+        for sy in seasons:
             if team_id:
                 row = client.fetch_team_position(int(team_id), str(competition_code), int(sy))
                 if row:
@@ -1239,16 +1246,19 @@ class DataAggregator:
                     print(f"[enrich away_position] {league_code} fid={fixture_id_str}: {exc!r}")
 
         if fdo_comp and "football_data_org" in self.clients:
-            try:
-                if not hp.get("position"):
-                    hp = self._fetch_football_data_position_with_fallback(home_id, home_nm, fdo_comp, season) or hp
-            except Exception as exc:
-                print(f"[enrich fdo_home_position] {league_code} fid={fixture_id_str}: {exc!r}")
-            try:
-                if not ap.get("position"):
-                    ap = self._fetch_football_data_position_with_fallback(away_id, away_nm, fdo_comp, season) or ap
-            except Exception as exc:
-                print(f"[enrich fdo_away_position] {league_code} fid={fixture_id_str}: {exc!r}")
+            from hibs_predictor.api_clients import football_data_requests_allowed
+
+            if football_data_requests_allowed():
+                try:
+                    if not hp.get("position"):
+                        hp = self._fetch_football_data_position_with_fallback(home_id, home_nm, fdo_comp, season) or hp
+                except Exception as exc:
+                    print(f"[enrich fdo_home_position] {league_code} fid={fixture_id_str}: {exc!r}")
+                try:
+                    if not ap.get("position"):
+                        ap = self._fetch_football_data_position_with_fallback(away_id, away_nm, fdo_comp, season) or ap
+                except Exception as exc:
+                    print(f"[enrich fdo_away_position] {league_code} fid={fixture_id_str}: {exc!r}")
 
         if prefer_scraped and league_code in soccerstats_standings.LEAGUE_PARAM:
             try:
@@ -1613,8 +1623,16 @@ class DataAggregator:
                 except Exception:
                     continue
 
-        if (not stats or (stats.get("goals_for", 0) == 0 and stats.get("goals_against", 0) == 0)) and fdo_comp and "football_data_org" in self.clients:
+        if (
+            (not stats or (stats.get("goals_for", 0) == 0 and stats.get("goals_against", 0) == 0))
+            and fdo_comp
+            and "football_data_org" in self.clients
+        ):
             try:
+                from hibs_predictor.api_clients import football_data_team_matches_enabled
+
+                if not football_data_team_matches_enabled():
+                    raise RuntimeError("fdo_team_matches_disabled")
                 fdo_matches = self.clients["football_data_org"].fetch_team_matches(int(team_id), 10)
                 fdo_stats = _stats_from_fdo_matches(fdo_matches)
                 if fdo_stats.get("played"):
@@ -1824,15 +1842,18 @@ class DataAggregator:
                         pass
 
                 if not matches and fdo_comp and "football_data_org" in self.clients:
-                    provider = "fdo"
-                    try:
-                        raw = self.clients["football_data_org"].fetch_team_matches(int(try_id), limit)
-                        for m in raw or []:
-                            norm = _fdo_match_to_recent_format(m)
-                            if norm:
-                                matches.append(norm)
-                    except Exception:
-                        pass
+                    from hibs_predictor.api_clients import football_data_team_matches_enabled
+
+                    if football_data_team_matches_enabled():
+                        provider = "fdo"
+                        try:
+                            raw = self.clients["football_data_org"].fetch_team_matches(int(try_id), limit)
+                            for m in raw or []:
+                                norm = _fdo_match_to_recent_format(m)
+                                if norm:
+                                    matches.append(norm)
+                        except Exception:
+                            pass
 
                 if not matches and team_name:
                     try:

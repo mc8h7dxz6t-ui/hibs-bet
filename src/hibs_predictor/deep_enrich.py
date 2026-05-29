@@ -374,20 +374,27 @@ def _fill_standings_if_needed(
         except Exception:
             pass
     if fdo_comp and "football_data_org" in aggregator.clients:
-        if not _position_ok(enriched.get("home_position")):
-            try:
-                row = aggregator._fetch_football_data_position_with_fallback(home_id, home_nm, fdo_comp, season)
-                if row:
-                    enriched["home_position"] = row
-            except Exception:
-                pass
-        if not _position_ok(enriched.get("away_position")):
-            try:
-                row = aggregator._fetch_football_data_position_with_fallback(away_id, away_nm, fdo_comp, season)
-                if row:
-                    enriched["away_position"] = row
-            except Exception:
-                pass
+        from hibs_predictor.api_clients import football_data_requests_allowed
+
+        if football_data_requests_allowed():
+            if not _position_ok(enriched.get("home_position")):
+                try:
+                    row = aggregator._fetch_football_data_position_with_fallback(
+                        home_id, home_nm, fdo_comp, season
+                    )
+                    if row:
+                        enriched["home_position"] = row
+                except Exception:
+                    pass
+            if not _position_ok(enriched.get("away_position")):
+                try:
+                    row = aggregator._fetch_football_data_position_with_fallback(
+                        away_id, away_nm, fdo_comp, season
+                    )
+                    if row:
+                        enriched["away_position"] = row
+                except Exception:
+                    pass
 
 
 def apply_xg_ladder(

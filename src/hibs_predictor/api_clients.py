@@ -152,11 +152,22 @@ class BaseApiClient:
     def _get_headers(self) -> Dict[str, str]:
         return {self.header_name: self.api_key}
 
-    def _get_json(self, endpoint: str, params: Optional[Dict[str, Any]] = None, use_cache: bool = True) -> Dict[str, Any]:
+    def _cache_ttl_hours(self, endpoint: str) -> float:
+        return 4.0
+
+    def _get_json(
+        self,
+        endpoint: str,
+        params: Optional[Dict[str, Any]] = None,
+        use_cache: bool = True,
+        *,
+        ttl_hours: Optional[float] = None,
+    ) -> Dict[str, Any]:
         cache_key = f"{self.service_name}_{endpoint}_{str(params)}"
+        ttl = float(ttl_hours) if ttl_hours is not None else self._cache_ttl_hours(endpoint)
 
         if use_cache:
-            cached = self.cache.get(cache_key, ttl_hours=4)
+            cached = self.cache.get(cache_key, ttl_hours=ttl)
             if cached:
                 return cached
 
@@ -180,6 +191,8 @@ class BaseApiClient:
             response.raise_for_status()
         except requests.HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else None
+            if status == 429:
+                self._trip_provider_rate_limit()
             if use_cache:
                 stale = self.cache.peek(cache_key)
                 if isinstance(stale, dict):
@@ -197,31 +210,84 @@ class BaseApiClient:
         except ValueError as exc:
             raise ValueError(f"Invalid JSON from {self.service_name} {endpoint}: {exc}") from exc
         self.rate_limiter.record_request(self.service_name)
-        self.cache.set(cache_key, data, ttl_hours=4)
+        self.cache.set(cache_key, data, ttl_hours=ttl)
         return data
+
+    def _trip_provider_rate_limit(self) -> None:
+        """Fill local minute guard after provider 429 so we stop hammering."""
+        limit = self.rate_limiter.minute_limits.get(self.service_name, 0)
+        if limit <= 0:
+            return
+        entry = self.rate_limiter._ensure_entry_shape(self.service_name)
+        entry["minute_count"] = int(limit)
+        entry["minute_reset_at"] = (
+            __import__("datetime").datetime.now()
+            + __import__("datetime").timedelta(minutes=1)
+        ).isoformat()
+        self.rate_limiter._save_state()
+
+
+def football_data_requests_allowed() -> bool:
+    """Respect local 10 req/min guard and optional global skip."""
+    if (os.getenv("HIBS_SKIP_FOOTBALL_DATA") or "").strip().lower() in ("1", "true", "yes", "on"):
+        return False
+    return RateLimiter().block_reason("football_data_org") is None
+
+
+def football_data_team_matches_enabled() -> bool:
+    """Per-team /teams/{id}/matches is expensive on free tier — off by default."""
+    return (os.getenv("HIBS_FOOTBALL_DATA_TEAM_MATCHES") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
 class FootballDataOrgClient(BaseApiClient):
     def __init__(self, api_key: str) -> None:
         super().__init__(api_key, "https://api.football-data.org/v4", "X-Auth-Token", "football_data_org")
+        self._standings_memo: Dict[str, List[Dict[str, Any]]] = {}
+
+    def _cache_ttl_hours(self, endpoint: str) -> float:
+        ep = endpoint.lower()
+        if "standings" in ep:
+            try:
+                return max(1.0, float(os.getenv("HIBS_FOOTBALL_DATA_STANDINGS_CACHE_HOURS", "24")))
+            except ValueError:
+                return 24.0
+        if "/teams/" in ep and "matches" in ep:
+            try:
+                return max(1.0, float(os.getenv("HIBS_FOOTBALL_DATA_TEAM_CACHE_HOURS", "24")))
+            except ValueError:
+                return 24.0
+        if "competitions/" in ep and "matches" in ep:
+            try:
+                return max(1.0, float(os.getenv("HIBS_FOOTBALL_DATA_FIXTURES_CACHE_HOURS", "6")))
+            except ValueError:
+                return 6.0
+        try:
+            return max(1.0, float(os.getenv("HIBS_FOOTBALL_DATA_CACHE_HOURS", "12")))
+        except ValueError:
+            return 12.0
 
     def _get_json(self, endpoint: str, params: Optional[Dict[str, Any]] = None, use_cache: bool = True) -> Dict[str, Any]:
-        """Fail-soft on quota/forbidden so enrichment rows still render from API-Sports/scrapers."""
+        """Fail-soft on quota/forbidden; long TTL caches; honour 10 req/min guard."""
+        if not football_data_requests_allowed():
+            return {"errorCode": 429, "message": "local football-data guard", "matches": [], "standings": []}
+
         cache_key = f"{self.service_name}_{endpoint}_{str(params)}"
+        ttl = self._cache_ttl_hours(endpoint)
         if use_cache:
-            cached = self.cache.get(cache_key, ttl_hours=0.25)
+            cached = self.cache.get(cache_key, ttl_hours=ttl)
             if isinstance(cached, dict) and int(cached.get("errorCode") or 0) in (403, 429):
                 return cached
         try:
-            return super()._get_json(endpoint, params=params, use_cache=use_cache)
+            return super()._get_json(endpoint, params=params, use_cache=use_cache, ttl_hours=ttl)
         except requests.HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else None
             if status in (403, 429):
+                if status == 429:
+                    self._trip_provider_rate_limit()
                 print(f"[Football-Data.org HTTP {status}] {endpoint}: {exc}")
                 payload = {"errorCode": status, "message": str(exc), "matches": [], "standings": []}
                 if use_cache:
-                    # Short deny-cache prevents repeated blocked calls during one refresh window.
-                    self.cache.set(cache_key, payload, ttl_hours=0.25)
+                    self.cache.set(cache_key, payload, ttl_hours=2.0)
                 return payload
             raise
 
@@ -254,13 +320,18 @@ class FootballDataOrgClient(BaseApiClient):
         return self._get_json(endpoint)
 
     def fetch_team_matches(self, team_id: int, limit: int = 10) -> List[Dict[str, Any]]:
+        if not football_data_team_matches_enabled():
+            return []
         endpoint = f"teams/{team_id}/matches"
         params = {"limit": limit, "status": "FINISHED"}
         data = self._get_json(endpoint, params=params)
-        return data.get("matches", [])
+        return data.get("matches", []) or []
 
     def fetch_standings(self, competition_code: str, season: int) -> List[Dict[str, Any]]:
         """Documented Football-Data.org standings endpoint for current/historical tables."""
+        memo_key = f"{competition_code}_{season}"
+        if memo_key in self._standings_memo:
+            return self._standings_memo[memo_key]
         endpoint = f"competitions/{competition_code}/standings"
         params = {"season": season}
         data = self._get_json(endpoint, params=params)
@@ -269,14 +340,16 @@ class FootballDataOrgClient(BaseApiClient):
         if data.get("errorCode") or data.get("message"):
             print(f"[Football-Data.org standings] {competition_code}: {data.get('message', data)}")
             return []
-        return data.get("standings", []) or []
+        groups = data.get("standings", []) or []
+        self._standings_memo[memo_key] = groups
+        return groups
 
     def fetch_team_position(self, team_id: int, competition_code: str, season: int) -> Dict[str, Any]:
         """Get a team's league-table row from Football-Data.org standings."""
-        if not team_id or not competition_code:
+        if not team_id or not competition_code or not football_data_requests_allowed():
             return {}
         cache_key = f"football_data_team_position_{team_id}_{competition_code}_{season}"
-        cached = self.cache.get(cache_key, ttl_hours=12)
+        cached = self.cache.get(cache_key, ttl_hours=24)
         if cached:
             return cached
         try:

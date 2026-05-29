@@ -23,8 +23,14 @@ class RateLimiter:
             "odds_api": 500,
             "stats_api": 150,
         }
+        try:
+            fdo_per_min = max(1, int(os.getenv("HIBS_FOOTBALL_DATA_PER_MIN_LIMIT", "8")))
+        except ValueError:
+            fdo_per_min = 8
         self.minute_limits = {
             "api_sports": int(os.getenv("HIBS_API_SPORTS_PER_MIN_LIMIT", "22")),
+            # football-data.org free tier is 10 req/min — stay under locally.
+            "football_data_org": fdo_per_min,
         }
         self._load_state()
 
