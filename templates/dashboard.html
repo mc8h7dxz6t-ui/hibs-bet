@@ -51,6 +51,18 @@
     <meta http-equiv="refresh" content="20">
     {% endif %}
 
+    {% if ops_banner and ops_banner.quota_banner %}
+    <div class="api-missing-banner" role="alert" style="border-color:rgba(251,191,36,0.45);">
+        <strong>API quota / guard:</strong> {{ ops_banner.quota_banner }}
+    </div>
+    {% endif %}
+
+    {% if ops_banner and ops_banner.warm_banner and not cold_start %}
+    <div class="api-missing-banner" role="status" style="border-color:rgba(96,165,250,0.35);">
+        {{ ops_banner.warm_banner }}
+    </div>
+    {% endif %}
+
     {% if not has_api_clients %}
     <div class="api-missing-banner" role="alert">
         <strong>No fixture API keys loaded.</strong> Add a real key (not the <code>your_*_here</code> placeholders) to <code>.env</code> in the project root: <code>API_SPORTS_FOOTBALL_KEY</code> and/or <code>FOOTBALL_DATA_ORG_KEY</code>. Restart after saving.

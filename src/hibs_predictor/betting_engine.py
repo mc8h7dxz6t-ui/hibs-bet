@@ -12,16 +12,19 @@ from hibs_predictor.historic_calibration import (
     adjust_xg_for_source_quality,
     apply_calibration_shrink,
     apply_form_weight_to_features,
+    apply_ml_isotonic_calibration,
     blend_h2h_into_1x2,
     compute_bet_confidence,
     venue_form_sample_counts,
     confidence_display_scale,
     extract_h2h_from_recent,
     form_sample_weight,
+    league_rho_for_predict,
     league_shrink_for_predict,
     min_bet_confidence_for_value,
 )
 from hibs_predictor.league_profiles import apply_league_probability_profile, value_margin_extra
+from hibs_predictor.odds_devig import blend_probs_toward_anchor
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
 
@@ -801,6 +804,25 @@ class BettingEngine:
                 rejected[outcome] = "edge_below_scaled_threshold"
                 continue
 
+            sharp_impl = fixture.get("sharp_anchor_implied") or {}
+            if outcome in ("home", "draw", "away") and odds >= 4.0 and isinstance(sharp_impl, dict):
+                sharp_p = sharp_impl.get(outcome)
+                try:
+                    sharp_f = float(sharp_p) if sharp_p is not None else None
+                except (TypeError, ValueError):
+                    sharp_f = None
+                if sharp_f is not None and model_prob > sharp_f + 0.055 and model_prob < 0.30:
+                    rejected[outcome] = "favorite_longshot_bias_gate"
+                    continue
+            if outcome.startswith(("btts_", "over", "under")) and odds >= 3.8:
+                try:
+                    flb_min = float(os.getenv("HIBS_FLB_BTTS_OU_MIN_ODDS", "3.8"))
+                except ValueError:
+                    flb_min = 3.8
+                if odds >= flb_min and model_prob < 0.42 and edge < margin + 0.03:
+                    rejected[outcome] = "favorite_longshot_bias_gate"
+                    continue
+
             if outcome in ("home", "draw", "away"):
                 if dq_known and dq_pct < 76.0:
                     rejected[outcome] = "data_quality_below_1x2_value_floor"
@@ -872,12 +894,14 @@ class BettingEngine:
             return 0.0
 
     @staticmethod
-    def _read_dixon_coles_rho() -> float:
-        """Low-score correlation (typical football rho ~ -0.13). Set 0 to disable."""
-        try:
-            return float(os.getenv("HIBS_DIXON_COLES_RHO", "-0.10"))
-        except ValueError:
-            return -0.10
+    def _read_dixon_coles_rho(league_code: str = "") -> float:
+        """Low-score correlation; per-league cache from calibration_fit when available."""
+        rho, _dbg = league_rho_for_predict(league_code)
+        return rho
+
+    @staticmethod
+    def _use_bivariate_side_markets() -> bool:
+        return os.getenv("HIBS_BIVARIATE_POISSON", "1").strip().lower() not in ("0", "false", "no", "off")
 
     @staticmethod
     def _dixon_coles_tau(h: int, a: int, lam_h: float, lam_a: float, rho: float) -> float:
@@ -894,11 +918,17 @@ class BettingEngine:
             return 1.0 - rho
         return 1.0
 
-    def _poisson_match_probs(self, xg_home: float, xg_away: float) -> Dict[str, float]:
+    def _poisson_match_probs(
+        self,
+        xg_home: float,
+        xg_away: float,
+        *,
+        league_code: str = "",
+    ) -> Dict[str, float]:
         max_goals = 8
         lam_h = max(0.1, float(xg_home))
         lam_a = max(0.1, float(xg_away))
-        rho = self._read_dixon_coles_rho()
+        rho = self._read_dixon_coles_rho(league_code)
         home_win = draw = away_win = 0.0
         for h in range(max_goals + 1):
             for a in range(max_goals + 1):
@@ -1160,7 +1190,7 @@ class BettingEngine:
                     metadata["xg_home"] = xg_home
                     metadata["xg_away"] = xg_away
                     sup_xg_dbg = {"blend_weight": w, "understat_xg_home": uh, "understat_xg_away": ua}
-        poisson_probs_raw = self._poisson_match_probs(xg_home, xg_away)
+        poisson_probs_raw = self._poisson_match_probs(xg_home, xg_away, league_code=league_code)
         X = np.array([features])
         try:
             rf_probs = self.rf_model.predict_proba(X)[0]
@@ -1175,6 +1205,7 @@ class BettingEngine:
                 ml_probs = {"home": 0.33, "draw": 0.34, "away": 0.33}
             else:
                 ml_probs = dict(poisson_probs_raw)
+        ml_probs, ml_cal_dbg = apply_ml_isotonic_calibration(ml_probs, league_code)
         mode = self._read_1x2_mode()
 
         lam_cal_h: Optional[float] = None
@@ -1202,7 +1233,7 @@ class BettingEngine:
                     cal_dbg = {**cal_dbg, "motivation_labels": motivation["labels"]}
             except Exception:
                 pass
-            poisson_probs_cal = self._poisson_match_probs(lam_cal_h, lam_cal_a)
+            poisson_probs_cal = self._poisson_match_probs(lam_cal_h, lam_cal_a, league_code=league_code)
 
         if mode == "calibrated_poisson" and poisson_probs_cal is not None:
             ensemble_probs = dict(poisson_probs_cal)
@@ -1237,14 +1268,31 @@ class BettingEngine:
             )
         except (TypeError, ValueError):
             cross_pct = 0.0
-        if has_book and bookmaker_odds:
+        sharp_impl = fixture.get("sharp_anchor_implied") or {}
+        dq_pct_blend = float(dq_pre.get("score_pct") or 0)
+        dq_anchor = _env_float("HIBS_DQ_SHARP_ANCHOR_PCT", 75.0)
+        if (
+            isinstance(sharp_impl, dict)
+            and all(sharp_impl.get(s) for s in ("home", "draw", "away"))
+            and dq_pct_blend > 0
+            and dq_pct_blend < dq_anchor
+        ):
+            sharp_w = min(0.52, 0.30 + (dq_anchor - dq_pct_blend) * 0.003)
+            ensemble_probs = blend_probs_toward_anchor(
+                ensemble_probs,
+                sharp_impl,
+                sharp_w,
+                keys=("home", "draw", "away"),
+            )
+        elif has_book and bookmaker_odds:
             try:
-                blend = float(os.getenv("HIBS_CALIB_MARKET_BLEND", "0.08"))
+                blend = float(os.getenv("HIBS_CALIB_MARKET_BLEND", "0.06"))
             except ValueError:
-                blend = 0.08
-            dq_pct_blend = float(dq_pre.get("score_pct") or 0)
-            if dq_pct_blend > 0 and dq_pct_blend < 75.0:
-                blend = min(0.18, blend + (75.0 - dq_pct_blend) * 0.0012)
+                blend = 0.06
+            if dq_pct_blend >= dq_anchor:
+                blend = min(blend, 0.04)
+            elif dq_pct_blend > 0:
+                blend = min(0.12, blend + (dq_anchor - dq_pct_blend) * 0.0008)
             ensemble_probs = self._blend_1x2_toward_implied(ensemble_probs, bookmaker_odds, blend)
 
         use_cal_side = mode == "calibrated_poisson" or (
@@ -1271,7 +1319,29 @@ class BettingEngine:
         except Exception:
             pass
 
-        poisson_btts = self._poisson_btts_probability(lam_h_side, lam_a_side)
+        if self._use_bivariate_side_markets():
+            from hibs_predictor.bivariate_poisson import side_market_probs
+
+            biv_side = side_market_probs(lam_h_side, lam_a_side)
+            poisson_btts = float(biv_side["btts_yes"])
+            over15_prob = float(biv_side["over15"])
+            over25_prob = float(biv_side["over25"])
+            over35_prob = float(biv_side["over35"])
+            under15_prob = float(biv_side["under15"])
+            under35_prob = float(biv_side["under35"])
+            j_home_btts = float(biv_side["home_and_btts"])
+            j_draw_btts = float(biv_side["draw_and_btts"])
+            j_away_btts = float(biv_side["away_and_btts"])
+        else:
+            poisson_btts = self._poisson_btts_probability(lam_h_side, lam_a_side)
+            over15_prob = self._poisson_over_goals_probability(lam_h_side, lam_a_side, 1.5)
+            over25_prob = self._poisson_over_goals_probability(lam_h_side, lam_a_side, 2.5)
+            over35_prob = self._poisson_over_goals_probability(lam_h_side, lam_a_side, 3.5)
+            under15_prob = max(0.02, min(0.98, 1.0 - over15_prob))
+            under35_prob = max(0.02, min(0.98, 1.0 - over35_prob))
+            j_home_btts = self._poisson_joint_home_win_and_btts(lam_h_side, lam_a_side)
+            j_draw_btts = self._poisson_joint_draw_and_btts(lam_h_side, lam_a_side)
+            j_away_btts = self._poisson_joint_away_win_and_btts(lam_h_side, lam_a_side)
         hb = float(fixture.get("home_btts_rate", 0.0) or 0.0)
         ab = float(fixture.get("away_btts_rate", 0.0) or 0.0)
         empirical_btts = (hb + ab) / 2.0 if (hb > 0 or ab > 0) else 0.0
@@ -1284,14 +1354,6 @@ class BettingEngine:
             btts_prob = max(0.03, min(0.97, poisson_btts * w + empirical_btts * (1.0 - w)))
         else:
             btts_prob = poisson_btts
-        over15_prob = self._poisson_over_goals_probability(lam_h_side, lam_a_side, 1.5)
-        over25_prob = self._poisson_over_goals_probability(lam_h_side, lam_a_side, 2.5)
-        over35_prob = self._poisson_over_goals_probability(lam_h_side, lam_a_side, 3.5)
-        under15_prob = max(0.02, min(0.98, 1.0 - over15_prob))
-        under35_prob = max(0.02, min(0.98, 1.0 - over35_prob))
-        j_home_btts = self._poisson_joint_home_win_and_btts(lam_h_side, lam_a_side)
-        j_draw_btts = self._poisson_joint_draw_and_btts(lam_h_side, lam_a_side)
-        j_away_btts = self._poisson_joint_away_win_and_btts(lam_h_side, lam_a_side)
         merged_model = {
             **ensemble_probs,
             "btts_yes": btts_prob,
@@ -1596,6 +1658,9 @@ class BettingEngine:
             "form_home": round(metadata["home_form"] * 100, 1),
             "form_away": round(metadata["away_form"] * 100, 1),
             "poisson_probs": {k: round(v * 100, 1) for k, v in poisson_probs_raw.items()},
+            "ml_probs_pct": {k: round(float(ml_probs.get(k, 0.0)) * 100, 1) for k in ("home", "draw", "away")},
+            "ml_isotonic_calibration": ml_cal_dbg,
+            "side_markets_model": "bivariate_poisson" if self._use_bivariate_side_markets() else "independent_poisson",
             "one_x2_mode": mode,
             "supplemental_xg_prior": sup_xg_dbg,
             "prediction_quality_hint": {
@@ -1620,6 +1685,7 @@ class BettingEngine:
             "league_model_profile": league_profile_debug,
             "historic_calibration": {
                 "calibration_shrink": cal_shrink_dbg,
+                "dixon_coles_rho": league_rho_for_predict(league_code)[1],
                 "xg_quality": xg_quality_dbg,
                 "h2h": h2h_calibration,
                 "form_sample_weight": round(form_w, 3),
@@ -1733,8 +1799,25 @@ def _apply_portfolio_kelly_row(
     kelly["example_stake"] = f"\u00a3{scaled_percent:.2f}"
 
 
+def _portfolio_fixture_key(fixture: Dict[str, Any]) -> str:
+    fid = fixture.get("id") or fixture.get("fixture_id")
+    if fid is not None:
+        return str(fid)
+    home = fixture.get("home")
+    away = fixture.get("away")
+    if isinstance(home, dict):
+        home = home.get("name")
+    if isinstance(away, dict):
+        away = away.get("name")
+    ko = fixture.get("kickoff_sort") or fixture.get("date") or ""
+    return f"{home}|{away}|{ko}"
+
+
 def apply_portfolio_kelly(fixtures: List[Dict[str, Any]]) -> None:
-    """Scale Kelly stakes across value bets sharing a kickoff window (capital exhaustion guard)."""
+    """
+    Portfolio Kelly: joint sqrt(k) within the same fixture, then sqrt(N) across independent
+    matches in a kickoff window, with a total window stake cap.
+    """
     if not fixtures:
         return
     window_min = portfolio_kickoff_window_minutes()
@@ -1747,6 +1830,7 @@ def apply_portfolio_kelly(fixtures: List[Dict[str, Any]]) -> None:
         ko = _fixture_kickoff_dt(fx)
         if ko is None:
             continue
+        fx_key = _portfolio_fixture_key(fx)
         for pool_name in ("value_bets", "value_bets_alt"):
             pool = pred.get(pool_name)
             if not isinstance(pool, dict):
@@ -1757,10 +1841,36 @@ def apply_portfolio_kelly(fixtures: List[Dict[str, Any]]) -> None:
                 pct = _value_bet_kelly_percent(row)
                 if pct <= 0:
                     continue
-                entries.append({"kickoff": ko, "row": row, "outcome": str(outcome), "pool": pool_name})
+                entries.append(
+                    {
+                        "kickoff": ko,
+                        "row": row,
+                        "outcome": str(outcome),
+                        "pool": pool_name,
+                        "fixture_key": fx_key,
+                    }
+                )
 
     if not entries:
         return
+
+    by_fixture: Dict[str, List[Dict[str, Any]]] = {}
+    for ent in entries:
+        by_fixture.setdefault(ent["fixture_key"], []).append(ent)
+
+    for fx_key, group in by_fixture.items():
+        k = len(group)
+        if k <= 1:
+            continue
+        denom = math.sqrt(float(k))
+        for ent in group:
+            ent["match_scaled_pct"] = _value_bet_kelly_percent(ent["row"]) / denom
+            ent["portfolio_match_legs"] = k
+
+    for ent in entries:
+        if "match_scaled_pct" not in ent:
+            ent["match_scaled_pct"] = _value_bet_kelly_percent(ent["row"])
+            ent["portfolio_match_legs"] = 1
 
     entries.sort(key=lambda e: e["kickoff"])
     clusters: List[List[Dict[str, Any]]] = []
@@ -1782,11 +1892,10 @@ def apply_portfolio_kelly(fixtures: List[Dict[str, Any]]) -> None:
         clusters.append(cluster)
 
     for group in clusters:
-        n = len(group)
-        if n <= 0:
-            continue
-        denom = math.sqrt(float(n))
-        scaled_pcts = [_value_bet_kelly_percent(ent["row"]) / denom for ent in group]
+        fixture_keys = {ent["fixture_key"] for ent in group}
+        n_matches = max(1, len(fixture_keys))
+        denom = math.sqrt(float(n_matches))
+        scaled_pcts = [float(ent["match_scaled_pct"]) / denom for ent in group]
         total = sum(scaled_pcts)
         factor = 1.0
         if cap > 0 and total > cap:
@@ -1796,6 +1905,8 @@ def apply_portfolio_kelly(fixtures: List[Dict[str, Any]]) -> None:
             _apply_portfolio_kelly_row(
                 ent["row"],
                 pct * factor,
-                window_n=n,
+                window_n=n_matches,
                 cap_scaled=cap_scaled,
             )
+            kelly = ent["row"].setdefault("kelly", {})
+            kelly["portfolio_match_legs"] = int(ent.get("portfolio_match_legs") or 1)

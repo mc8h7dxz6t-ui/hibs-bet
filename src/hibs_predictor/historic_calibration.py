@@ -333,15 +333,118 @@ def apply_calibration_shrink(
     return {k: max(1e-6, v / t) for k, v in out.items()}
 
 
-def load_league_shrink_map() -> Dict[str, float]:
-    """Load pre-fit league shrink factors from cache JSON."""
+def load_calibration_payload() -> Dict[str, Any]:
+    """Load full calibration cache JSON (shrink, rho, ML isotonic knots)."""
     path = calibration_cache_path()
     if not os.path.isfile(path):
         return {}
     try:
         with open(path, encoding="utf-8") as f:
             raw = json.load(f)
+        return raw if isinstance(raw, dict) else {}
     except Exception:
+        return {}
+
+
+def _clamp_rho(rho: float) -> float:
+    return max(-0.25, min(0.05, float(rho)))
+
+
+def load_league_rho_map() -> Dict[str, float]:
+    """Per-league Dixon–Coles ρ from calibration cache."""
+    raw = load_calibration_payload()
+    leagues = raw.get("leagues") if isinstance(raw, dict) else {}
+    if not isinstance(leagues, dict):
+        return {}
+    out: Dict[str, float] = {}
+    for lg, val in leagues.items():
+        if not isinstance(val, dict):
+            continue
+        try:
+            if val.get("rho") is not None:
+                out[str(lg).upper()] = _clamp_rho(float(val["rho"]))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def league_rho_for_predict(league_code: str) -> Tuple[float, Dict[str, Any]]:
+    """Resolve Dixon–Coles ρ: per-league cache → env default."""
+    dbg: Dict[str, Any] = {"source": "env_default"}
+    try:
+        default = float(os.getenv("HIBS_DIXON_COLES_RHO", "-0.10"))
+    except ValueError:
+        default = -0.10
+    default = _clamp_rho(default)
+    code = (league_code or "").upper()
+    cached = load_league_rho_map()
+    if code in cached:
+        dbg = {"source": "cache", "rho": cached[code]}
+        return cached[code], dbg
+    dbg["rho"] = default
+    return default, dbg
+
+
+def _isotonic_apply(p: float, knots: Dict[str, Any]) -> float:
+    xs = knots.get("x") or knots.get("X")
+    ys = knots.get("y") or knots.get("Y")
+    if not isinstance(xs, list) or not isinstance(ys, list) or len(xs) < 2 or len(xs) != len(ys):
+        return p
+    try:
+        px = max(0.0, min(1.0, float(p)))
+        x_vals = [float(x) for x in xs]
+        y_vals = [float(y) for y in ys]
+        if px <= x_vals[0]:
+            return max(1e-6, min(1.0 - 1e-6, y_vals[0]))
+        if px >= x_vals[-1]:
+            return max(1e-6, min(1.0 - 1e-6, y_vals[-1]))
+        for i in range(len(x_vals) - 1):
+            if x_vals[i] <= px <= x_vals[i + 1]:
+                span = x_vals[i + 1] - x_vals[i]
+                if span <= 0:
+                    return y_vals[i + 1]
+                t = (px - x_vals[i]) / span
+                return max(1e-6, min(1.0 - 1e-6, y_vals[i] * (1.0 - t) + y_vals[i + 1] * t))
+    except (TypeError, ValueError):
+        return p
+    return p
+
+
+def apply_ml_isotonic_calibration(
+    probs: Dict[str, float],
+    league_code: str = "",
+) -> Tuple[Dict[str, float], Dict[str, Any]]:
+    """Apply global isotonic knots from calibration cache to ML 1X2 head (if present)."""
+    raw = load_calibration_payload()
+    ml_cal = raw.get("ml_calibration") if isinstance(raw, dict) else None
+    if not isinstance(ml_cal, dict):
+        return probs, {"applied": False}
+    global_knots = ml_cal.get("global")
+    if not isinstance(global_knots, dict):
+        return probs, {"applied": False}
+    out = dict(probs)
+    applied = False
+    for k in ("home", "draw", "away"):
+        knots = global_knots.get(k)
+        if not isinstance(knots, dict):
+            continue
+        if k not in out:
+            continue
+        out[k] = _isotonic_apply(float(out[k]), knots)
+        applied = True
+    if not applied:
+        return probs, {"applied": False}
+    total = sum(float(out.get(k, 0.0)) for k in ("home", "draw", "away"))
+    if total <= 0:
+        return probs, {"applied": False}
+    out = {k: max(1e-6, float(out[k]) / total) for k in ("home", "draw", "away")}
+    return out, {"applied": True, "source": "ml_calibration_global", "league": (league_code or "").upper()}
+
+
+def load_league_shrink_map() -> Dict[str, float]:
+    """Load pre-fit league shrink factors from cache JSON."""
+    raw = load_calibration_payload()
+    if not raw:
         return {}
     leagues = raw.get("leagues") if isinstance(raw, dict) else raw
     if not isinstance(leagues, dict):

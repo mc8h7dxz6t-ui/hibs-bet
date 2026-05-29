@@ -2332,6 +2332,37 @@ def _fixture_coverage_summary(
     }
 
 
+def _dashboard_ops_context(data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Warm-status and API guard banners for the dashboard."""
+    global _dashboard_refresh_inflight
+    from hibs_predictor.rate_limiter import RateLimiter
+
+    bundle = data or {}
+    api_diag = RateLimiter().diagnostics("api_sports")
+    warm_in_progress = bool(_dashboard_refresh_inflight)
+    cache_stale = bool(bundle.get("cache_stale"))
+    cold_start = bool(bundle.get("cold_start"))
+    quota_banner: Optional[str] = None
+    reason = api_diag.get("block_reason")
+    if reason:
+        quota_banner = (
+            f"API-Sports requests are paused ({reason}). "
+            "Fixtures may load from cache; data quality can look lower until the guard resets."
+        )
+    warm_banner: Optional[str] = None
+    if warm_in_progress:
+        warm_banner = "Refreshing fixture data in the background — cards may update shortly."
+    elif cache_stale and not cold_start:
+        warm_banner = "Showing cached fixtures while a background refresh completes."
+    return {
+        "warm_in_progress": warm_in_progress,
+        "cache_stale": cache_stale,
+        "quota_banner": quota_banner,
+        "warm_banner": warm_banner,
+        "api_sports_guard": api_diag,
+    }
+
+
 def _dashboard_info_box(fixture_coverage: Dict[str, Any], total: int) -> Dict[str, Any]:
     """Small user-facing dashboard summary; feed/provider detail belongs on /status."""
     loaded = fixture_coverage.get("loaded") or []
@@ -2992,6 +3023,7 @@ def index():
             display_tz_label=display_tz_label(),
             progressive_load=progressive,
             cold_start=bool(data.get("cold_start")),
+            ops_banner=_dashboard_ops_context(data),
         )
         body = html.encode("utf-8")
         resp = make_response(body)
@@ -3074,6 +3106,7 @@ def index():
         display_tz_label=display_tz_label(),
         progressive_load=progressive,
         cold_start=bool(data.get("cold_start")),
+        ops_banner=_dashboard_ops_context(data),
     )
     body = html.encode("utf-8")
     resp = make_response(body)
@@ -3231,6 +3264,20 @@ def api_health():
     from hibs_predictor.health_quality_narrative import augment_health_for_ui
 
     payload = augment_health_for_ui(gather_health())
+    try:
+        from hibs_predictor.api_gap_metrics import compute_league_api_gaps
+
+        peek = Cache().peek(_all_fixtures_cache_key(include_domestic=False))
+        fixtures = (peek or {}).get("all") if isinstance(peek, dict) else []
+        payload["league_api_gaps"] = compute_league_api_gaps(fixtures or [])
+    except Exception as exc:
+        payload["league_api_gaps"] = {"error": str(exc)[:120], "rows": []}
+    try:
+        from hibs_predictor.rate_limiter import RateLimiter
+
+        payload["api_sports_guard"] = RateLimiter().diagnostics("api_sports")
+    except Exception:
+        pass
     _health_cache["t"] = now
     _health_cache["payload"] = payload
     return jsonify(payload)

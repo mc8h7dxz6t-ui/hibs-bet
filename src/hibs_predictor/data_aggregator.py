@@ -616,11 +616,11 @@ def compute_best_line_from_bookmakers(
             cross = max(cross, (max(impls) - min(impls)) * 100.0)
 
     sharp: Dict[str, float] = {}
+    from hibs_predictor.odds_devig import odds_ratio_devig_probs
+
     if all(pinnacle.get(s) and pinnacle[s] > 1.0 for s in sides):
-        raw_impl = {s: _implied_prob(float(pinnacle[s])) for s in sides}  # type: ignore[arg-type]
-        s = sum(raw_impl.values())
-        if s > 0:
-            sharp = {k: raw_impl[k] / s for k in raw_impl}
+        pin_odds = {s: float(pinnacle[s]) for s in sides}  # type: ignore[arg-type]
+        sharp = odds_ratio_devig_probs(pin_odds)
     else:
         med_odds: Dict[str, float] = {}
         for side in sides:
@@ -630,10 +630,7 @@ def compute_best_line_from_bookmakers(
             mid = prices[len(prices) // 2]
             med_odds[side] = mid
         if len(med_odds) == 3:
-            raw_impl = {k: _implied_prob(v) for k, v in med_odds.items()}
-            s = sum(raw_impl.values())
-            if s > 0:
-                sharp = {k: raw_impl[k] / s for k in raw_impl}
+            sharp = odds_ratio_devig_probs(med_odds)
 
     return {
         "best_odds_1x2": best,

@@ -1,5 +1,5 @@
 """
-Fit league calibration_shrink factors from prediction audit rows (last N days).
+Fit league calibration (shrink, Dixon–Coles ρ, ML isotonic) from prediction audit rows.
 
 Usage:
   HIBS_PREDICTION_LOG_ENABLED=1 python -m hibs_predictor.calibration_fit
@@ -10,12 +10,16 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timedelta, timezone
+import sqlite3
+from collections import defaultdict
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 
 from hibs_predictor.historic_calibration import (
     calibration_cache_path,
+    load_calibration_payload,
     shrink_multiplier_from_brier,
 )
 from hibs_predictor.prediction_log import _db_path, brier_by_league, init_db, prediction_log_enabled
@@ -35,6 +39,162 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _brier_1x2(probs: Dict[str, float], outcome: str) -> float:
+    return sum((float(probs.get(k, 0.0)) - (1.0 if k == outcome else 0.0)) ** 2 for k in ("home", "draw", "away"))
+
+
+def _poisson_1x2_with_rho(xg_h: float, xg_a: float, rho: float) -> Dict[str, float]:
+    from hibs_predictor.betting_engine import BettingEngine
+
+    engine = BettingEngine({})
+    lam_h = max(0.1, float(xg_h))
+    lam_a = max(0.1, float(xg_a))
+    max_goals = 8
+    home_win = draw = away_win = 0.0
+    for h in range(max_goals + 1):
+        for a in range(max_goals + 1):
+            p = (
+                engine._poisson_prob(lam_h, h)
+                * engine._poisson_prob(lam_a, a)
+                * BettingEngine._dixon_coles_tau(h, a, lam_h, lam_a, rho)
+            )
+            if p <= 0:
+                continue
+            if h > a:
+                home_win += p
+            elif h == a:
+                draw += p
+            else:
+                away_win += p
+    total = home_win + draw + away_win
+    if total <= 0:
+        return {"home": 1.0 / 3.0, "draw": 1.0 / 3.0, "away": 1.0 / 3.0}
+    return {
+        "home": home_win / total,
+        "draw": draw / total,
+        "away": away_win / total,
+    }
+
+
+def _scored_audit_rows() -> List[Dict[str, Any]]:
+    path = _db_path()
+    if not os.path.isfile(path):
+        return []
+    init_db()
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        cur = conn.execute(
+            """
+            SELECT league_code, result_outcome, prediction_json,
+                   enrich_summary_json
+            FROM prediction_snapshots
+            WHERE result_outcome IS NOT NULL
+              AND result_outcome IN ('home', 'draw', 'away')
+            ORDER BY id DESC
+            LIMIT 8000
+            """
+        )
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def fit_league_dixon_coles_rho(*, min_rows: int = 15) -> Dict[str, Dict[str, Any]]:
+    """Grid-search ρ per league on scored rows (minimise Poisson+DC Brier)."""
+    rows = _scored_audit_rows()
+    by_league: Dict[str, List[Tuple[float, float, str]]] = defaultdict(list)
+    for row in rows:
+        league = str(row.get("league_code") or "").upper()
+        outcome = str(row.get("result_outcome") or "")
+        if not league or outcome not in ("home", "draw", "away"):
+            continue
+        try:
+            pred = json.loads(row.get("prediction_json") or "{}")
+        except json.JSONDecodeError:
+            continue
+        xg_h = float(pred.get("expected_goals_home") or 0)
+        xg_a = float(pred.get("expected_goals_away") or 0)
+        if xg_h <= 0 or xg_a <= 0:
+            continue
+        by_league[league].append((xg_h, xg_a, outcome))
+
+    grid = [round(x, 3) for x in [i / 100.0 for i in range(-20, 6)]]
+    out: Dict[str, Dict[str, Any]] = {}
+    for league, samples in by_league.items():
+        if len(samples) < min_rows:
+            continue
+        best_rho = _env_float("HIBS_DIXON_COLES_RHO", -0.10)
+        best_brier = 1.0
+        for rho in grid:
+            total = 0.0
+            for xg_h, xg_a, outcome in samples:
+                probs = _poisson_1x2_with_rho(xg_h, xg_a, rho)
+                total += _brier_1x2(probs, outcome)
+            mean_b = total / len(samples)
+            if mean_b < best_brier:
+                best_brier = mean_b
+                best_rho = rho
+        out[league] = {"rho": round(best_rho, 4), "brier_rho_fit": round(best_brier, 5), "n": len(samples)}
+    return out
+
+
+def fit_ml_isotonic_global(*, min_rows: int = 40) -> Optional[Dict[str, Any]]:
+    """Fit isotonic calibrators for ML 1X2 head (home/draw/away) from audit snapshots."""
+    rows = _scored_audit_rows()
+    xs: Dict[str, List[float]] = {"home": [], "draw": [], "away": []}
+    ys: Dict[str, List[int]] = {"home": [], "draw": [], "away": []}
+    for row in rows:
+        outcome = str(row.get("result_outcome") or "")
+        if outcome not in xs:
+            continue
+        try:
+            pred = json.loads(row.get("prediction_json") or "{}")
+        except json.JSONDecodeError:
+            continue
+        ml_pct = pred.get("ml_probs_pct") or {}
+        if not isinstance(ml_pct, dict):
+            continue
+        for k in ("home", "draw", "away"):
+            try:
+                p = float(ml_pct.get(k)) / 100.0
+            except (TypeError, ValueError):
+                continue
+            if p <= 0 or p >= 1:
+                continue
+            xs[k].append(p)
+            ys[k].append(1 if outcome == k else 0)
+
+    if sum(len(v) for v in xs.values()) < min_rows:
+        return None
+
+    try:
+        from sklearn.isotonic import IsotonicRegression
+    except ImportError:
+        return None
+
+    global_knots: Dict[str, Dict[str, List[float]]] = {}
+    for k in ("home", "draw", "away"):
+        if len(xs[k]) < max(12, min_rows // 3):
+            continue
+        reg = IsotonicRegression(out_of_bounds="clip", y_min=1e-6, y_max=1.0 - 1e-6)
+        reg.fit(xs[k], ys[k])
+        x_arr = sorted(set(xs[k]))
+        if len(x_arr) < 2:
+            continue
+        y_arr = [float(reg.predict([x])[0]) for x in x_arr]
+        global_knots[k] = {"x": [round(v, 4) for v in x_arr], "y": [round(v, 4) for v in y_arr]}
+
+    if not global_knots:
+        return None
+    return {
+        "method": "isotonic",
+        "global": global_knots,
+        "n_rows": sum(len(xs[k]) for k in xs),
+        "fitted_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def fit_league_shrink_factors(
     *,
     days: int = 90,
@@ -52,20 +212,29 @@ def fit_league_shrink_factors(
     if eligible:
         baseline = sum(float(r["brier"]) * int(r["n"]) for r in eligible) / sum(int(r["n"]) for r in eligible)
 
-    leagues: dict = {}
+    existing = load_calibration_payload()
+    leagues: Dict[str, Any] = dict(existing.get("leagues") or {}) if isinstance(existing.get("leagues"), dict) else {}
+
     for r in rows:
         n = int(r.get("n") or 0)
         if n < min_n or r.get("brier") is None:
             continue
+        lg = str(r["league"]).upper()
         lb = float(r["brier"])
         shrink = shrink_multiplier_from_brier(lb, baseline)
-        leagues[str(r["league"]).upper()] = {
-            "shrink": round(shrink, 4),
-            "brier": round(lb, 5),
-            "n": n,
-        }
+        entry = dict(leagues.get(lg) or {})
+        entry.update({"shrink": round(shrink, 4), "brier": round(lb, 5), "n": n})
+        leagues[lg] = entry
 
-    return {
+    rho_map = fit_league_dixon_coles_rho(min_rows=max(10, min_n // 2))
+    for lg, rho_entry in rho_map.items():
+        entry = dict(leagues.get(lg) or {})
+        entry.update(rho_entry)
+        leagues[lg] = entry
+
+    ml_cal = fit_ml_isotonic_global(min_rows=max(min_n, 40))
+
+    payload: Dict[str, Any] = {
         "ok": True,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "window_days": days,
@@ -73,6 +242,11 @@ def fit_league_shrink_factors(
         "min_rows": min_n,
         "leagues": leagues,
     }
+    if ml_cal:
+        payload["ml_calibration"] = ml_cal
+    elif isinstance(existing.get("ml_calibration"), dict):
+        payload["ml_calibration"] = existing["ml_calibration"]
+    return payload
 
 
 def write_calibration_cache(payload: dict) -> str:
@@ -94,7 +268,12 @@ def main() -> None:
         print(json.dumps(payload, indent=2))
         return
     path = write_calibration_cache(payload)
-    print(f"Wrote {len(payload.get('leagues') or {})} league shrink factor(s) to {path}")
+    n_rho = sum(1 for v in (payload.get("leagues") or {}).values() if isinstance(v, dict) and v.get("rho") is not None)
+    ml = payload.get("ml_calibration")
+    print(
+        f"Wrote {len(payload.get('leagues') or {})} league entries ({n_rho} with ρ) to {path}"
+        + (f"; ML isotonic on {ml.get('n_rows')} rows" if isinstance(ml, dict) else "")
+    )
 
 
 if __name__ == "__main__":

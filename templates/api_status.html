@@ -70,6 +70,11 @@
             <ul id="status-xg-leagues" class="status-impact-list" style="margin-top:10px;"></ul>
         </div>
         <div class="status-section">
+            <h2>Per-league API gaps</h2>
+            <p id="status-api-gaps-headline" class="status-impact-headline">—</p>
+            <table class="data-table status-xg-table" id="status-api-gaps" style="margin-top:8px;font-size:0.78em;width:100%;"></table>
+        </div>
+        <div class="status-section">
             <h2>HTTP APIs</h2>
             <div id="status-apis" class="health-grid"></div>
         </div>
@@ -348,6 +353,32 @@
             var fh = '';
             (d.features || []).forEach(function (f) { fh += featureRowHtml(f); });
             if (fRoot) fRoot.innerHTML = fh || '<div class="health-row"><span class="health-name">No feature rows</span></div>';
+            var gaps = d.league_api_gaps;
+            var gapRows = Array.isArray(gaps) ? gaps : (gaps && gaps.rows ? gaps.rows : []);
+            var gapH = document.getElementById('status-api-gaps-headline');
+            if (gapH) {
+                if (gapRows.length) {
+                    gapH.textContent = 'Share of fixtures missing injuries, topscorers, or lineup context in the current disk bundle.';
+                } else if (gaps && gaps.error) {
+                    gapH.textContent = 'Could not compute gaps: ' + gaps.error;
+                } else {
+                    gapH.textContent = 'No fixture bundle on disk yet — load the dashboard once, then refresh.';
+                }
+            }
+            var gapTbl = document.getElementById('status-api-gaps');
+            if (gapTbl) {
+                var gth = '<tr><th>League</th><th>Fixtures</th><th>No injuries</th><th>No topscorers</th><th>No lineup</th></tr>';
+                var gbody = gapRows.map(function (row) {
+                    return '<tr><td>' + esc(row.league) + '</td><td>' + esc(row.fixtures) + '</td><td>'
+                        + esc(row.missing_injuries_pct) + '%</td><td>' + esc(row.missing_top_scorers_pct)
+                        + '%</td><td>' + esc(row.missing_lineup_pct) + '%</td></tr>';
+                }).join('');
+                gapTbl.innerHTML = gth + (gbody || '<tr><td colspan="5">No rows</td></tr>');
+            }
+            var guard = d.api_sports_guard || {};
+            if (guard.blocked && gapH) {
+                gapH.textContent = (gapH.textContent || '') + ' API guard: ' + esc(guard.block_reason || 'blocked') + '.';
+            }
             var ah = '';
             (d.apis || []).forEach(function (a) { ah += rowHtml(a, okMs, true); });
             var sh = '';

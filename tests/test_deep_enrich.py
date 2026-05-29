@@ -183,10 +183,14 @@ def test_analyze_dq_gaps_lists_weak_xg():
 
 
 def test_maybe_deep_enrich_upgrades_xg(monkeypatch):
+    from datetime import datetime, timezone
+
     monkeypatch.setenv("HIBS_TARGET_DQ_PCT", "90")
+    monkeypatch.delenv("HIBS_DEEP_ENRICH_TODAY_ONLY", raising=False)
+    today = datetime.now(timezone.utc).date().isoformat()
     fixture = {
-        "fixture": {"id": 9001, "date": "2099-01-01T15:00:00+00:00"},
-        "date": "2099-01-01T15:00:00+00:00",
+        "fixture": {"id": 9001, "date": f"{today}T15:00:00+00:00"},
+        "date": f"{today}T15:00:00+00:00",
         "teams": {"home": {"id": 10, "name": "Home"}, "away": {"id": 20, "name": "Away"}},
     }
     enriched = _rich_enriched(

@@ -56,6 +56,20 @@ def test_portfolio_kelly_separate_windows_unscaled():
     assert a["portfolio_window_n"] == 1
 
 
+def test_portfolio_kelly_same_fixture_joint_sqrt_legs():
+    """Two legs on one match: stake / sqrt(2) before window clustering."""
+    fixtures = [
+        _fx(1, "2026-06-01T15:00:00+00:00", {"home": _vb(8.0), "btts_yes": _vb(6.0)}),
+    ]
+    apply_portfolio_kelly(fixtures)
+    h = fixtures[0]["prediction"]["value_bets"]["home"]["kelly"]
+    b = fixtures[0]["prediction"]["value_bets"]["btts_yes"]["kelly"]
+    assert h["portfolio_match_legs"] == 2
+    assert b["portfolio_match_legs"] == 2
+    assert h["suggested_percent"] == round(8.0 / (2**0.5), 1)
+    assert b["suggested_percent"] == round(6.0 / (2**0.5), 1)
+
+
 def test_portfolio_kelly_caps_total_window_stake(monkeypatch):
     monkeypatch.setenv("HIBS_PORTFOLIO_STAKE_CAP_PCT", "10")
     fixtures = [
