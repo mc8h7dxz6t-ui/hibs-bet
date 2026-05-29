@@ -834,3 +834,75 @@ def test_assistant_chat_reuses_bundle_cache(monkeypatch):
     assert r1.status_code == 200
     assert r2.status_code == 200
     assert calls["n"] == 1
+
+
+def test_small_stakes_intent_returns_stake_guidance():
+    from hibs_predictor.assistant_chat import handle_chat
+    from hibs_predictor.assistant_recommendations import build_assistant_recommendations
+
+    pkt = _rich_assistant_packet(
+        league="NORWAY_ELITESERIEN",
+        value_bets_display=[
+            {
+                "market_key": "over_25",
+                "market_label": "Over 2.5",
+                "outcome": "over25",
+                "edge_pct": 6.0,
+                "roi_percent": 8.0,
+                "odds": 1.95,
+                "model_probability_pct": 61.0,
+            }
+        ],
+        pick_menu=[
+            {
+                "key": "over_25",
+                "label": "Over 2.5",
+                "model_pct": 61.0,
+                "odds": 1.95,
+                "is_value": True,
+                "edge_pct": 6.0,
+            }
+        ],
+    )
+    rec = build_assistant_recommendations([pkt])
+    reply = handle_chat("small stakes", [pkt], recommendations=rec)
+    assert reply["intent"] == "small_stakes"
+    blocks = [b for b in reply["blocks"] if b.get("type") == "small_stakes"]
+    assert blocks and blocks[0]["items"]
+    leg = blocks[0]["items"][0]
+    assert leg.get("model_pct") == 61.0
+    assert leg.get("stake_pct", 0) > 0
+    assert leg.get("stake_tier") in ("small_stake", "small_stake_validation")
+
+
+def test_friendlies_watch_only_in_small_stakes(monkeypatch):
+    from hibs_predictor.assistant_recommendations import build_small_stake_picks
+
+    monkeypatch.delenv("HIBS_ASSISTANT_STAKE_FRIENDLIES", raising=False)
+    pkt = _rich_assistant_packet(
+        league="INTL_FRIENDLIES",
+        value_bets_display=[
+            {
+                "market_key": "over_25",
+                "market_label": "Over 2.5",
+                "outcome": "over25",
+                "edge_pct": 8.0,
+                "odds": 2.0,
+                "model_probability_pct": 58.0,
+            }
+        ],
+        pick_menu=[
+            {
+                "key": "over_25",
+                "label": "Over 2.5",
+                "model_pct": 58.0,
+                "odds": 2.0,
+                "is_value": True,
+                "edge_pct": 8.0,
+            }
+        ],
+    )
+    out = build_small_stake_picks([pkt])
+    assert out["picks"]
+    assert out["picks"][0]["stake_tier"] == "watch_only"
+    assert out["bettable_count"] == 0

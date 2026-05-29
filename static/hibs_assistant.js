@@ -49,7 +49,7 @@
     }
 
     function welcomeHtml() {
-        return '<div class="hibs-assistant-card"><p class="ac-line">Ask about today\'s full card — leagues, value, live — or build accas (2–10 legs).</p><p class="ac-line" style="font-size:0.88em;color:var(--muted);">Try <em>btts 10 fold</em>, <em>best 3 btts</em>, <em>best 3 btts win detailed reasoning</em>, <em>live</em>, <em>value bets</em>, or name a fixture for stats / table.</p></div>';
+        return '<div class="hibs-assistant-card"><p class="ac-line">Ask about today\'s full card — leagues, value, live — or build accas (2–10 legs).</p><p class="ac-line" style="font-size:0.88em;color:var(--muted);">Try <em>small stakes</em>, <em>what to bet</em>, <em>btts 10 fold</em>, <em>value bets</em>, <em>live</em>, or name a fixture for stats / table.</p></div>';
     }
 
     function setBusy(on) {
@@ -165,6 +165,13 @@
             appendBot('<p class="ac-line"><strong>Best singles</strong></p>');
             (block.items || []).forEach(function (leg) {
                 appendBot(singleCardHtml(leg));
+            });
+            return;
+        }
+        if (t === 'small_stakes') {
+            appendBot('<p class="ac-line"><strong>Small-stake value picks</strong> — model % vs line + suggested bankroll %</p>');
+            (block.items || []).forEach(function (leg) {
+                appendBot(smallStakeCardHtml(leg));
             });
             return;
         }
@@ -406,6 +413,41 @@
             h += '<p class="ac-line" style="font-size:0.84em;">Data <span class="fr-dq fr-dq-compact ' + dqBadgeClass(leg.data_quality_pct) + '">' + leg.data_quality_pct + '%</span></p>';
         }
         h += '<p class="ac-line" style="margin-top:6px;">' + addToSlipButtonHtml(leg) + '</p>';
+        h += '</div>';
+        return h;
+    }
+
+    function smallStakeCardHtml(leg) {
+        var h = '<div class="hibs-assistant-card hibs-leg-card">';
+        h += '<p class="ac-line"><strong>' + esc(leg.match || (leg.home + ' v ' + leg.away)) + '</strong>';
+        if (leg.kickoff_time) h += ' · ' + esc(leg.kickoff_time);
+        if (leg.league) h += ' · <span style="color:var(--muted);">' + esc(leg.league) + '</span>';
+        h += '</p>';
+        h += '<p class="ac-line"><strong>' + esc(leg.market_label || leg.market_key) + '</strong>';
+        if (leg.odds) h += ' @ ' + oddsHtml(leg.odds);
+        h += '</p>';
+        if (leg.model_pct != null) {
+            h += '<p class="ac-line">Model <strong style="color:var(--neon);">' + leg.model_pct + '%</strong>';
+            if (leg.implied_pct != null) h += ' · line implied <strong>' + leg.implied_pct + '%</strong>';
+            h += '</p>';
+        }
+        if (leg.edge_pct != null) {
+            h += '<p class="ac-line" style="color:var(--gold);">Edge +' + leg.edge_pct + '%</p>';
+        }
+        if (leg.stake_tier === 'watch_only') {
+            h += '<p class="ac-line" style="color:#fde68a;"><strong>Watch only</strong> — not for real stakes</p>';
+        } else if (leg.stake_pct != null && leg.stake_pct > 0) {
+            h += '<p class="ac-line"><strong>Small stake:</strong> ~<span style="color:var(--gold);">' + leg.stake_pct + '%</span> of bankroll';
+            if (leg.stake_example_per_100) h += ' (' + esc(leg.stake_example_per_100) + ' per £100)';
+            h += ' · ' + esc(leg.stake_label || 'Cautious') + '</p>';
+        }
+        if (leg.stake_note) {
+            h += '<p class="ac-line" style="font-size:0.84em;color:var(--muted);">' + esc(leg.stake_note) + '</p>';
+        }
+        h += rationaleListHtml(leg.rationale);
+        if (leg.stake_tier !== 'watch_only' && leg.stake_pct > 0) {
+            h += '<p class="ac-line" style="margin-top:6px;">' + addToSlipButtonHtml(leg) + '</p>';
+        }
         h += '</div>';
         return h;
     }

@@ -31,6 +31,7 @@ from hibs_predictor.assistant_recommendations import (
     build_mixed_market_acca,
     build_multi_leg_btts_acca,
     build_ranked_btts_legs,
+    build_small_stake_picks,
     build_win_btts_combo_suggestions,
     is_analyzable,
 )
@@ -39,6 +40,7 @@ _HELP_LINES = [
     "Today's card — leagues loaded, value flags, live games (same dq gates as the dashboard).",
     "BTTS: btts 10 fold · best 3 btts · best 3 btts win (detailed reasoning)",
     "Accas: best acca · acca tips · suggest legs · BTTS acca · mixed acca · 3-leg safer acca",
+    "Small stakes: small stakes · what to bet · stake picks (value + model % + suggested % bankroll)",
     "Singles & review: value bets · best singles · review acca (on /acca)",
     "One fixture: stats / table / bet builder for Team A v Team B",
 ]
@@ -55,6 +57,7 @@ _CARD_WIDE_INTENTS = frozenset(
         "mixed_acca",
         "acca",
         "best_singles",
+        "small_stakes",
         "btts_acca",
         "multi_leg_btts",
         "win_btts_combo",
@@ -419,6 +422,20 @@ def parse_intent(question: str) -> Tuple[str, Dict[str, Any]]:
         "live" in q and any(x in q for x in ("fixture", "game", "match", "score", "now"))
     ):
         return "live", {}
+    if any(
+        x in q
+        for x in (
+            "small stake",
+            "small stakes",
+            "what to bet",
+            "stake pick",
+            "stake picks",
+            "which value",
+            "which bet",
+            "low stakes",
+        )
+    ):
+        return "small_stakes", {}
     if any(x in q for x in ("value bet", "value scan", "edge", "ev ", "dual agree", "dual finder")):
         return "value", {}
     if any(x in q for x in ("best single", "best bet", "top bet", "best pick", "strongest bet")):
@@ -729,19 +746,50 @@ def handle_chat(
             ]
         return out
 
+    if intent == "small_stakes":
+        stake = rec.get("small_stake_picks") or build_small_stake_picks(packets)
+        lines = list(stake.get("summary_lines") or [])
+        picks = stake.get("picks") or []
+        if not picks:
+            lines.append(
+                "No value legs cleared the bar (need value flag, edge, prices, and analyzable data). "
+                "Try **value bets** for the wider scan."
+            )
+            out["blocks"] = [{"type": "text", "lines": lines}]
+        else:
+            lines.append(
+                f"**{stake.get('bettable_count', 0)}** small-stake candidate(s) "
+                f"(max ~{stake.get('max_stake_pct')}% bankroll per pick in this phase)."
+            )
+            out["blocks"] = [
+                {"type": "text", "lines": lines},
+                {"type": "small_stakes", "items": picks},
+            ]
+        return out
+
     if intent == "value":
         hits = [p for p in packets if p.get("has_value_bet") and is_analyzable(p)]
         dual = [p for p in hits if p.get("has_value_dual_agree")]
+        stake = rec.get("small_stake_picks") or build_small_stake_picks(packets, limit=3)
+        picks = stake.get("picks") or []
         if not hits:
             out["blocks"] = [{"type": "text", "lines": ["No value-flagged fixtures with full model data in this window."]}]
         else:
             intro = [f"**{len(hits)}** value-flagged fixture(s) with full model data."]
             if dual:
                 intro.append(f"**{len(dual)}** with dual-finder agreement (model + consensus).")
-            out["blocks"] = [
+            if picks:
+                intro.append(
+                    f"Top stake ideas: ask **small stakes** for model % vs line + suggested % bankroll "
+                    f"({len(picks)} ranked below)."
+                )
+            blocks: List[Dict[str, Any]] = [
                 {"type": "text", "lines": intro},
                 {"type": "fixtures", "items": hits[:10], "compact": True},
             ]
+            if picks:
+                blocks.append({"type": "small_stakes", "items": picks[:3]})
+            out["blocks"] = blocks
         return out
 
     if intent in ("stats", "analyze", "general", "table"):

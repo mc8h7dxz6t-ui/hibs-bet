@@ -16,6 +16,16 @@ _DISCLAIMER = (
     "Stake conservatively; 18+ gamble responsibly."
 )
 
+_STAKE_FRIENDLIES = frozenset({"INTL_FRIENDLIES"})
+_STAKE_SCALE_LEAGUES = frozenset(
+    {
+        "WORLD_CUP",
+        "NORWAY_ELITESERIEN",
+        "FINLAND_VEIKKAUSLIIGA",
+        "DENMARK_SL",
+    }
+)
+
 _ACCA_MARKET_KEYS = {
     "btts": frozenset({"btts_yes"}),
     "btts_no": frozenset({"btts_no"}),
@@ -47,6 +57,207 @@ def assistant_min_data_pct() -> float:
 
 def assistant_min_form_matches() -> int:
     return max(2, _env_int("HIBS_ASSISTANT_MIN_FORM_MATCHES", 3))
+
+
+def assistant_min_value_edge_pct() -> float:
+    return _env_float("HIBS_ASSISTANT_MIN_VALUE_EDGE_PCT", 4.0)
+
+
+def assistant_stake_kelly_fraction() -> float:
+    """Fractional Kelly for small-stake guidance (default 12% of full Kelly)."""
+    return max(0.05, min(0.5, _env_float("HIBS_ASSISTANT_STAKE_KELLY_FRAC", 0.12)))
+
+
+def assistant_max_stake_pct() -> float:
+    return max(0.25, min(10.0, _env_float("HIBS_ASSISTANT_MAX_STAKE_PCT", 2.5)))
+
+
+def assistant_pre_proof_max_stake_pct() -> float:
+    """Cap per-bet % until scale proof metrics pass (Brier + CLV on /tracker)."""
+    return max(0.25, min(assistant_max_stake_pct(), _env_float("HIBS_ASSISTANT_PRE_PROOF_MAX_STAKE_PCT", 1.5)))
+
+
+def assistant_stake_friendlies_enabled() -> bool:
+    return (os.getenv("HIBS_ASSISTANT_STAKE_FRIENDLIES") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _league_stake_cohort(league_code: Optional[str]) -> str:
+    lc = (league_code or "").strip().upper()
+    if lc in _STAKE_FRIENDLIES:
+        return "friendlies"
+    if lc in _STAKE_SCALE_LEAGUES:
+        return "scale"
+    if lc and lc not in ("UNKNOWN", "SCOTTISH PREMIERSHIP"):
+        return "scale"
+    return "other"
+
+
+def _implied_pct_from_odds(odds: Any) -> Optional[float]:
+    try:
+        o = float(odds)
+    except (TypeError, ValueError):
+        return None
+    if o <= 1.0:
+        return None
+    return round(100.0 / o, 1)
+
+
+def _attach_stake_guidance(leg: Dict[str, Any], *, scale_proof_pass: bool) -> Dict[str, Any]:
+    """Kelly-based small stake % + watch-only flags for friendlies / validation phase."""
+    from hibs_predictor.betting_engine import OddsAnalyzer
+
+    cohort = _league_stake_cohort(str(leg.get("league") or ""))
+    out = dict(leg)
+    out["stake_cohort"] = cohort
+    mp = leg.get("model_pct")
+    odds = leg.get("odds")
+    implied = _implied_pct_from_odds(odds)
+    if implied is not None:
+        out["implied_pct"] = implied
+
+    if cohort == "friendlies" and not assistant_stake_friendlies_enabled():
+        out["stake_tier"] = "watch_only"
+        out["stake_pct"] = 0.0
+        out["stake_label"] = "Watch only"
+        out["stake_note"] = (
+            "International friendlies: high rotation — paper-track or skip real stakes "
+            "(enable HIBS_ASSISTANT_STAKE_FRIENDLIES=1 to include in stake list)."
+        )
+        return out
+
+    if mp is None or odds is None:
+        out["stake_tier"] = "no_price"
+        out["stake_pct"] = 0.0
+        out["stake_label"] = "No stake"
+        out["stake_note"] = "Missing model % or book price."
+        return out
+
+    try:
+        win_p = float(mp) / 100.0
+        o = float(odds)
+    except (TypeError, ValueError):
+        out["stake_tier"] = "no_price"
+        out["stake_pct"] = 0.0
+        out["stake_label"] = "No stake"
+        return out
+
+    kelly = OddsAnalyzer.kelly_criterion(win_p, o, fraction=assistant_stake_kelly_fraction())
+    raw_pct = float(kelly.get("suggested_percent") or 0)
+    cap = assistant_max_stake_pct()
+    if not scale_proof_pass:
+        cap = min(cap, assistant_pre_proof_max_stake_pct())
+    stake_pct = round(min(cap, max(0.0, raw_pct)), 2)
+    out["stake_pct"] = stake_pct
+    out["stake_label"] = str(kelly.get("confidence_label") or "Cautious")
+    out["stake_example_per_100"] = kelly.get("example_stake")
+    if stake_pct <= 0:
+        out["stake_tier"] = "skip"
+        out["stake_note"] = "No positive Kelly edge at these odds — do not bet."
+    elif not scale_proof_pass:
+        out["stake_tier"] = "small_stake_validation"
+        out["stake_note"] = (
+            f"Validation phase: cap ~{stake_pct}% of bankroll per £100 until "
+            "/tracker scale proof passes (Brier < baseline, CLV beat-close > 60%)."
+        )
+    else:
+        out["stake_tier"] = "small_stake"
+        out["stake_note"] = (
+            f"Small stake: ~{stake_pct}% of bankroll "
+            f"(fractional Kelly {assistant_stake_kelly_fraction():.0%}, max {cap}%)."
+        )
+    return out
+
+
+def _staking_phase_summary() -> Dict[str, Any]:
+    try:
+        from hibs_predictor.performance_tracker import build_proof_metrics_dict
+
+        proof = build_proof_metrics_dict()
+    except Exception:
+        proof = {}
+    scale_ready = bool(proof.get("proof_pass"))
+    lines = [
+        "I only suggest **small stakes** on **value** legs with full model + book prices.",
+        "Friendlies are **watch-only** unless you enable friendly stakes in env.",
+    ]
+    if scale_ready:
+        lines.append("Scale proof on /tracker is **passing** — still use small fractional Kelly, not max stakes.")
+    else:
+        msg = proof.get("message") or "Keep stakes minimal while the audit sample builds on /tracker."
+        lines.append(f"**Validation phase:** {msg}")
+    return {
+        "scale_proof_pass": scale_ready,
+        "proof_metrics": proof,
+        "summary_lines": lines,
+    }
+
+
+def build_small_stake_picks(
+    packets: List[Dict[str, Any]],
+    *,
+    limit: int = 5,
+) -> Dict[str, Any]:
+    """
+    Ranked value singles with model %, implied %, edge, and fractional-Kelly stake %.
+
+    Used by the assistant for “small stakes” / “what to bet” intents.
+    """
+    limit = max(1, min(12, int(limit)))
+    phase = _staking_phase_summary()
+    scale_proof_pass = bool(phase.get("scale_proof_pass"))
+    min_edge = assistant_min_value_edge_pct()
+    candidates: List[Dict[str, Any]] = []
+
+    for pkt in packets:
+        if not is_analyzable(pkt):
+            continue
+        leg = _value_leg_from_display(pkt)
+        if not leg:
+            for item in pkt.get("pick_menu") or []:
+                if not item.get("is_value"):
+                    continue
+                key = str(item.get("key") or "")
+                mp_item = item.get("model_pct")
+                if mp_item is not None and float(mp_item) < _min_model_pct_for_key(key):
+                    continue
+                leg = _leg_from_menu_item(pkt, item)
+                leg["is_value"] = True
+                break
+        if not leg or not leg.get("is_value"):
+            continue
+        try:
+            edge = float(leg.get("edge_pct") or 0)
+        except (TypeError, ValueError):
+            edge = 0.0
+        if edge < min_edge:
+            continue
+        leg = enrich_leg_with_packet_facts(dict(leg), pkt)
+        leg["match"] = _match_label(pkt)
+        leg["rationale"] = build_detailed_leg_rationale(pkt, leg, max_bullets=4)
+        leg = _attach_stake_guidance(leg, scale_proof_pass=scale_proof_pass)
+        if leg.get("stake_tier") == "skip":
+            continue
+        candidates.append(leg)
+
+    candidates.sort(key=lambda x: (-float(x.get("score") or 0), -float(x.get("edge_pct") or 0)))
+    picks = candidates[:limit]
+    bettable = [p for p in picks if p.get("stake_tier") in ("small_stake", "small_stake_validation")]
+
+    return {
+        "scale_proof_pass": scale_proof_pass,
+        "summary_lines": phase.get("summary_lines") or [],
+        "picks": picks,
+        "bettable_count": len(bettable),
+        "min_edge_pct": min_edge,
+        "max_stake_pct": assistant_pre_proof_max_stake_pct()
+        if not scale_proof_pass
+        else assistant_max_stake_pct(),
+    }
 
 
 def _exclusion_reason(packet: Dict[str, Any]) -> Optional[str]:
@@ -1026,5 +1237,6 @@ def build_assistant_recommendations(packets: List[Dict[str, Any]]) -> Dict[str, 
         "acca_suggestions": acca_suggestions,
         "bet_builder_suggestions": bet_builders,
         "market_highlights": _market_highlights(packets),
+        "small_stake_picks": build_small_stake_picks(packets),
         "disclaimer": _DISCLAIMER,
     }
