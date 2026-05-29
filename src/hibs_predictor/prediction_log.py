@@ -1500,6 +1500,7 @@ def report_summary_dict() -> Dict[str, Any]:
             "brier_by_data_quality_bucket": brier_by_data_quality_bucket(),
             "clv_by_league": clv_beat_close_by_league(),
             "brier_by_league": brier_by_league(),
+            "scale_readiness": scale_readiness_dict(),
         }
 
     brier_sum = 0.0
@@ -1568,7 +1569,181 @@ def report_summary_dict() -> Dict[str, Any]:
         out["value_hit_rate"] = round(100.0 * value_wins / value_settled, 2)
     out["clv_by_league"] = clv_beat_close_by_league()
     out["brier_by_league"] = brier_by_league()
+    out["scale_readiness"] = scale_readiness_dict()
     return out
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _league_cohort(league_code: str) -> str:
+    """Split audit metrics: friendlies vs staking-scale (domestic / Nordics / WC — never pooled)."""
+    lc = (league_code or "").strip().upper()
+    if lc == "INTL_FRIENDLIES":
+        return "friendlies"
+    if lc in ("WORLD_CUP", "NORWAY_ELITESERIEN", "FINLAND_VEIKKAUSLIIGA", "DENMARK_SL"):
+        return "scale"
+    if lc and lc not in ("UNKNOWN", "SCOTTISH PREMIERSHIP"):
+        return "scale"
+    return "other"
+
+
+def scale_readiness_dict() -> Dict[str, Any]:
+    """
+    Staking-scale gate: Brier vs baseline and CLV beat-close on value-flagged picks.
+
+    Friendlies are reported separately and never mixed into ``scale`` aggregates.
+    """
+    baseline = _env_float("HIBS_CALIB_BASELINE_BRIER", 0.66)
+    min_n = max(5, int(_env_float("HIBS_SCALE_READY_MIN_N", 25)))
+    min_clv_pct = _env_float("HIBS_SCALE_READY_CLV_PCT", 55.0)
+    empty: Dict[str, Any] = {
+        "baseline_brier": baseline,
+        "min_scored_n": min_n,
+        "min_clv_beat_pct": min_clv_pct,
+        "scale_ready": False,
+        "cohorts": {},
+        "message": "No scored rows yet — run pred-log-sync after matches finish.",
+    }
+    if not os.path.isfile(_db_path()):
+        empty["message"] = "No audit database yet."
+        return empty
+    init_db()
+    conn = sqlite3.connect(_db_path(), timeout=20)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT league_code, prediction_json, result_outcome, enrich_summary_json
+            FROM prediction_snapshots
+            WHERE result_outcome IS NOT NULL AND result_outcome != ''
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        return empty
+
+    cohorts: Dict[str, Dict[str, Any]] = {
+        "scale": {"label": "Domestic / Nordics / WC (staking scale)", "n_brier": 0, "brier_sum": 0.0, "clv_n": 0, "clv_beat": 0},
+        "friendlies": {"label": "International friendlies (audit only)", "n_brier": 0, "brier_sum": 0.0, "clv_n": 0, "clv_beat": 0},
+        "other": {"label": "Other / legacy rows", "n_brier": 0, "brier_sum": 0.0, "clv_n": 0, "clv_beat": 0},
+    }
+    by_league: Dict[str, Dict[str, Any]] = {}
+
+    for r in rows:
+        lg = str(r["league_code"] or "unknown")
+        cohort = _league_cohort(lg)
+        bucket = cohorts[cohort]
+        lg_bucket = by_league.setdefault(
+            lg,
+            {"league": lg, "cohort": cohort, "n_brier": 0, "brier_sum": 0.0, "clv_n": 0, "clv_beat": 0},
+        )
+        try:
+            pred = json.loads(r["prediction_json"])
+        except Exception:
+            continue
+        probs = pred.get("probabilities") or {}
+        ph = _safe_prob(probs.get("home"))
+        pd = _safe_prob(probs.get("draw"))
+        pa = _safe_prob(probs.get("away"))
+        out = (r["result_outcome"] or "").lower()
+        if out not in ("home", "draw", "away"):
+            continue
+        yh, yd, ya = (1.0, 0.0, 0.0) if out == "home" else ((0.0, 1.0, 0.0) if out == "draw" else (0.0, 0.0, 1.0))
+        brier = (ph - yh) ** 2 + (pd - yd) ** 2 + (pa - ya) ** 2
+        bucket["n_brier"] += 1
+        bucket["brier_sum"] += brier
+        lg_bucket["n_brier"] += 1
+        lg_bucket["brier_sum"] += brier
+
+        if not _value_pick_snapshot(pred):
+            continue
+        try:
+            enrich = json.loads(r["enrich_summary_json"] or "")
+        except Exception:
+            enrich = {}
+        clv = enrich.get("clv") if isinstance(enrich, dict) else None
+        if not isinstance(clv, dict) or clv.get("clv_pp") is None:
+            continue
+        try:
+            pp_f = float(clv["clv_pp"])
+        except (TypeError, ValueError):
+            continue
+        bucket["clv_n"] += 1
+        lg_bucket["clv_n"] += 1
+        if pp_f > 0:
+            bucket["clv_beat"] += 1
+            lg_bucket["clv_beat"] += 1
+
+    out_cohorts: Dict[str, Any] = {}
+    for key, b in cohorts.items():
+        nb = int(b["n_brier"])
+        cn = int(b["clv_n"])
+        row: Dict[str, Any] = {
+            "label": b["label"],
+            "n_scored": nb,
+            "brier_score_1x2": round(b["brier_sum"] / nb, 5) if nb else None,
+            "brier_vs_baseline": round((b["brier_sum"] / nb) - baseline, 5) if nb else None,
+            "beats_baseline": bool(nb and (b["brier_sum"] / nb) < baseline),
+        }
+        if cn:
+            row["value_clv_n"] = cn
+            row["value_beat_close_pct"] = round(100.0 * b["clv_beat"] / cn, 2)
+            row["clv_gate_ok"] = row["value_beat_close_pct"] >= min_clv_pct
+        else:
+            row["value_clv_n"] = 0
+            row["value_beat_close_pct"] = None
+            row["clv_gate_ok"] = False
+        out_cohorts[key] = row
+
+    league_rows: List[Dict[str, Any]] = []
+    for lg, b in sorted(by_league.items(), key=lambda x: -x[1]["n_brier"]):
+        nb = int(b["n_brier"])
+        cn = int(b["clv_n"])
+        league_rows.append(
+            {
+                "league": lg,
+                "cohort": b["cohort"],
+                "n_scored": nb,
+                "brier": round(b["brier_sum"] / nb, 5) if nb else None,
+                "value_clv_n": cn,
+                "value_beat_close_pct": round(100.0 * b["clv_beat"] / cn, 2) if cn else None,
+            }
+        )
+
+    scale = out_cohorts.get("scale") or {}
+    n_scale = int(scale.get("n_scored") or 0)
+    brier_ok = bool(scale.get("beats_baseline"))
+    clv_ok = bool(scale.get("clv_gate_ok"))
+    scale_ready = n_scale >= min_n and brier_ok and clv_ok
+    parts: List[str] = []
+    if n_scale < min_n:
+        parts.append(f"Need {min_n - n_scale} more scored scale-cohort fixtures (have {n_scale}).")
+    elif not brier_ok:
+        parts.append(
+            f"Brier {scale.get('brier_score_1x2')} not below baseline {baseline} on scale cohort."
+        )
+    elif not clv_ok:
+        parts.append(
+            f"Value CLV beat-close {scale.get('value_beat_close_pct')}% below {min_clv_pct}% target."
+        )
+    else:
+        parts.append("Scale gates passed on domestic/Nordics/WC — friendlies excluded.")
+
+    return {
+        "baseline_brier": baseline,
+        "min_scored_n": min_n,
+        "min_clv_beat_pct": min_clv_pct,
+        "scale_ready": scale_ready,
+        "cohorts": out_cohorts,
+        "by_league": league_rows,
+        "message": " ".join(parts) if parts else "Insufficient data.",
+    }
 
 
 def brier_by_league() -> List[Dict[str, Any]]:

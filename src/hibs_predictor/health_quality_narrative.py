@@ -142,11 +142,13 @@ def _audit_ops_summary() -> Dict[str, Any]:
             clv_beat_close_by_league,
             monitor_summary_dict,
             pred_log_sync_cron_status,
+            scale_readiness_dict,
         )
 
         out["prediction_log_enabled"] = prediction_audit_enabled()
         out["clv_log_enabled"] = _clv_enabled()
         out["clv_by_league"] = clv_beat_close_by_league()
+        out["scale_readiness"] = scale_readiness_dict()
         out["monitor"] = monitor_summary_dict()
         out["pred_log_sync_cron"] = pred_log_sync_cron_status()
     except Exception as exc:
@@ -291,6 +293,11 @@ def augment_health_for_ui(health: Dict[str, Any]) -> Dict[str, Any]:
             f"Model monitor ({mon.get('window_days', '?')}d): {mon['n_scored']} scored, "
             f"Brier {mon['brier_score_1x2']}, best-pick accuracy {mon.get('best_pick_accuracy_pct', '?')}% "
             "(see Insights or /api/monitor/summary)."
+        )
+    scale = out["audit_ops"].get("scale_readiness") or {}
+    if scale.get("cohorts"):
+        bullets.append(
+            f"Scale readiness: {'READY' if scale.get('scale_ready') else 'not yet'} — {scale.get('message', '')}"
         )
 
     out["apis"] = apis

@@ -15,6 +15,7 @@ from hibs_predictor.prediction_log import (
     monitor_today_dict,
     monitor_yesterday_dict,
     report_summary_dict,
+    scale_readiness_dict,
 )
 
 
@@ -585,3 +586,41 @@ def test_run_pred_log_sync_for_web_no_snapshots(monkeypatch, audit_db):
     assert out["ok"] is False
     assert out["enabled"] is True
     assert "snapshots" in (out.get("message") or "").lower()
+
+
+def test_scale_readiness_separates_friendlies_from_scale_cohort(audit_db, monkeypatch):
+    monkeypatch.setenv("HIBS_SCALE_READY_MIN_N", "2")
+    now = datetime.now(timezone.utc).isoformat()
+    rec = now
+    conn = sqlite3.connect(str(audit_db))
+    try:
+        for i, league in enumerate(("WORLD_CUP", "INTL_FRIENDLIES")):
+            _insert_row(
+                conn,
+                captured_at=now,
+                league=league,
+                outcome="home",
+                predicted="home",
+                probs={"home": 0.5, "draw": 0.25, "away": 0.25},
+                clv_pp=2.0 if league == "WORLD_CUP" else -1.0,
+                result_recorded_at=rec,
+                result_home=2,
+                result_away=1,
+                result_status="FT",
+                fixture_id=9000 + i,
+                pred_extra={
+                    "has_any_value": True,
+                    "best_bet": "home",
+                    "value_bets": {"home": {"roi_percent": 5.0}},
+                },
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    scale = scale_readiness_dict()
+    assert scale["cohorts"]["friendlies"]["n_scored"] == 1
+    assert scale["cohorts"]["scale"]["n_scored"] == 1
+    assert scale["scale_ready"] is False
+    rep = report_summary_dict()
+    assert "scale_readiness" in rep
