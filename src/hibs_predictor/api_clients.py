@@ -234,6 +234,25 @@ def football_data_requests_allowed() -> bool:
     return RateLimiter().block_reason("football_data_org") is None
 
 
+def football_data_record_request() -> None:
+    """Count one Football-Data.org HTTP call against the shared minute/hour guards."""
+    RateLimiter().record_request("football_data_org")
+
+
+def football_data_trip_minute_guard() -> None:
+    """Fill local minute guard after provider 429 (health probe and client paths)."""
+    limiter = RateLimiter()
+    limit = limiter.minute_limits.get("football_data_org", 0)
+    if limit <= 0:
+        return
+    entry = limiter._ensure_entry_shape("football_data_org")
+    entry["minute_count"] = int(limit)
+    entry["minute_reset_at"] = (
+        __import__("datetime").datetime.now() + __import__("datetime").timedelta(minutes=1)
+    ).isoformat()
+    limiter._save_state()
+
+
 def football_data_team_matches_enabled() -> bool:
     """Per-team /teams/{id}/matches is expensive on free tier — off by default."""
     return (os.getenv("HIBS_FOOTBALL_DATA_TEAM_MATCHES") or "").strip().lower() in ("1", "true", "yes", "on")

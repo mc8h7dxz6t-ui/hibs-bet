@@ -136,7 +136,11 @@ def gather_health() -> Dict[str, Any]:
             )
         else:
             try:
-                from hibs_predictor.api_clients import football_data_requests_allowed
+                from hibs_predictor.api_clients import (
+                    football_data_record_request,
+                    football_data_requests_allowed,
+                    football_data_trip_minute_guard,
+                )
 
                 if not football_data_requests_allowed():
                     apis.append(
@@ -168,9 +172,10 @@ def gather_health() -> Dict[str, Any]:
                     )
                     try:
                         from hibs_predictor.cache import Cache
-                        from hibs_predictor.rate_limiter import RateLimiter
 
-                        RateLimiter().record_request("football_data_org")
+                        football_data_record_request()
+                        if r.status_code == 429:
+                            football_data_trip_minute_guard()
                         Cache().set(
                             "health_probe_football_data_org",
                             {"ok": ok, "error": err},

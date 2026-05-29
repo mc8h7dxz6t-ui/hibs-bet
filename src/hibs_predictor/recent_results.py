@@ -426,6 +426,10 @@ def fetch_league_recent_results(
     def try_football_data() -> None:
         if "football_data_org" not in aggregator.clients:
             return
+        from hibs_predictor.api_clients import football_data_requests_allowed
+
+        if not football_data_requests_allowed():
+            return
         comp = league.get("football_data_org_id")
         if not comp:
             return
