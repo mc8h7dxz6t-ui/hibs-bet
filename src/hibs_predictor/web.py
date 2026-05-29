@@ -2207,6 +2207,14 @@ def _finalize_fixture_bundle(
         apply_portfolio_kelly(all_fixtures)
     except Exception as exc:
         print(f"[Portfolio Kelly] {exc!r}")
+    try:
+        from hibs_predictor.prediction_log import log_predictions_from_fixtures
+
+        n_logged = log_predictions_from_fixtures(all_fixtures)
+        if n_logged:
+            print(f"[Prediction log] auto-logged {n_logged} snapshot(s)")
+    except Exception as exc:
+        print(f"[Prediction log] {exc!r}")
     _ensure_fixture_pick_menus(all_fixtures)
     all_fixtures.sort(key=lambda x: x.get("kickoff_sort") or x.get("date") or "")
     league_tables = _build_league_tables(all_fixtures, include_live=False, include_domestic=include_domestic)

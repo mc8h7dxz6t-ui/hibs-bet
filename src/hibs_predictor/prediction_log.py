@@ -1,7 +1,9 @@
 """
 Persistent prediction audit trail + post-match result join for calibration / ROI analysis.
 
-Enable with HIBS_PREDICTION_LOG_ENABLED=1. Optional CLV: HIBS_CLV_LOG_ENABLED=1 stores opening
+Enabled by default (set HIBS_PREDICTION_LOG_ENABLED=0 to disable). After each fixture bundle
+build, log_predictions_from_fixtures runs when HIBS_PREDICTION_LOG_ALWAYS=1 (default on).
+CLV: HIBS_CLV_LOG_ENABLED=1 (default when log on) stores opening
 1X2 + best-bet odds at capture; pred-log-sync joins closing 1X2 from API-Football fixture odds
 when available and computes clv_pp (stake implied vs close, percentage points).
 All logging is best-effort and must never break predictions.
@@ -29,7 +31,21 @@ def _db_path() -> str:
 
 def _enabled() -> bool:
     load_dotenv()
-    return os.getenv("HIBS_PREDICTION_LOG_ENABLED", "0").lower() in ("1", "true", "yes")
+    raw = (os.getenv("HIBS_PREDICTION_LOG_ENABLED") or "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def _always_log() -> bool:
+    """When on, bundle finalization logs every fixture prediction (see min interval)."""
+    load_dotenv()
+    return (os.getenv("HIBS_PREDICTION_LOG_ALWAYS") or "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _auto_log_max_fixtures() -> int:
+    try:
+        return max(1, int(os.getenv("HIBS_PREDICTION_LOG_AUTO_MAX", "500")))
+    except ValueError:
+        return 500
 
 
 def prediction_log_enabled() -> bool:
@@ -39,7 +55,10 @@ def prediction_log_enabled() -> bool:
 
 def _clv_enabled() -> bool:
     load_dotenv()
-    return os.getenv("HIBS_CLV_LOG_ENABLED", "0").lower() in ("1", "true", "yes")
+    if not _enabled():
+        return False
+    raw = (os.getenv("HIBS_CLV_LOG_ENABLED") or "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
 
 
 def _min_interval_sec() -> int:
@@ -830,6 +849,43 @@ def _rows_result_recorded_in_day(
         seen.add(fid)
         out.append(r)
     return out
+
+
+def log_predictions_from_fixtures(
+    fixtures: List[Dict[str, Any]],
+    *,
+    max_rows: Optional[int] = None,
+) -> int:
+    """
+    Automated audit logging after each fixture bundle build.
+
+    With HIBS_PREDICTION_LOG_ALWAYS=1 (default): log every row with a prediction, respecting
+    HIBS_PREDICTION_LOG_MIN_INTERVAL_SEC per fixture (0 = new row on every bundle pass).
+    Otherwise only backfill fixtures missing any snapshot row.
+    """
+    if not _enabled() or not fixtures:
+        return 0
+    cap = max_rows if max_rows is not None else _auto_log_max_fixtures()
+    if not _always_log():
+        return backfill_snapshots_from_fixtures(fixtures, max_rows=min(cap, 80))
+
+    logged = 0
+    force_each_pass = _min_interval_sec() <= 0
+    for fixture in fixtures:
+        if logged >= cap:
+            break
+        pred = fixture.get("prediction")
+        if not isinstance(pred, dict) or pred.get("prediction_unavailable"):
+            continue
+        if not _fixture_id(fixture):
+            continue
+        maybe_log_prediction_snapshot(
+            fixture,
+            pred,
+            skip_interval=force_each_pass,
+        )
+        logged += 1
+    return logged
 
 
 def backfill_snapshots_from_fixtures(
