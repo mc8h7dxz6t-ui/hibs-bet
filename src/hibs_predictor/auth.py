@@ -41,6 +41,12 @@ def public_health_enabled() -> bool:
     return _env_truthy("HIBS_AUTH_PUBLIC_HEALTH")
 
 
+def public_tracker_enabled() -> bool:
+    """Allow read-only /tracker without login when auth is on."""
+    raw = (os.getenv("HIBS_PUBLIC_TRACKER") or "1").strip().lower()
+    return raw not in ("0", "false", "no", "off", "disabled")
+
+
 def configured_username() -> str:
     return (os.getenv("HIBS_AUTH_USERNAME") or DEFAULT_USERNAME).strip() or DEFAULT_USERNAME
 
@@ -122,13 +128,20 @@ def init_app(app: Flask) -> None:
     app.config.setdefault("SESSION_COOKIE_SAMESITE", "Lax")
 
 
-def login_required(view: Optional[F] = None, *, allow_public_health: bool = False) -> Any:
+def login_required(
+    view: Optional[F] = None,
+    *,
+    allow_public_health: bool = False,
+    allow_public_tracker: bool = False,
+) -> Any:
     def decorator(f: F) -> F:
         @wraps(f)
         def wrapped(*args: Any, **kwargs: Any):
             if not auth_enabled():
                 return f(*args, **kwargs)
             if allow_public_health and public_health_enabled():
+                return f(*args, **kwargs)
+            if allow_public_tracker and public_tracker_enabled():
                 return f(*args, **kwargs)
             if is_logged_in():
                 return f(*args, **kwargs)

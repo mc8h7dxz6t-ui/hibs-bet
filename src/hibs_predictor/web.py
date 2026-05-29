@@ -3442,6 +3442,69 @@ def api_acca_recommendations():
     return jsonify(build_acca_recommendations(packets))
 
 
+@app.route("/tracker")
+@login_required(allow_public_tracker=True)
+def public_tracker_page():
+    """Public read-only locked predictions + settlement ledger."""
+    from hibs_predictor.auth import public_tracker_enabled
+    from hibs_predictor.performance_tracker import build_public_tracker_dict
+
+    if auth_enabled() and not public_tracker_enabled():
+        abort(404)
+    try:
+        history_days = max(7, min(365, int(request.args.get("days", "90"))))
+    except ValueError:
+        history_days = 90
+    tracker = build_public_tracker_dict(history_days=history_days)
+    resp = make_response(
+        render_template(
+            "performance_tracker.html",
+            tracker=tracker,
+            display_tz_label=display_tz_label(),
+        )
+    )
+    resp.headers["Cache-Control"] = "public, max-age=120"
+    return resp
+
+
+@app.route("/api/tracker")
+@login_required(allow_public_tracker=True)
+def api_public_tracker():
+    from hibs_predictor.auth import public_tracker_enabled
+    from hibs_predictor.performance_tracker import build_public_tracker_dict
+
+    if auth_enabled() and not public_tracker_enabled():
+        abort(404)
+    try:
+        history_days = max(7, min(365, int(request.args.get("days", "90"))))
+    except ValueError:
+        history_days = 90
+    payload = build_public_tracker_dict(history_days=history_days)
+    resp = jsonify(payload)
+    resp.headers["Cache-Control"] = "public, max-age=120"
+    return resp
+
+
+@app.route("/api/tracker/export.csv")
+@login_required(allow_public_tracker=True)
+def api_public_tracker_csv():
+    from hibs_predictor.auth import public_tracker_enabled
+    from hibs_predictor.performance_tracker import export_ledger_csv
+
+    if auth_enabled() and not public_tracker_enabled():
+        abort(404)
+    try:
+        days = max(7, min(365, int(request.args.get("days", "365"))))
+    except ValueError:
+        days = 365
+    body = export_ledger_csv(days=days)
+    resp = make_response(body)
+    resp.headers["Content-Type"] = "text/csv; charset=utf-8"
+    resp.headers["Content-Disposition"] = 'attachment; filename="hibs-bet-tracker.csv"'
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
+
+
 @app.route("/performance")
 @login_required
 def performance_page():

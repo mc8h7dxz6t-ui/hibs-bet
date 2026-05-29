@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Performance Tracker · hibs-bet{% endblock %}
+{% block content %}
+<style>
+.trk-page{max-width:1140px;margin:0 auto;position:relative;z-index:1;}
+.trk-hero{margin-bottom:18px;padding:18px 20px;border:1px solid rgba(0,122,51,0.35);border-radius:var(--radius-lg);background:linear-gradient(118deg,rgba(0,122,51,0.22) 0%,rgba(10,32,22,0.92) 50%,rgba(6,14,24,0.96) 100%);}
+.trk-hero h1{font-family:'Orbitron',sans-serif;font-size:1.4em;color:var(--hibs-neon);margin-bottom:8px;}
+.trk-badge{display:inline-block;font-size:0.72em;padding:3px 10px;border-radius:999px;border:1px solid rgba(167,243,208,0.35);color:var(--neon-value);margin-right:6px;margin-bottom:6px;}
+.trk-intro{font-size:0.88em;color:var(--muted);line-height:1.55;margin:10px 0;}
+.trk-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-md);padding:16px;margin-bottom:16px;}
+.trk-card h2{font-size:1.05em;margin-bottom:10px;}
+.trk-stats{display:flex;flex-wrap:wrap;gap:12px;margin:12px 0;}
+.trk-stat{flex:1 1 140px;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(0,0,0,0.2);}
+.trk-stat strong{display:block;font-size:1.35em;color:var(--hibs-neon);}
+.trk-stat span{font-size:0.75em;color:var(--muted);}
+.trk-table{width:100%;font-size:0.76em;border-collapse:collapse;}
+.trk-table th,.trk-table td{padding:7px 8px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top;}
+.trk-table th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--slate-800);}
+.trk-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;max-height:70vh;}
+.trk-lock-yes{color:var(--green);}
+.trk-lock-no{color:var(--gold);}
+.trk-win td{background:rgba(0,122,51,0.1);}
+.trk-loss td{background:rgba(220,38,38,0.08);}
+.trk-nav{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}
+.trk-hash{font-family:ui-monospace,monospace;font-size:0.68em;color:var(--muted);word-break:break-all;max-width:120px;}
+.trk-export .nav-btn{margin-right:8px;}
+@media(max-width:767px){.trk-table{min-width:920px;}}
+</style>
+<div class="trk-page">
+    <div class="trk-hero">
+        <div class="trk-nav">
+            <a href="/login" class="nav-btn">Member login</a>
+            <a href="/performance" class="nav-btn">Internal performance</a>
+        </div>
+        <span class="trk-badge">Read-only</span>
+        <span class="trk-badge">Pre-kickoff lock</span>
+        <span class="trk-badge">Cron settlement</span>
+        <h1>Performance Tracker</h1>
+        <p class="trk-intro">
+            Independent verification ledger for hibs-bet. Each row is the <strong>first snapshot logged before kickoff</strong>
+            (fixture id + SHA-256 hash). Full-time results are joined automatically by the daily
+            <code>pred-log-sync</code> job — this page cannot edit predictions or scores.
+        </p>
+        {% if tracker.methodology %}
+        <p class="trk-intro" style="margin-top:8px;">
+            <strong>Lock:</strong> {{ tracker.methodology.lock_rule }}
+            <strong>Settlement:</strong> {{ tracker.methodology.settlement_rule }}
+        </p>
+        {% endif %}
+        <div class="trk-export">
+            <a class="nav-btn" href="/api/tracker/export.csv?days={{ tracker.history_days }}" download>Download CSV (verification)</a>
+            <a class="nav-btn" href="/api/tracker?days={{ tracker.history_days }}">JSON API</a>
+        </div>
+        <p class="trk-intro" style="font-size:0.8em;margin-top:10px;">{{ tracker.third_party_note }}</p>
+    </div>
+
+    {% if not tracker.enabled %}
+    <section class="trk-card">
+        <p>Prediction audit logging is disabled on this server.</p>
+    </section>
+    {% else %}
+
+    <section class="trk-card">
+        <h2>Summary</h2>
+        <div class="trk-stats">
+            <div class="trk-stat"><strong>{{ tracker.ledger_count }}</strong><span>Locked fixtures</span></div>
+            <div class="trk-stat"><strong>{{ tracker.locked_pre_kickoff_count }}</strong><span>Pre-kickoff verified</span></div>
+            <div class="trk-stat"><strong>{{ tracker.settled_count }}</strong><span>FT settled (cron)</span></div>
+            <div class="trk-stat"><strong>{% if tracker.value_hit_rate_pct is not none %}{{ tracker.value_hit_rate_pct }}%{% else %}—{% endif %}</strong><span>Value hit rate (settled)</span></div>
+        </div>
+        {% set scale = tracker.scale_readiness or {} %}
+        {% if scale.get('message') %}
+        <p class="trk-intro"><strong>Scale gate:</strong> {{ 'READY' if scale.scale_ready else 'Not ready' }} — {{ scale.message }}</p>
+        {% endif %}
+        {% if tracker.pred_log_sync_cron %}
+        <p class="trk-intro">Settlement cron: {{ tracker.pred_log_sync_cron.message or 'scheduled' }}</p>
+        {% endif %}
+    </section>
+
+    {% if tracker.audit and tracker.audit.brier_by_league %}
+    <section class="trk-card">
+        <h2>Metrics by league (not pooled)</h2>
+        <table class="trk-table">
+            <thead><tr><th>League</th><th>n</th><th>Brier 1X2</th></tr></thead>
+            <tbody>
+            {% for row in tracker.audit.brier_by_league %}
+            <tr><td>{{ row.league }}</td><td>{{ row.n }}</td><td>{{ row.brier if row.brier is not none else '—' }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </section>
+    {% endif %}
+
+    <section class="trk-card">
+        <h2>Locked prediction ledger ({{ tracker.history_days }} days)</h2>
+        <div class="trk-scroll">
+            <table class="trk-table">
+                <thead>
+                    <tr>
+                        <th>Kickoff (UTC)</th>
+                        <th>Match</th>
+                        <th>League</th>
+                        <th>Lock</th>
+                        <th>Logged (UTC)</th>
+                        <th>DQ%</th>
+                        <th>Model</th>
+                        <th>Value</th>
+                        <th>Score</th>
+                        <th>Res</th>
+                        <th>CLV</th>
+                        <th>Hash</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for row in tracker.ledger %}
+                <tr class="{% if row.value_result == 'W' or row.model_result == 'W' %}trk-win{% elif row.value_result == 'L' or row.model_result == 'L' %}trk-loss{% endif %}">
+                    <td>{{ (row.kickoff_utc or '')[:16] }}</td>
+                    <td>{{ row.match }}</td>
+                    <td>{{ row.league_code }}<br><span style="color:var(--muted)">{{ row.cohort }}</span></td>
+                    <td class="{% if row.locked_pre_kickoff %}trk-lock-yes{% else %}trk-lock-no{% endif %}">
+                        {% if row.locked_pre_kickoff %}✓{% else %}late{% endif %}
+                    </td>
+                    <td>{{ (row.captured_at_utc or '')[:19] }}</td>
+                    <td>{{ row.data_quality_pct }}</td>
+                    <td>{{ row.model_pick or '—' }}{% if row.model_pct %} {{ row.model_pct }}%{% endif %}</td>
+                    <td>{% if row.has_value %}{{ row.value_market or 'value' }}{% if row.value_odds %} @ {{ row.value_odds }}{% endif %}{% else %}—{% endif %}</td>
+                    <td>{{ row.score or '—' }}</td>
+                    <td>{% if row.value_result %}<strong>{{ row.value_result }}</strong>{% elif row.model_result %}{{ row.model_result }}{% else %}pending{% endif %}</td>
+                    <td>{% if row.clv_pp is not none %}{{ row.clv_pp }}{% else %}—{% endif %}</td>
+                    <td class="trk-hash" title="{{ row.verification_hash }}">{{ row.verification_hash[:12] }}…</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="12">No locked fixtures in window yet — load the dashboard before kickoff to log snapshots.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    {% endif %}
+</div>
+{% endblock %}

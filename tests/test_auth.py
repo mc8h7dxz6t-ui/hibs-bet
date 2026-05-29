@@ -114,6 +114,27 @@ def test_hibs_hibs_password_alias(monkeypatch):
     assert client.get("/settings").status_code == 200
 
 
+def test_public_tracker_without_login(monkeypatch):
+    web = _reload_web(
+        monkeypatch,
+        HIBS_AUTH_ENABLED="1",
+        HIBS_AUTH_PASSWORD="testpass",
+        HIBS_SECRET_KEY="test-secret-key",
+        HIBS_PUBLIC_TRACKER="1",
+    )
+    client = web.app.test_client()
+    page = client.get("/tracker")
+    assert page.status_code == 200
+    assert b"Performance Tracker" in page.data
+    api = client.get("/api/tracker")
+    assert api.status_code == 200
+    assert api.get_json().get("read_only") is True
+    csv = client.get("/api/tracker/export.csv")
+    assert csv.status_code == 200
+    assert "text/csv" in (csv.content_type or "")
+    assert client.get("/").status_code == 302
+
+
 def test_public_health_when_configured(monkeypatch):
     web = _reload_web(
         monkeypatch,
