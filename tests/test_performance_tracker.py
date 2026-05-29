@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from hibs_predictor.performance_tracker import (
+    build_proof_metrics_dict,
     build_public_tracker_dict,
     export_ledger_csv,
     locked_predictions_ledger,
@@ -74,6 +75,9 @@ def test_ledger_picks_earliest_pre_kickoff_snapshot(audit_db, monkeypatch):
 
     payload = build_public_tracker_dict(history_days=30)
     assert payload["public"] is True
+    proof = payload.get("proof_metrics") or {}
+    assert len(proof.get("metrics") or []) == 2
+    assert proof["clv_beat_target_pct"] == 60.0
     assert payload["read_only"] is True
     assert "export_urls" in payload
 

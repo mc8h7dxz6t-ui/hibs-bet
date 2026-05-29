@@ -1600,7 +1600,7 @@ def scale_readiness_dict() -> Dict[str, Any]:
     """
     baseline = _env_float("HIBS_CALIB_BASELINE_BRIER", 0.66)
     min_n = max(5, int(_env_float("HIBS_SCALE_READY_MIN_N", 25)))
-    min_clv_pct = _env_float("HIBS_SCALE_READY_CLV_PCT", 55.0)
+    min_clv_pct = _env_float("HIBS_SCALE_READY_CLV_PCT", 60.0)
     empty: Dict[str, Any] = {
         "baseline_brier": baseline,
         "min_scored_n": min_n,

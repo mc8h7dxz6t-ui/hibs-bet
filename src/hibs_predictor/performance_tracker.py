@@ -161,6 +161,74 @@ def locked_predictions_ledger(*, limit: int = 500, days: int = 90) -> List[Dict[
     return out
 
 
+def build_proof_metrics_dict() -> Dict[str, Any]:
+    """
+    North-star proof metrics (scale cohort only — friendlies reported separately).
+
+    - Brier 1X2 < bookmaker baseline → calibration beats public consensus.
+    - CLV beat-close > target on value-flagged picks → edge before the line moves.
+    """
+    try:
+        baseline = float(os.getenv("HIBS_CALIB_BASELINE_BRIER", "0.66"))
+    except ValueError:
+        baseline = 0.66
+    try:
+        clv_target = float(os.getenv("HIBS_PROOF_CLV_BEAT_PCT", "60"))
+    except ValueError:
+        clv_target = 60.0
+    try:
+        min_n = max(5, int(os.getenv("HIBS_SCALE_READY_MIN_N", "25")))
+    except ValueError:
+        min_n = 25
+
+    scale = scale_readiness_dict()
+    cohorts = scale.get("cohorts") or {}
+    sc = cohorts.get("scale") or {}
+    fr = cohorts.get("friendlies") or {}
+
+    brier = sc.get("brier_score_1x2")
+    n_brier = int(sc.get("n_scored") or 0)
+    clv_pct = sc.get("value_beat_close_pct")
+    clv_n = int(sc.get("value_clv_n") or 0)
+
+    brier_ok = brier is not None and n_brier >= min_n and float(brier) < baseline
+    clv_ok = clv_pct is not None and clv_n >= 5 and float(clv_pct) >= clv_target
+
+    return {
+        "baseline_brier": baseline,
+        "clv_beat_target_pct": clv_target,
+        "min_scored_n": min_n,
+        "proof_pass": bool(brier_ok and clv_ok),
+        "metrics": [
+            {
+                "id": "brier_1x2",
+                "label": "Brier score (1X2)",
+                "target": f"< {baseline} (bookmaker baseline)",
+                "proves": "Model calibrates 1X2 probabilities better than public consensus.",
+                "cohort": "scale",
+                "current": brier,
+                "n": n_brier,
+                "pass": brier_ok,
+            },
+            {
+                "id": "clv_beat_rate",
+                "label": "CLV beat-close rate",
+                "target": f"> {clv_target}% of value-flagged picks",
+                "proves": "Model spots inefficiencies before money moves the closing line.",
+                "cohort": "scale",
+                "current": clv_pct,
+                "n": clv_n,
+                "pass": clv_ok,
+            },
+        ],
+        "friendlies_note": {
+            "brier": fr.get("brier_score_1x2"),
+            "n": fr.get("n_scored"),
+            "note": "Friendlies audit-only — not used for scale proof (rotation / wide margins).",
+        },
+    }
+
+
 def build_public_tracker_dict(*, history_days: int = 90, limit: int = 500) -> Dict[str, Any]:
     """Payload for /tracker and /api/tracker."""
     history_days = max(7, min(365, int(history_days)))
@@ -203,6 +271,7 @@ def build_public_tracker_dict(*, history_days: int = 90, limit: int = 500) -> Di
         "pred_log_sync_cron": cron,
         "audit": report_summary_dict(),
         "scale_readiness": scale_readiness_dict(),
+        "proof_metrics": build_proof_metrics_dict(),
         "ledger": ledger,
         "export_urls": {
             "csv": "/api/tracker/export.csv",

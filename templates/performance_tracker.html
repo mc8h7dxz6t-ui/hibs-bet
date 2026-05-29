@@ -60,6 +60,43 @@
     </section>
     {% else %}
 
+    {% set proof = tracker.proof_metrics or {} %}
+    <section class="trk-card">
+        <h2>Proof metrics (scale cohort)</h2>
+        <p class="trk-intro">Targets for deciding if the formula is winning — measured on <strong>domestic / Nordics / World Cup</strong> only, not friendlies.</p>
+        <table class="trk-table">
+            <thead>
+                <tr>
+                    <th>Metric</th>
+                    <th>Target</th>
+                    <th>What it proves</th>
+                    <th>Current</th>
+                    <th>n</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for m in proof.metrics or [] %}
+                <tr>
+                    <td><strong>{{ m.label }}</strong></td>
+                    <td>{{ m.target }}</td>
+                    <td style="max-width:220px;">{{ m.proves }}</td>
+                    <td>{% if m.current is not none %}{{ m.current }}{% if m.id == 'clv_beat_rate' %}%{% endif %}{% else %}—{% endif %}</td>
+                    <td>{{ m.n }}</td>
+                    <td class="{% if m.pass %}trk-lock-yes{% else %}trk-lock-no{% endif %}">{% if m.pass %}PASS{% else %}pending{% endif %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <p class="trk-intro" style="margin-top:10px;">
+            Overall proof: <strong>{% if proof.proof_pass %}PASS{% else %}Not yet{% endif %}</strong>
+            (need ≥{{ proof.min_scored_n }} scale fixtures for Brier; ≥5 value picks with CLV for beat-close).
+        </p>
+        {% if proof.friendlies_note and proof.friendlies_note.n %}
+        <p class="trk-intro">Friendlies (audit only): Brier {{ proof.friendlies_note.brier }} on {{ proof.friendlies_note.n }} fixtures — {{ proof.friendlies_note.note }}</p>
+        {% endif %}
+    </section>
+
     <section class="trk-card">
         <h2>Summary</h2>
         <div class="trk-stats">
