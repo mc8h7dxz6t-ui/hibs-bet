@@ -1,6 +1,6 @@
 """Tournament / international focus mode (World Cup window, date-driven).
 
-Default summer (**2026-05-20 → 2026-08-01**, before **26/27** domestic seasons): **World Cup**
+Default summer (**2026-05-20 → resume date**, before **26/27** domestic seasons): **World Cup**
 is the main target (**2026-06-11 → 2026-07-18** tournament focus on the dashboard),
 plus **international friendlies** (wider fixture window through the summer break),
 **cup / UEFA finals**, and **Nordics** as peer **5-day** daily options (LOI season ended — omitted)
@@ -63,10 +63,10 @@ _DEFAULT_AUTO_END = date(2026, 7, 18)
 _DEFAULT_FRIENDLIES_AUTO_START = date(2026, 5, 20)
 # UK + most European domestic leagues are between seasons until ~August (Nordics keep playing).
 _DEFAULT_DOMESTIC_OFFSEASON_START = date(2026, 5, 20)
-_DEFAULT_DOMESTIC_OFFSEASON_END = date(2026, 8, 1)
+_DEFAULT_DOMESTIC_RESUME_DATE = date(2026, 8, 1)
 
-# After the World Cup window ends, still between UK/EU domestic seasons: fetch UK + European
-# league calendars (not international-only summer trim).
+# Opt-in only (``HIBS_POST_WC_DOMESTIC_EUROPEAN=1``): fetch UK + European league calendars
+# after the World Cup window instead of staying on Nordics / friendlies / cups until resume.
 _POST_WC_DOMESTIC_EUROPEAN_CODES: tuple[str, ...] = tuple(
     sorted(
         set(_DASHBOARD_REGION_UK)
@@ -119,7 +119,11 @@ def _domestic_offseason_window() -> tuple[date, date]:
         _parse_date(os.getenv("HIBS_DOMESTIC_OFFSEASON_START", ""))
         or _DEFAULT_DOMESTIC_OFFSEASON_START
     )
-    end = _parse_date(os.getenv("HIBS_DOMESTIC_OFFSEASON_END", "")) or _DEFAULT_DOMESTIC_OFFSEASON_END
+    end = (
+        _parse_date(os.getenv("HIBS_DOMESTIC_RESUME_DATE", ""))
+        or _parse_date(os.getenv("HIBS_DOMESTIC_OFFSEASON_END", ""))
+        or _DEFAULT_DOMESTIC_RESUME_DATE
+    )
     if end < start:
         start, end = end, start
     return start, end
@@ -156,17 +160,15 @@ def is_summer_daily_league(league_code: str) -> bool:
 
 def post_wc_domestic_european_active(*, today: Optional[date] = None) -> bool:
     """
-    After the World Cup auto window ends but before domestic seasons resume (~Aug).
+    Opt-in post-WC UK + European domestic fetch (Jul–Aug gap before seasons resume).
 
-  Override: ``HIBS_POST_WC_DOMESTIC_EUROPEAN=0`` disables; ``=1`` forces on outside the window.
+    Default **off** — summer fetch stays Nordics / friendlies / cups until
+    ``HIBS_DOMESTIC_RESUME_DATE`` (or ``HIBS_DOMESTIC_OFFSEASON_END``). Set
+    ``HIBS_POST_WC_DOMESTIC_EUROPEAN=1`` to restore the old post-WC UK/EU trim.
     """
     raw = (os.getenv("HIBS_POST_WC_DOMESTIC_EUROPEAN") or "").strip().lower()
-    if raw in ("0", "false", "no", "off"):
+    if raw not in ("1", "true", "yes", "on"):
         return False
-    if raw in ("1", "true", "yes", "on"):
-        cur = today if today is not None else _today_utc()
-        _, off_end = _domestic_offseason_window()
-        return domestic_offseason_active(today=cur) and cur < off_end
     if tournament_focus_active(today=today):
         return False
     if not domestic_offseason_active(today=today):
@@ -192,7 +194,7 @@ def post_wc_domestic_european_league_codes() -> List[str]:
 def active_competition_league_codes(*, today: Optional[date] = None) -> List[str]:
     """
     Summer / focus fetch list: World Cup first, then friendlies, Nordics (5-day), cups.
-    Post-WC gap (Jul–Aug): UK + European domestic calendars instead of international-only.
+    Post-WC gap (Jul–Aug): same summer list unless ``HIBS_POST_WC_DOMESTIC_EUROPEAN=1``.
     """
     if post_wc_domestic_european_active(today=today):
         return post_wc_domestic_european_league_codes()
@@ -356,7 +358,7 @@ def dashboard_default_region(*, today: Optional[date] = None) -> str:
     Default region chip on the dashboard.
 
     World Cup window: International (friendlies + WC in that chip).
-    Post-WC summer gap: All (UK + European leagues in default fetch).
+    Post-WC summer gap (opt-in UK/EU fetch): All region when ``HIBS_POST_WC_DOMESTIC_EUROPEAN=1``.
     Pre-WC summer / domestic offseason: All — UEFA finals (UCL/EL/UECL) are fetched but
     use the European region slug, so International-only hides Conference League tonight.
     """

@@ -102,6 +102,24 @@ def _odds_cross_reject_pct() -> float:
     return _env_float("HIBS_ODDS_CROSS_REJECT_PCT", 10.0)
 
 
+def _friendlies_value_margin_extra(league_code: str) -> float:
+    if str(league_code or "").strip().upper() != "INTL_FRIENDLIES":
+        return 0.0
+    return _env_float("HIBS_FRIENDLIES_VALUE_MARGIN_EXTRA", 0.025)
+
+
+def _friendlies_value_dq_floor(league_code: str) -> float:
+    if str(league_code or "").strip().upper() != "INTL_FRIENDLIES":
+        return 0.0
+    return _env_float("HIBS_FRIENDLIES_VALUE_DQ_PCT", 88.0)
+
+
+def _friendlies_market_blend_extra(league_code: str) -> float:
+    if str(league_code or "").strip().upper() != "INTL_FRIENDLIES":
+        return 0.0
+    return _env_float("HIBS_FRIENDLIES_MARKET_BLEND_EXTRA", 0.04)
+
+
 def _value_max_odds() -> float:
     return _env_float("HIBS_VALUE_MAX_ODDS", 6.0)
 
@@ -1289,10 +1307,11 @@ class BettingEngine:
                 blend = float(os.getenv("HIBS_CALIB_MARKET_BLEND", "0.06"))
             except ValueError:
                 blend = 0.06
+            blend += _friendlies_market_blend_extra(league_code)
             if dq_pct_blend >= dq_anchor:
-                blend = min(blend, 0.04)
+                blend = min(blend, 0.04 + _friendlies_market_blend_extra(league_code))
             elif dq_pct_blend > 0:
-                blend = min(0.12, blend + (dq_anchor - dq_pct_blend) * 0.0008)
+                blend = min(0.12 + _friendlies_market_blend_extra(league_code), blend + (dq_anchor - dq_pct_blend) * 0.0008)
             ensemble_probs = self._blend_1x2_toward_implied(ensemble_probs, bookmaker_odds, blend)
 
         use_cal_side = mode == "calibrated_poisson" or (
@@ -1418,6 +1437,7 @@ class BettingEngine:
         conf_scale = min(1.0, max(0.4, avg_n / 8.0))
         margin = base_margin + (1.0 - conf_scale) * 0.02
         margin += value_margin_extra(league_code, dq_pct)
+        margin += _friendlies_value_margin_extra(league_code)
         margin = max(0.03, min(0.09, margin))
         if dq_min_boost > 0 and dq_pct < dq_min_boost:
             margin *= 1.0 + min(0.35, (dq_min_boost - dq_pct) / 100.0)
@@ -1433,6 +1453,11 @@ class BettingEngine:
         elif _is_cup_or_playoff_fixture(fixture) and dq_known and dq_pct < cup_dq_floor:
             portfolio_reject = {k: "cup_playoff_low_data_quality" for k in value_bets}
             value_bets = {}
+        else:
+            fr_dq = _friendlies_value_dq_floor(league_code_val)
+            if fr_dq > 0 and dq_known and dq_pct < fr_dq:
+                portfolio_reject = {k: "friendlies_data_quality_floor" for k in value_bets}
+                value_bets = {}
         filtered_value_bets, rejected_value_bets = self._filter_value_bets(
             value_bets,
             fixture,

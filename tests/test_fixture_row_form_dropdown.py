@@ -14,10 +14,8 @@ _TEMPLATE = Path(__file__).resolve().parents[1] / "templates" / "_fixture_row_co
 
 
 def _league_snap_snippet() -> str:
-    text = _TEMPLATE.read_text(encoding="utf-8")
-    start = text.index('<select class="fr-league-snap"')
-    end = text.index("</select>", start) + len("</select>")
-    return text[start:end]
+    hub = Path(__file__).resolve().parents[1] / "templates" / "_fixture_form_hub.html"
+    return hub.read_text(encoding="utf-8")
 
 
 def _render_league_snap(fixture: dict) -> str:
@@ -99,3 +97,27 @@ def test_league_dropdown_includes_both_last10_optgroups():
     assert 'label="Atalanta — last 10"' in html
     assert "W 2-0 vs Roma" in html
     assert "L 0-1 vs Lazio" in html
+
+
+def test_mobile_form_hub_includes_away_last10_pane():
+    html = _render_league_snap(
+        {
+            "home": "Rosenborg",
+            "away": "Molde",
+            "league": "ELITESERIEN",
+            "league_flag": "🇳🇴",
+            "league_name": "Eliteserien",
+            "is_cup_competition": False,
+            "home_last10": [
+                {"result": "W", "score": "2-1", "opponent": "Brann", "home_away": "H", "date": "2026-05-10"},
+            ],
+            "away_last10": [
+                {"result": "D", "score": "1-1", "opponent": "Viking", "home_away": "A", "date": "2026-05-11"},
+            ],
+        }
+    )
+    assert 'class="fr-form-hub"' in html
+    assert 'data-fr-pane="away"' in html
+    assert "vs Viking" in html
+    assert 'data-fr-pane="home"' in html
+    assert "vs Brann" in html

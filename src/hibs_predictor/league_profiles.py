@@ -203,6 +203,14 @@ _PROFILES: Dict[str, Dict[str, Any]] = {
         "market_anchor": 0.13,
         "value_margin_extra": 0.018,
     },
+    "INTL_FRIENDLIES": {
+        "label": "International friendlies profile",
+        "description": "High squad rotation and thin samples — lean on market signal; value needs extra edge.",
+        "draw_target": 0.28,
+        "upset_risk": 0.18,
+        "market_anchor": 0.15,
+        "value_margin_extra": 0.022,
+    },
     "EURO": {
         "label": "International tournament profile",
         "description": "National-team samples are thinner; neutral venue, squads and market signal matter more.",

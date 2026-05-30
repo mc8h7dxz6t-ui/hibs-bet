@@ -300,6 +300,11 @@ def inject_sky_dock():
     ctx["hibs_auth_enabled"] = auth_enabled()
     ctx["hibs_logged_in"] = is_logged_in()
     ctx.update(hibs_brand_context())
+    ctx["portfolio_api_url"] = os.environ.get(
+        "HIBS_PORTFOLIO_API_URL", "http://127.0.0.1:5003/api/portfolio/summary"
+    )
+    ctx["portfolio_racing_url"] = os.environ.get("HIBS_RACING_BASE_URL", "http://127.0.0.1:5003") + "/portfolio"
+    ctx["portfolio_football_url"] = "/tracker"
     return ctx
 
 
@@ -516,6 +521,107 @@ def _merge_stale_fixture_row(row: Dict[str, Any], stale: Optional[Dict[str, Any]
             row[key] = stale_val
         if stale_pct is not None and (new_pct is None or stale_pct > new_pct):
             row["data_quality"] = dict(stale_dq)
+
+
+def _preserve_data_quality_max(row: Dict[str, Any], new_dq: Dict[str, Any]) -> None:
+    """Apply new DQ only when it improves score_pct — never cliff after merge/rerun."""
+    existing = row.get("data_quality") if isinstance(row.get("data_quality"), dict) else {}
+    try:
+        old_pct = float(existing.get("score_pct")) if existing.get("score_pct") is not None else None
+        new_pct = float(new_dq.get("score_pct") or 0)
+    except (TypeError, ValueError):
+        row["data_quality"] = dict(new_dq)
+        return
+    if old_pct is not None and old_pct > new_pct:
+        return
+    row["data_quality"] = dict(new_dq)
+
+
+_TRANSIENT_PREDICTION_BLOCK_REASONS = frozenset({"api_rate_guard", "fixture_enrichment_failed"})
+
+
+def _row_as_enriched_for_predict(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Build predict input from a dashboard row (post-merge), without stale block flags."""
+    skip = {
+        "prediction",
+        "has_value_bet",
+        "compact_xg_home",
+        "compact_xg_away",
+        "dashboard_region",
+        "pick_menu",
+        "structured_insight",
+    }
+    enriched = {k: v for k, v in row.items() if k not in skip}
+    enriched.pop("_hibs_prediction_blocked", None)
+    enriched.pop("_hibs_prediction_block_reason", None)
+    dq = row.get("data_quality")
+    if isinstance(dq, dict):
+        enriched["data_quality"] = dict(dq)
+    best = row.get("best_odds_1x2") or {}
+    if isinstance(best, dict):
+        for side in ("home", "draw", "away"):
+            if best.get(side) is not None:
+                enriched[f"odds_{side}"] = best[side]
+        try:
+            enriched["odds_available"] = all(float(best.get(k) or 0) > 1.0 for k in ("home", "draw", "away"))
+        except (TypeError, ValueError):
+            enriched.setdefault("odds_available", False)
+    return enriched
+
+
+def _abstain_data_pct_floor() -> float:
+    try:
+        return float(os.getenv("HIBS_ABSTAIN_DATA_PCT", "48"))
+    except ValueError:
+        return 48.0
+
+
+def _prediction_rerun_eligible(row: Dict[str, Any], reason: str) -> bool:
+    if not _slim_row_enrich_fresh(row):
+        return False
+    if reason in _TRANSIENT_PREDICTION_BLOCK_REASONS:
+        return True
+    if reason == "data_coverage_too_thin":
+        dq = row.get("data_quality") if isinstance(row.get("data_quality"), dict) else {}
+        try:
+            pct = float(dq.get("score_pct") or 0)
+        except (TypeError, ValueError):
+            return False
+        return pct >= _abstain_data_pct_floor()
+    return False
+
+
+def _maybe_rerun_prediction_after_stale_merge(row: Dict[str, Any]) -> bool:
+    pred = row.get("prediction")
+    if not isinstance(pred, dict) or not pred.get("prediction_unavailable"):
+        return False
+    reason = str(pred.get("prediction_unavailable_reason") or "")
+    if not _prediction_rerun_eligible(row, reason):
+        return False
+    enriched = _row_as_enriched_for_predict(row)
+    try:
+        new_pred = betting_engine.predict_with_confidence(enriched)
+    except Exception as exc:
+        print(f"[Prediction rerun] {row.get('home')} v {row.get('away')}: {exc!r}")
+        return False
+    if not isinstance(new_pred, dict) or new_pred.get("prediction_unavailable"):
+        return False
+    row["prediction"] = new_pred
+    _preserve_data_quality_max(row, _data_quality_for_enriched(enriched, new_pred))
+    row["has_value_bet"] = bool(
+        new_pred.get("has_any_value")
+        or new_pred.get("value_bets")
+        or new_pred.get("value_bets_alt")
+    )
+    return True
+
+
+def _repair_guard_blocked_predictions(fixtures: List[Dict[str, Any]]) -> int:
+    n = 0
+    for row in fixtures:
+        if isinstance(row, dict) and _maybe_rerun_prediction_after_stale_merge(row):
+            n += 1
+    return n
 
 
 def _merge_league_fixture_lists(
@@ -755,12 +861,18 @@ def _load_fixtures_for_http(
         bundle["fetch_days"] = _fetch_window_days()
         if not _all_fixtures_bundle_fresh(cached):
             bundle["cache_stale"] = True
+        n_repaired = _repair_guard_blocked_predictions(bundle.get("all") or [])
+        if n_repaired:
+            log.info("Repaired %d guard-blocked prediction(s) in cached bundle", n_repaired)
         if attach_live:
             _refresh_live_on_bundle(bundle)
         return bundle
 
     stale = _stale_fixture_bundle_for_refresh(include_domestic=include_domestic)
     if stale:
+        n_repaired = _repair_guard_blocked_predictions(stale.get("all") or [])
+        if n_repaired:
+            log.info("Repaired %d guard-blocked prediction(s) in stale bundle", n_repaired)
         if attach_live:
             _refresh_live_on_bundle(stale)
         _schedule_dashboard_refresh()
@@ -923,12 +1035,13 @@ def _reset_provider_rate_limits() -> None:
         print(f"[Cache clear] rate-limit reset failed: {exc!r}")
 
 
-def clear_application_caches(*, all_disk: bool = False) -> int:
+def clear_application_caches(*, all_disk: bool = False, reset_rate_limits: bool = True) -> int:
     """Clear in-memory health cache and on-disk fixture caches (or all JSON when all_disk)."""
     _clear_health_cache()
     _clear_dashboard_page_cache()
     clear_assistant_bundle_cache()
-    _reset_provider_rate_limits()
+    if reset_rate_limits:
+        _reset_provider_rate_limits()
     cache = Cache()
     if all_disk:
         return cache.clear_all()
@@ -1464,6 +1577,8 @@ def fetch_next_48h_fixtures(league_code: str, *, allow_stale: bool = False) -> L
         }
         row["data_quality"] = _data_quality_for_enriched(enriched, prediction)
         _merge_stale_fixture_row(row, stale_by_key.get(_fixture_key(fixture)))
+        if _maybe_rerun_prediction_after_stale_merge(row):
+            prediction = row["prediction"]
         try:
             from hibs_predictor.xg_source_display import attach_xg_display_fields, compact_fixture_xg
 
@@ -2202,6 +2317,7 @@ def _finalize_fixture_bundle(
         row["dashboard_region"] = league_dashboard_region(str(row.get("league") or ""))
     if attach_live:
         _refresh_live_on_bundle({"all": all_fixtures})
+    _repair_guard_blocked_predictions(all_fixtures)
     _ensure_fixture_data_quality(all_fixtures)
     if reboost:
         _reboost_bundle_data_quality(all_fixtures)
@@ -2817,19 +2933,51 @@ def _dashboard_days_groups(
 
 
 def _leagues_for_filter(by_league: Dict[str, List], *, include_domestic: bool = False) -> List[tuple]:
-    """League filter chips in dashboard order — every competition with fixtures in the window."""
+    """League filter chips in dashboard order — competitions with fixtures, plus summer focus list."""
+    from hibs_predictor.tournament_focus import (
+        active_competition_league_codes,
+        domestic_offseason_active,
+        friendlies_window_active,
+        post_wc_domestic_european_active,
+        tournament_focus_active,
+    )
+
     order_index = {c: i for i, c in enumerate(_dashboard_league_order(include_domestic=include_domestic))}
     min_n = _min_league_chip_fixtures()
     codes: List[str] = []
     seen: set = set()
+    focus_codes: set[str] = set()
+    # Summer / pre- & post-WC: show WC, friendlies, Nordics, cup finals even when count is 0.
+    summer_chips = not include_domestic and (
+        tournament_focus_active()
+        or domestic_offseason_active()
+        or friendlies_window_active()
+        or post_wc_domestic_european_active()
+    )
+    if summer_chips:
+        focus_codes = set(active_competition_league_codes())
+        for c in focus_codes:
+            if c in LEAGUES and c not in seen:
+                codes.append(c)
+                seen.add(c)
     for c in _dashboard_league_order(include_domestic=include_domestic):
         if c in LEAGUES and len(by_league.get(c) or []) >= min_n:
-            codes.append(c)
-            seen.add(c)
+            if c not in seen:
+                codes.append(c)
+                seen.add(c)
     for c in sorted(by_league.keys(), key=lambda x: (order_index.get(x, 999), x)):
         if c in LEAGUES and c not in seen and len(by_league.get(c) or []) >= min_n:
             codes.append(c)
-    return [(c, _league_block_display_name(c, by_league.get(c) or [])) for c in codes]
+            seen.add(c)
+
+    def _chip_label(code: str) -> str:
+        n = len(by_league.get(code) or [])
+        base = _league_block_display_name(code, by_league.get(code) or [])
+        if n == 0 and code in focus_codes:
+            return f"{base} (0)"
+        return base
+
+    return [(c, _chip_label(c)) for c in codes]
 
 
 def _assistant_packets_from_fixtures(fixtures: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -2909,6 +3057,12 @@ def _stale_fixture_bundle_for_refresh(*, include_domestic: bool) -> Optional[Dic
     """Last on-disk bundle kept in memory after refresh=1 clears caches (avoids blank dashboard)."""
     ck = _all_fixtures_cache_key(include_domestic=include_domestic)
     disk = Cache().peek(ck)
+    if (
+        (not isinstance(disk, dict) or not _is_complete_fixture_bundle(disk) or not disk.get("all"))
+        and include_domestic
+    ):
+        # All-leagues view: keep intl/summer bundle visible while the full 35-league rebuild runs.
+        disk = Cache().peek(_all_fixtures_cache_key(include_domestic=False))
     if not isinstance(disk, dict) or not _is_complete_fixture_bundle(disk) or not disk.get("all"):
         return None
     bundle = dict(disk)
@@ -2963,7 +3117,10 @@ def index():
     refresh_stale_bundle: Optional[Dict[str, Any]] = None
     if force_refresh:
         refresh_stale_bundle = _stale_fixture_bundle_for_refresh(include_domestic=include_domestic)
-        clear_application_caches(all_disk=request.args.get("all") == "1")
+        clear_application_caches(
+            all_disk=request.args.get("all") == "1",
+            reset_rate_limits=False,
+        )
     elif not include_domestic:
         cached_page = _dashboard_page_cache_get(allow_stale=True)
         if cached_page is not None:

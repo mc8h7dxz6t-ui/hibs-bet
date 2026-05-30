@@ -1,0 +1,132 @@
+{# Table + last-10 form: native select (desktop) + tabbed hub (mobile). #}
+{% set table_rows = fixture.league_table_rows if fixture.league_table_rows is defined else [] %}
+{% set table_label = fixture.league_table_name if fixture.league_table_name is defined else (fixture.league_name or fixture.league) %}
+{% set home_snap = fixture.home_table_snapshot if fixture.home_table_snapshot is defined else [] %}
+{% set away_snap = fixture.away_table_snapshot if fixture.away_table_snapshot is defined else [] %}
+
+<div class="fr-form-hub" role="region" aria-label="League table and last-10 form"
+     onclick="event.stopPropagation();" onpointerdown="event.stopPropagation();" onmousedown="event.stopPropagation();" onmouseup="event.stopPropagation();" ontouchstart="event.stopPropagation();">
+    <div class="fr-form-hub-head">
+        {% if fixture.league_flag %}<span class="fr-form-hub-flag" aria-hidden="true">{{ fixture.league_flag }}</span>{% endif %}
+        <span class="fr-form-hub-title">{{ table_label }}</span>
+    </div>
+    <div class="fr-form-hub-nav" role="tablist" aria-label="Table or form view">
+        <button type="button" class="fr-form-hub-tab active" role="tab" aria-selected="true" data-fr-pane="table">Table</button>
+        <button type="button" class="fr-form-hub-tab" role="tab" aria-selected="false" data-fr-pane="home">{{ fixture.home }}</button>
+        <button type="button" class="fr-form-hub-tab" role="tab" aria-selected="false" data-fr-pane="away">{{ fixture.away }}</button>
+    </div>
+    <div class="fr-form-hub-body">
+        <div class="fr-form-hub-pane active" data-fr-pane="table" role="tabpanel">
+            {% if fixture.is_cup_competition %}
+            <p class="fr-form-hub-muted">{{ fixture.cup_round_label or 'Cup tie' }} — no league table</p>
+            {% if fixture.home_table_form_warn %}<p class="fr-form-hub-warn">⚠ {{ fixture.home }} table vs form mismatch</p>{% endif %}
+            {% if fixture.away_table_form_warn %}<p class="fr-form-hub-warn">⚠ {{ fixture.away }} table vs form mismatch</p>{% endif %}
+            {% elif table_rows %}
+            <ul class="fr-form-hub-list">
+                {% for row in table_rows %}
+                <li class="fr-form-hub-row{% if row.is_home_team %} fr-form-hub-row-home{% elif row.is_away_team %} fr-form-hub-row-away{% endif %}{% if row.is_focus %} fr-form-hub-row-focus{% endif %}">
+                    <span class="fr-form-hub-pos">{{ row.position|position_rank }}.</span>
+                    <span class="fr-form-hub-team">{{ row.team|table_team_label }}</span>
+                    <span class="fr-form-hub-meta">P {{ row.played }} · GF {{ row.goals_for }} GA {{ row.goals_against }} · {% if row.goal_diff > 0 %}+{% endif %}{{ row.goal_diff }} · {{ row.points }} pts{% if row.form %} · <span class="fr-form-hub-frm">{{ row.form[-5:] }}</span>{% endif %}</span>
+                </li>
+                {% endfor %}
+            </ul>
+            {% elif home_snap or away_snap %}
+            <ul class="fr-form-hub-list">
+                {% for row in home_snap + away_snap %}
+                <li class="fr-form-hub-row{% if row.is_focus %} fr-form-hub-row-focus{% endif %}">
+                    <span class="fr-form-hub-pos">{{ row.position|position_rank }}.</span>
+                    <span class="fr-form-hub-team">{{ row.team|table_team_label }}</span>
+                    <span class="fr-form-hub-meta">GF {{ row.goals_for }} GA {{ row.goals_against }} · {{ row.points }} pts</span>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="fr-form-hub-muted">Table not available for this competition</p>
+            {% endif %}
+        </div>
+        <div class="fr-form-hub-pane" data-fr-pane="home" role="tabpanel" hidden>
+            {% if hl10 %}
+            <ul class="fr-form-hub-list fr-form-hub-list-form">
+                {% for r in hl10 %}
+                <li class="fr-form-hub-form-line">
+                    <span class="fd fd-{{ r.result }}">{{ r.result }}</span>
+                    <span class="fr-form-hub-form-sc">{{ r.score }}</span>
+                    <span class="fr-form-hub-form-vs">vs {{ r.opponent }}</span>
+                    <span class="fr-form-hub-form-ha ha-badge ha-{{ r.home_away }}">{{ r.home_away }}</span>
+                    {% if r.date %}<span class="fr-form-hub-form-dt">{{ r.date[:10] }}</span>{% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="fr-form-hub-muted">No recent results loaded for {{ fixture.home }}</p>
+            {% endif %}
+        </div>
+        <div class="fr-form-hub-pane" data-fr-pane="away" role="tabpanel" hidden>
+            {% if al10 %}
+            <ul class="fr-form-hub-list fr-form-hub-list-form">
+                {% for r in al10 %}
+                <li class="fr-form-hub-form-line">
+                    <span class="fd fd-{{ r.result }}">{{ r.result }}</span>
+                    <span class="fr-form-hub-form-sc">{{ r.score }}</span>
+                    <span class="fr-form-hub-form-vs">vs {{ r.opponent }}</span>
+                    <span class="fr-form-hub-form-ha ha-badge ha-{{ r.home_away }}">{{ r.home_away }}</span>
+                    {% if r.date %}<span class="fr-form-hub-form-dt">{{ r.date[:10] }}</span>{% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="fr-form-hub-muted">No recent results loaded for {{ fixture.away }}</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<select class="fr-league-snap fr-league-snap-native" title="{% if fixture.is_cup_competition %}Cup round and form{% else %}League table (* = fixture teams) and last-10 form{% endif %}"
+    onclick="event.stopPropagation();" onpointerdown="event.stopPropagation();" onmousedown="event.stopPropagation();" onmouseup="event.stopPropagation();" onchange="event.stopPropagation();" onkeydown="event.stopPropagation();" ontouchstart="event.stopPropagation();">
+    {% if fixture.is_cup_competition %}
+    <optgroup label="{{ fixture.cup_round_label or fixture.league_name or fixture.league }}">
+        <option selected>{{ fixture.cup_round_label or 'Cup tie' }} · no league table</option>
+        {% if fixture.home_table_form_warn %}<option disabled>⚠ {{ fixture.home }} table vs form mismatch</option>{% endif %}
+        {% if fixture.away_table_form_warn %}<option disabled>⚠ {{ fixture.away }} table vs form mismatch</option>{% endif %}
+    </optgroup>
+    {% else %}
+    {% if table_rows %}
+    <optgroup label="{{ table_label }}">
+        {% for row in table_rows %}
+        <option {% if row.is_focus %}selected{% endif %} class="{% if row.is_home_team %}fr-tbl-home{% elif row.is_away_team %}fr-tbl-away{% endif %}">{% if row.is_focus %}* {% endif %}{% if row.is_home_team %}[H] {% elif row.is_away_team %}[A] {% endif %}{{ row.position|position_rank }}. {{ row.team|table_team_label }} · P {{ row.played }} · GF {{ row.goals_for }} GA {{ row.goals_against }} · GD {% if row.goal_diff > 0 %}+{% endif %}{{ row.goal_diff }} · {{ row.points }} pts{% if row.form %} · {{ row.form[-5:] }}{% endif %}</option>
+        {% endfor %}
+    </optgroup>
+    {% elif home_snap or away_snap %}
+    <optgroup label="{{ table_label }}">
+        {% for row in home_snap + away_snap %}
+        <option {% if row.is_focus %}selected{% endif %}>{% if row.is_focus %}* {% endif %}{{ row.position|position_rank }}. {{ row.team|table_team_label }} · GF {{ row.goals_for }} GA {{ row.goals_against }} · {{ row.points }} pts</option>
+        {% endfor %}
+    </optgroup>
+    {% else %}
+    <option selected>Table N/A</option>
+    {% endif %}
+    {% endif %}
+    {% if hl10 %}
+    <optgroup label="{{ fixture.home }} — last 10">
+        {% for r in hl10 %}
+        <option>{{ r.result }} {{ r.score }} vs {{ r.opponent }} ({{ r.home_away }}){% if r.date %} · {{ r.date[:10] }}{% endif %}</option>
+        {% endfor %}
+    </optgroup>
+    {% else %}
+    <optgroup label="{{ fixture.home }} — last 10">
+        <option disabled>No recent results loaded</option>
+    </optgroup>
+    {% endif %}
+    {% if al10 %}
+    <optgroup label="{{ fixture.away }} — last 10">
+        {% for r in al10 %}
+        <option>{{ r.result }} {{ r.score }} vs {{ r.opponent }} ({{ r.home_away }}){% if r.date %} · {{ r.date[:10] }}{% endif %}</option>
+        {% endfor %}
+    </optgroup>
+    {% else %}
+    <optgroup label="{{ fixture.away }} — last 10">
+        <option disabled>No recent results loaded</option>
+    </optgroup>
+    {% endif %}
+</select>

@@ -173,8 +173,35 @@
         .sub-tab:hover{color:var(--text);background:rgba(248,250,252,0.04);}
         .sub-tab.active{background:rgba(57,255,20,0.12);color:var(--neon-value);border-color:rgba(57,255,20,0.35);}
         .fr-menus{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
-        .fr-pick-menu,.fr-league-snap{max-width:100%;min-width:0;flex:1 1 140px;font-size:0.62em;padding:3px 6px;border-radius:6px;border:1px solid rgba(148,163,184,0.25);background:rgba(2,6,23,0.75);color:var(--text);font-family:'Inter',sans-serif;}
-        .fr-league-snap{flex:1 1 180px;}
+        .fr-pick-menu,.fr-league-snap,.fr-league-snap-native{max-width:100%;min-width:0;flex:1 1 140px;font-size:0.62em;padding:3px 6px;border-radius:6px;border:1px solid rgba(148,163,184,0.25);background:rgba(2,6,23,0.75);color:var(--text);font-family:'Inter',sans-serif;}
+        .fr-league-snap,.fr-league-snap-native{flex:1 1 180px;}
+        .fr-form-hub{display:none;width:100%;border:1px solid rgba(0,122,51,0.22);border-radius:10px;background:rgba(2,6,23,0.72);overflow:hidden;}
+        .fr-form-hub-head{display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid rgba(148,163,184,0.12);background:rgba(0,122,51,0.06);}
+        .fr-form-hub-flag{font-size:1em;line-height:1;}
+        .fr-form-hub-title{font-size:0.62em;font-weight:800;color:var(--hibs-neon);letter-spacing:0.04em;text-transform:uppercase;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+        .fr-form-hub-nav{display:flex;gap:4px;padding:6px 8px;border-bottom:1px solid rgba(148,163,184,0.1);}
+        .fr-form-hub-tab{flex:1;min-height:36px;padding:6px 4px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--muted);font-size:0.62em;font-weight:800;font-family:'Inter',sans-serif;cursor:pointer;transition:background 0.15s,border-color 0.15s,color 0.15s;line-height:1.2;}
+        .fr-form-hub-tab:hover{color:var(--text);background:rgba(248,250,252,0.04);}
+        .fr-form-hub-tab.active{background:rgba(57,255,20,0.12);color:var(--neon-value);border-color:rgba(57,255,20,0.35);}
+        .fr-form-hub-body{max-height:min(42vh,220px);overflow-y:auto;-webkit-overflow-scrolling:touch;}
+        .fr-form-hub-pane{display:none;padding:8px;}
+        .fr-form-hub-pane.active{display:block;}
+        .fr-form-hub-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;}
+        .fr-form-hub-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 8px;font-size:0.68em;line-height:1.35;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,0.12);background:rgba(15,23,42,0.45);}
+        .fr-form-hub-row-focus{border-color:rgba(57,255,20,0.4);background:rgba(57,255,20,0.06);}
+        .fr-form-hub-row-home{border-left:3px solid rgba(134,239,172,0.55);}
+        .fr-form-hub-row-away{border-left:3px solid rgba(251,146,60,0.55);}
+        .fr-form-hub-pos{font-weight:900;color:var(--muted);font-variant-numeric:tabular-nums;}
+        .fr-form-hub-team{font-weight:700;color:var(--text);}
+        .fr-form-hub-meta{grid-column:1 / -1;font-size:0.92em;color:var(--muted);}
+        .fr-form-hub-frm{font-weight:800;letter-spacing:0.06em;color:var(--neon-value);}
+        .fr-form-hub-form-line{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:0.68em;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,0.1);background:rgba(15,23,42,0.4);}
+        .fr-form-hub-form-sc{font-weight:800;font-variant-numeric:tabular-nums;}
+        .fr-form-hub-form-vs{flex:1;min-width:0;color:var(--text);}
+        .fr-form-hub-form-dt{font-size:0.9em;color:var(--muted);font-variant-numeric:tabular-nums;}
+        .fr-form-hub-muted,.fr-form-hub-warn{margin:0;font-size:0.68em;line-height:1.4;}
+        .fr-form-hub-muted{color:var(--muted);}
+        .fr-form-hub-warn{color:#fecaca;}
         .slip-crest{width:22px;height:22px;object-fit:contain;vertical-align:-5px;margin-right:4px;}
         .hibs-assistant-fab{position:fixed;bottom:20px;right:20px;z-index:9999;width:52px;height:52px;border-radius:50%;border:1px solid rgba(167,243,208,0.5);background:linear-gradient(145deg,#1f4a34,#0b2418);color:var(--neon-value);font-size:1.4em;cursor:pointer;box-shadow:0 10px 32px rgba(0,0,0,0.42),0 0 24px rgba(167,243,208,0.16);transition:transform 0.2s,box-shadow 0.2s;padding:0;overflow:hidden;}
         .hibs-assistant-fab img{width:100%;height:100%;object-fit:contain;padding:6px;box-sizing:border-box;}
@@ -834,6 +861,9 @@
         .fr-l10-preview{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-top:5px;}
         .fr-l10-lbl{font-size:0.55em;font-weight:800;color:var(--muted);letter-spacing:0.06em;}
         .fr-l10-sep{opacity:0.45;font-size:0.65em;}
+        .fr-league-chip{display:inline-flex;align-items:center;gap:4px;font-size:0.58em;font-weight:800;color:var(--muted);letter-spacing:0.03em;margin-bottom:2px;}
+        .fr-league-chip-flag{font-size:1.05em;line-height:1;}
+        .fr-league-chip-txt{text-transform:uppercase;max-width:12rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
         .fr-teams{font-weight:700;color:var(--text);line-height:1.25;}
         .fr-vs{font-weight:500;color:var(--muted);margin:0 4px;}
         .fr-pred{font-size:0.72em;font-weight:700;margin-top:2px;}
@@ -1418,7 +1448,14 @@
             .fr-sum-grid > .fr-od:nth-child(13)::before{content:'U3.5';font-size:0.52em;font-weight:800;color:var(--muted);display:block;line-height:1.1;margin-bottom:2px;}
             .fr-chev{flex:0 0 100%;text-align:center;padding-top:2px;}
             .fr-menus{width:100%;}
-            .fr-pick-menu,.fr-league-snap{flex:1 1 100%;min-height:40px;font-size:0.68em;}
+            .fr-pick-menu,.fr-league-snap,.fr-league-snap-native{display:none;}
+            .fr-form-hub{display:block;}
+            .fr-l10-preview{width:100%;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,0.12);background:rgba(2,6,23,0.45);}
+            .fr-l10-lbl{font-size:0.62em;}
+            .h2h-grid{grid-template-columns:1fr;gap:14px;}
+            .h2h-col .section-title{font-size:0.72em;color:var(--hibs-neon);}
+            .form-summary{gap:4px;}
+            .fs-stat{font-size:0.62em;}
             .fr-add-slip{min-height:40px;padding:8px 12px;}
             .chip,.chip-lg,.nav-btn,.tab-btn,.sub-tab{min-height:40px;padding-top:8px;padding-bottom:8px;}
             .chk-inline{min-height:40px;}
@@ -1446,6 +1483,8 @@
             .dash-filter-panel{border:none;background:transparent;margin:0;}
             .dash-filter-panel-sum{display:none;}
             .dash-filter-panel .dash-sidebar-filters{padding:0;}
+            /* Summary hidden on desktop — keep panel open so league/region chips stay visible */
+            .dash-filter-panel > .dash-sidebar-filters{display:block !important;}
         }
         @media (max-width: 480px) {
             .site-wordmark{font-size:1em;}
@@ -1484,6 +1523,7 @@
 <body class="hibs-launch-active">
 {% include '_launch_wait_overlay.html' %}
 <div class="hibs-app-shell container{% block container_class %}{% endblock %}">
+    {% include '_portfolio_bar.html' %}
     {% block content %}{% endblock %}
     <footer><p>{% from '_hibs_brand.html' import footer_crest %}{{ footer_crest() }}<span>hibs-bet</span> &mdash; Edinburgh Betting Intelligence &nbsp;|&nbsp; Gamble Responsibly &nbsp;|&nbsp; 18+</p></footer>
 </div>
@@ -1517,6 +1557,26 @@
         if (t) { t.classList.add('active'); }
         document.dispatchEvent(new CustomEvent('hibs-tab-change', { detail: { tabId: tabId, groupId: groupId } }));
     }
+    document.addEventListener('click', function (e) {
+        var tab = e.target.closest('.fr-form-hub-tab');
+        if (!tab) return;
+        e.stopPropagation();
+        var hub = tab.closest('.fr-form-hub');
+        if (!hub) return;
+        var paneId = tab.getAttribute('data-fr-pane');
+        if (!paneId) return;
+        hub.querySelectorAll('.fr-form-hub-tab').forEach(function (b) {
+            b.classList.remove('active');
+            b.setAttribute('aria-selected', 'false');
+        });
+        tab.classList.add('active');
+        tab.setAttribute('aria-selected', 'true');
+        hub.querySelectorAll('.fr-form-hub-pane').forEach(function (p) {
+            var on = p.getAttribute('data-fr-pane') === paneId;
+            p.classList.toggle('active', on);
+            if (on) { p.removeAttribute('hidden'); } else { p.setAttribute('hidden', ''); }
+        });
+    });
     (function (global) {
         var KEY = 'hibs_user_settings_v1';
         var DEFAULTS = {

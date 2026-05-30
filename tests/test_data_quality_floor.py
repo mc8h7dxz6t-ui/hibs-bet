@@ -272,6 +272,69 @@ def test_merge_stale_fixture_row_preserves_higher_dq():
     assert row["home_stats"]["played"] == 12
 
 
+def test_rerun_prediction_after_stale_merge_restores_probs():
+    """After merge restores enrich, re-run model when block was transient (api_rate_guard)."""
+    from unittest.mock import patch
+
+    from hibs_predictor.web import (
+        _maybe_rerun_prediction_after_stale_merge,
+        _merge_stale_fixture_row,
+        _slim_row_enrich_fresh,
+    )
+
+    row = {
+        "home": "Norway",
+        "away": "Finland",
+        "home_id": 1,
+        "away_id": 2,
+        "league": "NORWAY_ELITESERIEN",
+        "home_recent_n": 1,
+        "away_recent_n": 1,
+        "xg_home": 0.0,
+        "xg_away": 0.0,
+        "xg_source": "unknown",
+        "prediction": {
+            "prediction_unavailable": True,
+            "prediction_unavailable_reason": "api_rate_guard",
+        },
+        "data_quality": {"score_pct": 35.0, "full_scope": False},
+    }
+    stale = {
+        "home": "Norway",
+        "away": "Finland",
+        "home_id": 1,
+        "away_id": 2,
+        "home_recent_n": 8,
+        "away_recent_n": 8,
+        "home_last10": [{}] * 8,
+        "away_last10": [{}] * 8,
+        "home_stats": {"played": 12, "goals_for": 18, "goals_against": 10},
+        "away_stats": {"played": 12, "goals_for": 15, "goals_against": 12},
+        "xg_home": 1.4,
+        "xg_away": 1.1,
+        "xg_source": "goals_proxy",
+        "best_odds_1x2": {"home": 2.1, "draw": 3.4, "away": 3.2},
+        "market_odds": {"btts": {"yes": 1.8}, "totals_2_5": {"over": 1.9}},
+        "data_quality": {"score_pct": 91.0, "full_scope": True},
+    }
+    _merge_stale_fixture_row(row, stale)
+    assert _slim_row_enrich_fresh(row)
+
+    mock_pred = {
+        "home_win_prob": 0.42,
+        "draw_prob": 0.28,
+        "away_win_prob": 0.30,
+        "probabilities": {"home": 0.42, "draw": 0.28, "away": 0.30},
+        "bookmaker_odds": {"home": 2.1, "draw": 3.4, "away": 3.2},
+    }
+    with patch("hibs_predictor.web.betting_engine.predict_with_confidence", return_value=mock_pred):
+        assert _maybe_rerun_prediction_after_stale_merge(row) is True
+
+    assert not row["prediction"].get("prediction_unavailable")
+    assert row["prediction"].get("home_win_prob") == 0.42
+    assert float(row["data_quality"]["score_pct"]) >= 48.0
+
+
 def test_finalize_ucl_rich_row_stays_above_90():
     """Regression: bundle finalize must not cliff UCL showpiece rows with stored premium DQ."""
     from hibs_predictor.web import _finalize_fixture_bundle
@@ -390,6 +453,60 @@ def test_ensure_dq_backfills_missing_only():
     ]
     _ensure_fixture_data_quality(rows)
     assert float(rows[0]["data_quality"]["score_pct"]) >= 85.0
+
+
+def test_rerun_prediction_preserves_higher_dq():
+    """Prediction rerun after stale merge must not downgrade an existing premium DQ score."""
+    from unittest.mock import patch
+
+    from hibs_predictor.web import (
+        _maybe_rerun_prediction_after_stale_merge,
+        _merge_stale_fixture_row,
+        _slim_row_enrich_fresh,
+    )
+
+    row = {
+        "home": "Norway",
+        "away": "Finland",
+        "home_id": 1,
+        "away_id": 2,
+        "league": "NORWAY_ELITESERIEN",
+        "home_recent_n": 8,
+        "away_recent_n": 8,
+        "home_last10": [{}] * 8,
+        "away_last10": [{}] * 8,
+        "home_stats": {"played": 12, "goals_for": 18, "goals_against": 10},
+        "away_stats": {"played": 12, "goals_for": 15, "goals_against": 12},
+        "xg_home": 1.4,
+        "xg_away": 1.1,
+        "xg_source": "goals_proxy",
+        "best_odds_1x2": {"home": 2.1, "draw": 3.4, "away": 3.2},
+        "market_odds": {"btts": {"yes": 1.8}, "totals_2_5": {"over": 1.9}},
+        "prediction": {
+            "prediction_unavailable": True,
+            "prediction_unavailable_reason": "api_rate_guard",
+        },
+        "data_quality": {"score_pct": 91.0, "full_scope": True},
+    }
+    stale = dict(row)
+    stale["prediction"] = {
+        "home_win_prob": 0.42,
+        "bookmaker_odds": {"home": 2.1, "draw": 3.4, "away": 3.2},
+    }
+    _merge_stale_fixture_row(row, stale)
+    assert _slim_row_enrich_fresh(row)
+
+    mock_pred = {
+        "home_win_prob": 0.42,
+        "draw_prob": 0.28,
+        "away_win_prob": 0.30,
+        "probabilities": {"home": 0.42, "draw": 0.28, "away": 0.30},
+        "bookmaker_odds": {"home": 2.1, "draw": 3.4, "away": 3.2},
+    }
+    with patch("hibs_predictor.web.betting_engine.predict_with_confidence", return_value=mock_pred):
+        assert _maybe_rerun_prediction_after_stale_merge(row) is True
+
+    assert float(row["data_quality"]["score_pct"]) >= 91.0
 
 
 def test_world_cup_flagship_floor_95():

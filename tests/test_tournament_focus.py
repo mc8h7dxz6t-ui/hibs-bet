@@ -96,7 +96,7 @@ def test_focus_auto_on_at_opening_match(monkeypatch):
 
 
 def test_focus_off_after_world_cup_ends(monkeypatch):
-    """After WC window but before August: post-WC UK + European fetch (not intl-only)."""
+    """After WC window but before domestic resume: summer list (no UK/EU domestic by default)."""
     monkeypatch.delenv("HIBS_POST_WC_DOMESTIC_EUROPEAN", raising=False)
     monkeypatch.setattr(
         "hibs_predictor.tournament_focus._today_utc",
@@ -104,8 +104,28 @@ def test_focus_off_after_world_cup_ends(monkeypatch):
     )
     assert tournament_focus_active() is False
     assert domestic_offseason_active() is True
+    codes = league_codes_for_fetch()
+    assert "EPL" not in codes
+    assert "LA_LIGA" not in codes
+    assert "NORWAY_ELITESERIEN" in codes
+    assert INTL_FRIENDLIES_CODE in codes
+    assert "UCL" in codes
+
+
+def test_post_wc_domestic_opt_in_only(monkeypatch):
+    """UK/EU domestic after WC requires explicit HIBS_POST_WC_DOMESTIC_EUROPEAN=1."""
+    monkeypatch.delenv("HIBS_POST_WC_DOMESTIC_EUROPEAN", raising=False)
+    monkeypatch.setattr(
+        "hibs_predictor.tournament_focus._today_utc",
+        lambda: date(2026, 7, 25),
+    )
+    from hibs_predictor.tournament_focus import post_wc_domestic_european_active
+
+    assert post_wc_domestic_european_active() is False
+    assert "EPL" not in league_codes_for_fetch()
+    monkeypatch.setenv("HIBS_POST_WC_DOMESTIC_EUROPEAN", "1")
+    assert post_wc_domestic_european_active() is True
     assert "EPL" in league_codes_for_fetch()
-    assert "WORLD_CUP" not in league_codes_for_fetch()
 
 
 def test_domestic_returns_august(monkeypatch):
@@ -261,7 +281,7 @@ def test_friendlies_fixture_window_days(monkeypatch):
 
 
 def test_post_wc_domestic_european_fetch_after_world_cup(monkeypatch):
-    monkeypatch.delenv("HIBS_POST_WC_DOMESTIC_EUROPEAN", raising=False)
+    monkeypatch.setenv("HIBS_POST_WC_DOMESTIC_EUROPEAN", "1")
     monkeypatch.delenv("HIBS_TOURNAMENT_FOCUS", raising=False)
     monkeypatch.setattr(
         "hibs_predictor.tournament_focus._today_utc",

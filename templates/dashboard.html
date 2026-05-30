@@ -46,7 +46,7 @@
 
     {% if cold_start %}
     <div class="api-missing-banner" role="status">
-        <strong>Loading fixtures…</strong> First load can take a minute while data is fetched. This page will refresh automatically, or click <strong>Refresh</strong> above.
+        <strong>Loading fixtures…</strong> Rebuilding fixture data (often 1–2 minutes). This page will reload automatically; avoid clicking <strong>Refresh</strong> again until fixtures appear.
     </div>
     <meta http-equiv="refresh" content="20">
     {% endif %}
@@ -75,7 +75,7 @@
     </div>
     {% elif tournament_focus.post_wc_domestic_european_active %}
     <div class="tournament-focus-banner" role="status">
-        <strong>Post–World Cup</strong> — default fetch is <strong>UK + European</strong> leagues on your <strong>{{ fetch_days }}-day</strong> list until domestic seasons resume ({{ tournament_focus.domestic_offseason_end }}). Live scores poll faster near kick-off. Use <strong>All</strong> to load every configured league.
+        <strong>Post–World Cup (opt-in)</strong> — default fetch is <strong>UK + European</strong> leagues on your <strong>{{ fetch_days }}-day</strong> list until domestic seasons resume ({{ tournament_focus.domestic_offseason_end }}). Use <strong>All</strong> to load every configured league.
     </div>
     {% elif tournament_focus.domestic_offseason_active %}
     <div class="tournament-focus-banner" role="status">
@@ -102,7 +102,7 @@
             <p class="dash-side-hd">Coming up</p>
             <p class="dash-side-sub">Kick-offs in <strong>{{ display_tz_label }}</strong> · click to jump</p>
 
-            <details class="dash-filter-panel">
+            <details class="dash-filter-panel" open>
                 <summary class="dash-filter-panel-sum">Search &amp; filters</summary>
             <div class="search-chips dash-sidebar-filters">
                 <input type="search" id="dash-search" class="dash-search" placeholder="Search teams…" autocomplete="off" aria-label="Search fixtures">
@@ -119,7 +119,9 @@
                     <button type="button" class="chip chip-region{% if slug == tournament_focus.default_region %} active{% elif not slug and not tournament_focus.default_region %} active{% endif %}" data-region="{{ slug }}">{{ label }}</button>
                     {% endfor %}
                 </div>
-                {% if tournament_focus.active and tournament_focus.intl_only_fetch %}
+                {% if tournament_focus.domestic_offseason_active and not tournament_focus.active %}
+                <p class="chip-hint region-filter-hint" id="region-filter-hint">Summer window: <strong>World Cup</strong>, <strong>friendlies</strong>, <strong>Nordic</strong> leagues, and <strong>cup finals</strong> (UCL etc.) load first — UK/EPL calendars return after {{ tournament_focus.domestic_offseason_end }}. Use <strong>Nordic</strong> or <strong>International</strong> region chips, or pick a league below.</p>
+                {% elif tournament_focus.active and tournament_focus.intl_only_fetch %}
                 <p class="chip-hint region-filter-hint" id="region-filter-hint">Showing <strong>International</strong> by default during {{ tournament_focus.label|lower }}. <strong>Nordic</strong> leagues are on the {{ fetch_days }}-day window — pick another region for UK/European leagues.</p>
                 {% elif tournament_focus.intl_only_fetch and not tournament_focus.active %}
                 <p class="chip-hint region-filter-hint" id="region-filter-hint"><strong>All</strong> is the default. <strong>UEFA finals</strong> (Conference League, Europa, Champions) are under <strong>European</strong> — not International. Friendlies use <strong>International</strong>; Nordics use the <strong>Nordic</strong> chip.</p>
@@ -624,9 +626,9 @@
             if (window.hibsShowLaunchOverlay) window.hibsShowLaunchOverlay();
             b.disabled = true;
             b.textContent = 'Refreshing…';
-            fetch('/api/cache/clear?all=1', { method: 'POST' })
-                .catch(function () { return null; })
-                .finally(function () { window.location.href = dashboardUrl({ refresh: '1' }); });
+            // Server snapshots disk bundle on ?refresh=1 before clearing fixture caches.
+            // Do not POST /api/cache/clear?all=1 first — that wipes the bundle and causes 0 fixtures.
+            window.location.href = dashboardUrl({ refresh: '1' });
         });
     }
 
