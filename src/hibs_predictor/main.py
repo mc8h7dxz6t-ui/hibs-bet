@@ -292,14 +292,23 @@ def run_pred_log_sync(args: argparse.Namespace) -> None:
     if "api_sports" not in agg.clients:
         print("API_SPORTS_FOOTBALL_KEY is required to sync finished results.")
         sys.exit(1)
-    n = sync_finished_results(
-        agg.clients["api_sports"].fetch_fixture,
-        fetch_odds_fn=agg.clients["api_sports"].fetch_odds,
-        fetch_statistics_fn=getattr(agg.clients["api_sports"], "fetch_fixture_statistics", None),
+    client = agg.clients["api_sports"]
+    stats = sync_finished_results(
+        client.fetch_fixture,
+        fetch_odds_fn=client.fetch_odds,
+        fetch_statistics_fn=getattr(client, "fetch_fixture_statistics", None),
+        fetch_by_league_fn=client.fetch_fixtures_by_league,
+        fetch_by_date_fn=getattr(client, "fetch_fixtures_by_date", None),
         max_fixtures=int(args.max_fixtures),
         min_after_kickoff_hours=float(args.min_after_kickoff_hours),
+        verbose=bool(getattr(args, "verbose", False)),
     )
-    print(f"Updated snapshot row(s): {n}")
+    if getattr(args, "verbose", False):
+        import json
+
+        print(json.dumps(stats, indent=2))
+    else:
+        print(f"Updated snapshot row(s): {stats.get('updated', 0)}")
 
 
 def run_pred_log_report(args: argparse.Namespace) -> None:
@@ -313,6 +322,17 @@ def run_pred_log_report(args: argparse.Namespace) -> None:
     if getattr(args, "csv", None):
         rep["csv_rows_written"] = export_scored_csv(args.csv)
         rep["csv_path"] = args.csv
+    print(json.dumps(rep, indent=2))
+
+
+def run_pred_log_backtest(args: argparse.Namespace) -> None:
+    """Honest engine backtest from prediction_audit.sqlite."""
+    import json
+
+    load_dotenv()
+    from hibs_predictor.prediction_log import backtest_report_dict
+
+    rep = backtest_report_dict(days=int(args.days))
     print(json.dumps(rep, indent=2))
 
 
@@ -343,6 +363,28 @@ def run_data_sources_probe() -> None:
 
     payload = run_all_probes()
     print(json.dumps(payload, indent=2))
+
+
+def run_historic_snapshot(args: argparse.Namespace) -> None:
+    """Backfill FT fixtures into prediction audit DB with enrich + predict (chunked API guard)."""
+    _load_env_from_project()
+    from hibs_predictor.historic_snapshot import default_league_codes, print_summary_json, run_historic_snapshot
+
+    leagues = None
+    if getattr(args, "leagues", None):
+        leagues = [c.strip().upper() for c in str(args.leagues).split(",") if c.strip()]
+    elif not (os.getenv("HIBS_HISTORIC_SNAPSHOT_LEAGUES") or "").strip():
+        leagues = default_league_codes()
+    summary = run_historic_snapshot(
+        date_from=str(args.date_from),
+        date_to=str(args.date_to),
+        league_codes=leagues,
+        max_fixtures=int(args.max_fixtures),
+        verbose=bool(getattr(args, "verbose", False)),
+    )
+    print_summary_json(summary)
+    if not summary.get("ok"):
+        sys.exit(1)
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -380,12 +422,28 @@ def create_parser() -> argparse.ArgumentParser:
         default=2.5,
         help="Skip API calls for fixtures whose kickoff is sooner than this many hours ago",
     )
+    pred_sync.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print settlement diagnostics (pending, unresolved, resolved_by_teams)",
+    )
 
     pred_report = subparsers.add_parser("pred-log-report", help="Print JSON metrics for scored prediction snapshots")
     pred_report.add_argument(
         "--csv",
         metavar="PATH",
         help="Also write scored rows to CSV at this path",
+    )
+
+    pred_backtest = subparsers.add_parser(
+        "pred-log-backtest",
+        help="Honest backtest on audit log (Brier, log loss, picks) for last N kickoff days",
+    )
+    pred_backtest.add_argument(
+        "--days",
+        type=int,
+        default=30,
+        help="Kickoff window in days (default 30)",
     )
 
     pred_prune = subparsers.add_parser("pred-log-prune", help="Delete old rows from prediction audit DB")
@@ -406,6 +464,26 @@ def create_parser() -> argparse.ArgumentParser:
         help="JSON probe: policy window + reliability of StatsBomb/Understat/FBref/Sofascore/API-Football",
     )
 
+    hist = subparsers.add_parser(
+        "historic-snapshot",
+        help="Backfill FT fixtures (enrich + predict) into prediction audit DB for calibration",
+    )
+    hist.add_argument("--from", dest="date_from", required=True, help="Kickoff date from YYYY-MM-DD")
+    hist.add_argument("--to", dest="date_to", required=True, help="Kickoff date to YYYY-MM-DD")
+    hist.add_argument(
+        "--leagues",
+        default=None,
+        help="Comma league codes (default: UK+top5; override env HIBS_HISTORIC_SNAPSHOT_LEAGUES)",
+    )
+    hist.add_argument(
+        "--max",
+        dest="max_fixtures",
+        type=int,
+        default=None,
+        help="Max fixtures to process (default HIBS_HISTORIC_MAX_FIXTURES=400)",
+    )
+    hist.add_argument("--verbose", action="store_true", help="Include sample per-fixture outcomes in JSON")
+
     return parser
 
 
@@ -425,12 +503,16 @@ def main() -> None:
         run_pred_log_sync(args)
     elif args.command == "pred-log-report":
         run_pred_log_report(args)
+    elif args.command == "pred-log-backtest":
+        run_pred_log_backtest(args)
     elif args.command == "pred-log-prune":
         run_pred_log_prune(args)
     elif args.command == "calibration-fit":
         run_calibration_fit()
     elif args.command == "data-sources-probe":
         run_data_sources_probe()
+    elif args.command == "historic-snapshot":
+        run_historic_snapshot(args)
     else:
         parser.print_help()
 

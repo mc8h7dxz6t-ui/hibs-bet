@@ -76,7 +76,8 @@ def test_sync_finished_results_joins_xg(monkeypatch, tmp_path):
             "teams": {"home": {"id": 1, "name": "Home FC"}, "away": {"id": 2, "name": "Away FC"}},
         }
 
-    n = sync_finished_results(_fetch_fixture, fetch_statistics_fn=lambda _fid: stats)
+    out = sync_finished_results(_fetch_fixture, fetch_statistics_fn=lambda _fid: stats)
+    n = out["updated"]
     assert n == 1
 
     conn = sqlite3.connect(str(db))

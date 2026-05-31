@@ -171,19 +171,10 @@ def parse_result_xg_from_statistics(
 
 
 def _fixture_id(fixture: Dict[str, Any]) -> Optional[int]:
-    fx = fixture.get("fixture")
-    if isinstance(fx, dict) and fx.get("id") is not None:
-        try:
-            return int(fx["id"])
-        except (TypeError, ValueError):
-            pass
-    raw = fixture.get("id")
-    if raw is not None:
-        try:
-            return int(raw)
-        except (TypeError, ValueError):
-            return None
-    return None
+    """Numeric API-Football fixture id for audit + settlement (never FotMob slugs)."""
+    from hibs_predictor.live_scores import api_fixture_id_for_row
+
+    return api_fixture_id_for_row(fixture)
 
 
 def _kickoff_iso(fixture: Dict[str, Any]) -> str:
@@ -384,6 +375,156 @@ def maybe_log_prediction_snapshot(
         return
 
 
+def _has_scored_snapshot(conn: sqlite3.Connection, fixture_id: int) -> bool:
+    cur = conn.execute(
+        """
+        SELECT 1 FROM prediction_snapshots
+        WHERE fixture_id = ? AND result_outcome IS NOT NULL AND TRIM(result_outcome) != ''
+        LIMIT 1
+        """,
+        (fixture_id,),
+    )
+    return cur.fetchone() is not None
+
+
+def _latest_unscored_snapshot_id(conn: sqlite3.Connection, fixture_id: int) -> Optional[int]:
+    cur = conn.execute(
+        """
+        SELECT id FROM prediction_snapshots
+        WHERE fixture_id = ?
+          AND (result_outcome IS NULL OR TRIM(result_outcome) = '')
+        ORDER BY id DESC LIMIT 1
+        """,
+        (fixture_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    try:
+        return int(row[0])
+    except (TypeError, ValueError):
+        return None
+
+
+def insert_historic_snapshot(
+    fixture: Dict[str, Any],
+    prediction: Dict[str, Any],
+    result: Dict[str, Any],
+) -> str:
+    """
+    Insert or update an audit row for historic backfill (FT result known at write time).
+
+    Uses ``api_fixture_id`` as ``fixture_id``. Sets ``captured_at`` to kickoff minus 2 hours
+    (synthetic pre-kickoff lock). Skips when a scored row already exists; updates the latest
+    unscored row for the same fixture only.
+
+    Returns: ``inserted``, ``updated_unscored``, ``skipped_scored``, ``skipped_no_id``, or ``error``.
+    """
+    if not _enabled():
+        return "skipped_disabled"
+    if prediction.get("prediction_unavailable"):
+        return "skipped_unavailable"
+    fid = _fixture_id(fixture)
+    if not fid:
+        return "skipped_no_id"
+    try:
+        hg = int(result["home"])
+        ag = int(result["away"])
+    except (KeyError, TypeError, ValueError):
+        return "error"
+    outcome = str(result.get("outcome") or _outcome_from_goals(hg, ag))
+    status = str(result.get("status") or "FT")
+    ko_iso = _kickoff_iso(fixture)
+    ko_dt = _parse_kickoff_iso(ko_iso)
+    if ko_dt is None:
+        captured_iso = datetime.now(timezone.utc).isoformat()
+    else:
+        captured_iso = (ko_dt - timedelta(hours=2)).isoformat()
+    recorded_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        init_db()
+        path = _db_path()
+        league = str(fixture.get("league") or "")
+        home_nm = str(prediction.get("home") or fixture.get("home", {}).get("name") or "?")
+        away_nm = str(prediction.get("away") or fixture.get("away", {}).get("name") or "?")
+        mode = str(prediction.get("one_x2_mode") or os.getenv("HIBS_1X2_MODE", "ensemble"))
+        xg_src = str(fixture.get("xg_source") or prediction.get("xg_source") or "")
+        dq = fixture.get("data_quality") or {}
+        dq_pct = float(dq.get("score_pct") or 0)
+        pred_json = json.dumps(prediction, default=str)
+        sum_json = json.dumps(_enrich_summary(fixture, prediction), default=str)
+        conn = sqlite3.connect(path, timeout=15)
+        try:
+            if _has_scored_snapshot(conn, fid):
+                return "skipped_scored"
+            row_id = _latest_unscored_snapshot_id(conn, fid)
+            if row_id is not None:
+                conn.execute(
+                    """
+                    UPDATE prediction_snapshots SET
+                        captured_at = ?, league_code = ?, kickoff_iso = ?, home_name = ?, away_name = ?,
+                        one_x2_mode = ?, xg_source = ?, data_quality_pct = ?,
+                        prediction_json = ?, enrich_summary_json = ?,
+                        result_home = ?, result_away = ?, result_outcome = ?,
+                        result_status = ?, result_recorded_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        captured_iso,
+                        league,
+                        ko_iso,
+                        home_nm,
+                        away_nm,
+                        mode,
+                        xg_src,
+                        dq_pct,
+                        pred_json,
+                        sum_json,
+                        hg,
+                        ag,
+                        outcome,
+                        status,
+                        recorded_iso,
+                        row_id,
+                    ),
+                )
+                conn.commit()
+                return "updated_unscored"
+            conn.execute(
+                """
+                INSERT INTO prediction_snapshots (
+                    captured_at, fixture_id, league_code, kickoff_iso, home_name, away_name,
+                    one_x2_mode, xg_source, data_quality_pct, prediction_json, enrich_summary_json,
+                    result_home, result_away, result_outcome, result_status, result_recorded_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    captured_iso,
+                    fid,
+                    league,
+                    ko_iso,
+                    home_nm,
+                    away_nm,
+                    mode,
+                    xg_src,
+                    dq_pct,
+                    pred_json,
+                    sum_json,
+                    hg,
+                    ag,
+                    outcome,
+                    status,
+                    recorded_iso,
+                ),
+            )
+            conn.commit()
+            return "inserted"
+        finally:
+            conn.close()
+    except Exception:
+        return "error"
+
+
 def _outcome_from_goals(h: int, a: int) -> str:
     if h > a:
         return "home"
@@ -424,25 +565,160 @@ def _apply_clv_to_enrich_summary(
     return enrich
 
 
+def _kickoff_date_str(kickoff_iso: str) -> Optional[str]:
+    ko = _parse_kickoff_iso(kickoff_iso)
+    if ko is None:
+        return None
+    return ko.astimezone(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _match_api_fixture_row(
+    candidates: List[Dict[str, Any]],
+    *,
+    home_name: str,
+    away_name: str,
+) -> Optional[Dict[str, Any]]:
+    from hibs_predictor.team_aliases import team_names_match
+
+    home_nm = (home_name or "").strip()
+    away_nm = (away_name or "").strip()
+    if not home_nm or not away_nm:
+        return None
+    for raw in candidates:
+        if not isinstance(raw, dict):
+            continue
+        teams = raw.get("teams") or {}
+        h = ((teams.get("home") or {}).get("name") or "").strip()
+        a = ((teams.get("away") or {}).get("name") or "").strip()
+        if team_names_match(home_nm, h) and team_names_match(away_nm, a):
+            return raw
+    return None
+
+
+def _resolve_api_fixture_id(
+    row: sqlite3.Row,
+    *,
+    fetch_fixture_fn: Any,
+    fetch_by_league_fn: Any = None,
+    fetch_by_date_fn: Any = None,
+) -> Tuple[Optional[int], Optional[Dict[str, Any]], str]:
+    """
+    Resolve numeric API fixture id + raw row for settlement.
+
+    Returns (api_fixture_id, raw_fixture_row, resolution_note).
+    """
+    from hibs_predictor.live_scores import parse_fixture_id_int
+
+    stored = row["fixture_id"]
+    fid_int = parse_fixture_id_int(stored)
+    raw: Optional[Dict[str, Any]] = None
+    if fid_int is not None:
+        try:
+            raw = fetch_fixture_fn(fid_int)
+        except Exception:
+            raw = None
+        if isinstance(raw, dict) and raw.get("fixture"):
+            return fid_int, raw, "direct_id"
+    home_nm = str(row["home_name"] or "")
+    away_nm = str(row["away_name"] or "")
+    kick = str(row["kickoff_iso"] or "")
+    league = str(row["league_code"] or "")
+    day = _kickoff_date_str(kick)
+    if not day:
+        return None, None, "no_kickoff_date"
+    try:
+        from hibs_predictor.config import LEAGUES
+        from hibs_predictor.season import season_candidates
+
+        league_api_id = LEAGUES.get(league, {}).get("api_sports_id")
+    except Exception:
+        league_api_id = None
+    candidates: List[Dict[str, Any]] = []
+    if fetch_by_league_fn is not None and league_api_id:
+        try:
+            season = season_candidates(league_code=league)[0]
+            candidates = fetch_by_league_fn(int(league_api_id), int(season), date_from=day, date_to=day) or []
+        except Exception:
+            candidates = []
+    if not candidates and fetch_by_date_fn is not None:
+        try:
+            candidates = fetch_by_date_fn(day, league_id=int(league_api_id) if league_api_id else None) or []
+        except Exception:
+            candidates = []
+    matched = _match_api_fixture_row(candidates, home_name=home_nm, away_name=away_nm)
+    if not matched:
+        return None, None, "unresolved_teams"
+    fx = matched.get("fixture") or {}
+    try:
+        resolved = int(fx.get("id"))
+    except (TypeError, ValueError):
+        return None, None, "unresolved_id"
+    return resolved, matched, "resolved_by_teams"
+
+
+def _apply_ft_to_snapshots(
+    conn: sqlite3.Connection,
+    *,
+    fixture_id: int,
+    hi: int,
+    ai: int,
+    status: str,
+    res_xg_h: Optional[float],
+    res_xg_a: Optional[float],
+    stored_fixture_id: Any,
+) -> int:
+    oc = _outcome_from_goals(hi, ai)
+    rec_at = datetime.now(timezone.utc).isoformat()
+    try:
+        stored_int = int(stored_fixture_id)
+    except (TypeError, ValueError):
+        stored_int = fixture_id
+    cur = conn.execute(
+        """
+        UPDATE prediction_snapshots
+        SET result_home=?, result_away=?, result_outcome=?, result_status=?, result_recorded_at=?,
+            result_xg_home=?, result_xg_away=?, fixture_id=?
+        WHERE fixture_id=? AND result_recorded_at IS NULL
+        """,
+        (hi, ai, oc, status, rec_at, res_xg_h, res_xg_a, fixture_id, stored_int),
+    )
+    n = int(cur.rowcount or 0)
+    conn.commit()
+    return n
+
+
 def sync_finished_results(
     fetch_fixture_fn: Any,
     *,
     fetch_odds_fn: Any = None,
     fetch_statistics_fn: Any = None,
+    fetch_by_league_fn: Any = None,
+    fetch_by_date_fn: Any = None,
     max_fixtures: int = 400,
     min_after_kickoff_hours: float = 2.5,
-) -> int:
+    verbose: bool = False,
+) -> Dict[str, Any]:
     """
     For snapshots missing results, fetch fixture status via API and fill goals when FT.
 
     ``fetch_fixture_fn``: ``ApiSportsFootballClient.fetch_fixture`` (fixture_id -> raw response row).
     ``fetch_odds_fn``: optional ``fetch_odds`` for closing 1X2 when ``HIBS_CLV_LOG_ENABLED=1``.
     ``fetch_statistics_fn``: optional ``fetch_fixture_statistics`` for post-match xG join.
-    Returns number of snapshot rows updated (can be > distinct fixtures if multiple pending rows).
+    Returns stats dict with ``updated`` row count (can exceed distinct fixtures).
     """
+    stats: Dict[str, Any] = {
+        "updated": 0,
+        "pending_fixture_groups": 0,
+        "skipped_too_recent": 0,
+        "not_ft_yet": 0,
+        "api_fetch_failed": 0,
+        "unresolved_fixture": 0,
+        "resolved_by_teams": 0,
+    }
     path = _db_path()
     if not _enabled() and not os.path.isfile(path):
-        return 0
+        stats["message"] = "prediction_log_disabled"
+        return stats
     init_db()
     conn = sqlite3.connect(path, timeout=20)
     conn.row_factory = sqlite3.Row
@@ -452,7 +728,9 @@ def sync_finished_results(
     try:
         rows = conn.execute(
             """
-            SELECT fixture_id, MIN(kickoff_iso) AS kickoff_iso
+            SELECT fixture_id, MIN(kickoff_iso) AS kickoff_iso,
+                   MAX(home_name) AS home_name, MAX(away_name) AS away_name,
+                   MAX(league_code) AS league_code
             FROM prediction_snapshots
             WHERE result_recorded_at IS NULL
             GROUP BY fixture_id
@@ -461,91 +739,120 @@ def sync_finished_results(
             """,
             (int(max_fixtures),),
         ).fetchall()
+        stats["pending_fixture_groups"] = len(rows)
         for r in rows:
-            fid = r["fixture_id"]
             kick_raw = r["kickoff_iso"] or ""
             ko = _parse_kickoff_iso(str(kick_raw))
             if ko is not None and now < ko + min_after:
+                stats["skipped_too_recent"] += 1
                 continue
-            try:
-                fid_int = int(fid)
-            except (TypeError, ValueError):
-                continue
-            try:
-                raw = fetch_fixture_fn(fid_int)
-            except Exception:
-                continue
-            if not isinstance(raw, dict):
+            fid_int, raw, note = _resolve_api_fixture_id(
+                r,
+                fetch_fixture_fn=fetch_fixture_fn,
+                fetch_by_league_fn=fetch_by_league_fn,
+                fetch_by_date_fn=fetch_by_date_fn,
+            )
+            if note == "resolved_by_teams":
+                stats["resolved_by_teams"] += 1
+            if fid_int is None or not isinstance(raw, dict):
+                if note in ("unresolved_teams", "unresolved_id", "no_kickoff_date"):
+                    stats["unresolved_fixture"] += 1
+                else:
+                    stats["api_fetch_failed"] += 1
                 continue
             status = ((raw.get("fixture") or {}).get("status") or {}).get("short") or ""
             goals = raw.get("goals") or {}
             gh, ga = goals.get("home"), goals.get("away")
-            if status == "FT" and gh is not None and ga is not None:
+            if status != "FT" or gh is None or ga is None:
+                stats["not_ft_yet"] += 1
+                continue
+            try:
+                hi, ai = int(gh), int(ga)
+            except (TypeError, ValueError):
+                continue
+            res_xg_h: Optional[float] = None
+            res_xg_a: Optional[float] = None
+            if fetch_statistics_fn is not None:
                 try:
-                    hi, ai = int(gh), int(ga)
-                except (TypeError, ValueError):
-                    continue
-                oc = _outcome_from_goals(hi, ai)
-                rec_at = datetime.now(timezone.utc).isoformat()
-                res_xg_h: Optional[float] = None
-                res_xg_a: Optional[float] = None
-                if fetch_statistics_fn is not None:
-                    try:
-                        stats_raw = fetch_statistics_fn(fid_int)
-                        teams = raw.get("teams") or {}
-                        hid = ((teams.get("home") or {}).get("id"))
-                        aid = ((teams.get("away") or {}).get("id"))
-                        hnm = ((teams.get("home") or {}).get("name"))
-                        anm = ((teams.get("away") or {}).get("name"))
-                        res_xg_h, res_xg_a = parse_result_xg_from_statistics(
-                            stats_raw,
-                            home_team_id=int(hid) if hid is not None else None,
-                            away_team_id=int(aid) if aid is not None else None,
-                            home_name=str(hnm) if hnm else None,
-                            away_name=str(anm) if anm else None,
-                        )
-                    except Exception:
-                        res_xg_h = res_xg_a = None
-                cur = conn.execute(
+                    stats_raw = fetch_statistics_fn(fid_int)
+                    teams = raw.get("teams") or {}
+                    hid = ((teams.get("home") or {}).get("id"))
+                    aid = ((teams.get("away") or {}).get("id"))
+                    hnm = ((teams.get("home") or {}).get("name"))
+                    anm = ((teams.get("away") or {}).get("name"))
+                    res_xg_h, res_xg_a = parse_result_xg_from_statistics(
+                        stats_raw,
+                        home_team_id=int(hid) if hid is not None else None,
+                        away_team_id=int(aid) if aid is not None else None,
+                        home_name=str(hnm) if hnm else None,
+                        away_name=str(anm) if anm else None,
+                    )
+                except Exception:
+                    res_xg_h = res_xg_a = None
+            updated += _apply_ft_to_snapshots(
+                conn,
+                fixture_id=fid_int,
+                hi=hi,
+                ai=ai,
+                status=status,
+                res_xg_h=res_xg_h,
+                res_xg_a=res_xg_a,
+                stored_fixture_id=r["fixture_id"],
+            )
+            if _clv_enabled() and fetch_odds_fn is not None:
+                try:
+                    odds_raw = fetch_odds_fn(fid_int)
+                    closing = parse_closing_1x2_from_odds_response(odds_raw)
+                except Exception:
+                    closing = {"home": None, "draw": None, "away": None}
+                snap_rows = conn.execute(
                     """
-                    UPDATE prediction_snapshots
-                    SET result_home=?, result_away=?, result_outcome=?, result_status=?, result_recorded_at=?,
-                        result_xg_home=?, result_xg_away=?
-                    WHERE fixture_id=? AND result_recorded_at IS NULL
+                    SELECT id, enrich_summary_json FROM prediction_snapshots
+                    WHERE fixture_id IN (?, ?) AND enrich_summary_json IS NOT NULL
                     """,
-                    (hi, ai, oc, status, rec_at, res_xg_h, res_xg_a, fid_int),
-                )
-                updated += cur.rowcount if cur.rowcount else 0
-                conn.commit()
-                if _clv_enabled() and fetch_odds_fn is not None:
+                    (fid_int, int(r["fixture_id"])),
+                ).fetchall()
+                for sr in snap_rows:
                     try:
-                        odds_raw = fetch_odds_fn(fid_int)
-                        closing = parse_closing_1x2_from_odds_response(odds_raw)
+                        enrich = json.loads(sr["enrich_summary_json"])
                     except Exception:
-                        closing = {"home": None, "draw": None, "away": None}
-                    snap_rows = conn.execute(
-                        """
-                        SELECT id, enrich_summary_json FROM prediction_snapshots
-                        WHERE fixture_id=? AND enrich_summary_json IS NOT NULL
-                        """,
-                        (fid_int,),
-                    ).fetchall()
-                    for sr in snap_rows:
-                        try:
-                            enrich = json.loads(sr["enrich_summary_json"])
-                        except Exception:
-                            continue
-                        if not isinstance(enrich, dict) or "clv" not in enrich:
-                            continue
-                        enrich = _apply_clv_to_enrich_summary(enrich, closing)
-                        conn.execute(
-                            "UPDATE prediction_snapshots SET enrich_summary_json=? WHERE id=?",
-                            (json.dumps(enrich, default=str), sr["id"]),
-                        )
-                    conn.commit()
+                        continue
+                    if not isinstance(enrich, dict) or "clv" not in enrich:
+                        continue
+                    enrich = _apply_clv_to_enrich_summary(enrich, closing)
+                    conn.execute(
+                        "UPDATE prediction_snapshots SET enrich_summary_json=? WHERE id=?",
+                        (json.dumps(enrich, default=str), sr["id"]),
+                    )
+                conn.commit()
     finally:
         conn.close()
-    return updated
+    stats["updated"] = int(updated)
+    scored = conn_row_count_scored() if updated else None
+    if scored is not None:
+        stats["n_scored_total"] = scored
+    if verbose:
+        stats["message"] = (
+            f"Updated {updated} snapshot row(s); "
+            f"pending groups {stats['pending_fixture_groups']}; "
+            f"resolved_by_teams {stats['resolved_by_teams']}; "
+            f"unresolved {stats['unresolved_fixture']}"
+        )
+    return stats
+
+
+def conn_row_count_scored() -> Optional[int]:
+    try:
+        conn = sqlite3.connect(_db_path(), timeout=10)
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM prediction_snapshots WHERE result_outcome IS NOT NULL AND result_outcome != ''"
+            ).fetchone()
+            return int(row[0] if row else 0)
+        finally:
+            conn.close()
+    except Exception:
+        return None
 
 
 def run_pred_log_sync_for_web(
@@ -606,15 +913,19 @@ def run_pred_log_sync_for_web(
             min_h = float(os.getenv("HIBS_PRED_LOG_SYNC_MIN_HOURS", "2.5"))
         except ValueError:
             min_h = 2.5
-    fetch_stats = getattr(agg.clients["api_sports"], "fetch_fixture_statistics", None)
-    updated = sync_finished_results(
-        agg.clients["api_sports"].fetch_fixture,
-        fetch_odds_fn=agg.clients["api_sports"].fetch_odds,
+    client = agg.clients["api_sports"]
+    fetch_stats = getattr(client, "fetch_fixture_statistics", None)
+    sync_stats = sync_finished_results(
+        client.fetch_fixture,
+        fetch_odds_fn=client.fetch_odds,
         fetch_statistics_fn=fetch_stats,
+        fetch_by_league_fn=client.fetch_fixtures_by_league,
+        fetch_by_date_fn=getattr(client, "fetch_fixtures_by_date", None),
         max_fixtures=int(max_fixtures),
         min_after_kickoff_hours=float(min_h),
     )
-    msg = (
+    updated = int(sync_stats.get("updated") or 0)
+    msg = sync_stats.get("message") or (
         f"Updated {updated} snapshot row(s) with full-time results."
         if updated
         else "No pending fixtures needed an update (already synced or not FT yet)."
@@ -622,10 +933,145 @@ def run_pred_log_sync_for_web(
     return {
         "ok": True,
         "enabled": True,
-        "updated": int(updated),
+        "updated": updated,
         "message": msg,
+        "sync_stats": sync_stats,
         "today": monitor_today_dict(),
         "yesterday": monitor_yesterday_dict(),
+    }
+
+
+def _auto_sync_enabled() -> bool:
+    load_dotenv()
+    if not _enabled():
+        return False
+    raw = (os.getenv("HIBS_PRED_LOG_SYNC_AUTO") or "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def _auto_sync_min_interval_sec() -> int:
+    try:
+        return max(300, int(os.getenv("HIBS_PRED_LOG_SYNC_AUTO_MIN_SEC", "1800")))
+    except ValueError:
+        return 1800
+
+
+def _auto_sync_state_path() -> str:
+    from hibs_predictor.cache import default_cache_dir
+
+    return os.path.join(default_cache_dir(), ".pred_log_sync_auto.last")
+
+
+def pending_settlement_count() -> int:
+    """Distinct fixtures with snapshots but no FT result yet."""
+    if not os.path.isfile(_db_path()):
+        return 0
+    init_db()
+    try:
+        conn = sqlite3.connect(_db_path(), timeout=10)
+        try:
+            row = conn.execute(
+                """
+                SELECT COUNT(DISTINCT fixture_id) FROM prediction_snapshots
+                WHERE result_recorded_at IS NULL OR result_outcome IS NULL OR result_outcome = ''
+                """
+            ).fetchone()
+            return int(row[0] if row else 0)
+        finally:
+            conn.close()
+    except Exception:
+        return 0
+
+
+def maybe_auto_sync_prediction_results(*, force: bool = False) -> Dict[str, Any]:
+    """
+    Throttled settlement pass after dashboard bundle builds (same as pred-log-sync).
+
+    Does not block predictions or DQ — only fills result columns on existing snapshots.
+    """
+    if not _auto_sync_enabled():
+        return {"ok": True, "skipped": True, "reason": "auto_sync_disabled"}
+    state_path = _auto_sync_state_path()
+    now_ts = datetime.now(timezone.utc).timestamp()
+    if not force and os.path.isfile(state_path):
+        try:
+            last = float(open(state_path, encoding="utf-8").read().strip())
+            if now_ts - last < _auto_sync_min_interval_sec():
+                return {"ok": True, "skipped": True, "reason": "throttled", "pending": pending_settlement_count()}
+        except Exception:
+            pass
+    pending = pending_settlement_count()
+    if pending == 0 and not force:
+        return {"ok": True, "skipped": True, "reason": "no_pending", "pending": 0}
+    result = run_pred_log_sync_for_web()
+    try:
+        os.makedirs(os.path.dirname(state_path), exist_ok=True)
+        with open(state_path, "w", encoding="utf-8") as fh:
+            fh.write(str(now_ts))
+    except Exception:
+        pass
+    updated = int(result.get("updated") or 0)
+    if updated:
+        print(f"[Prediction log] auto-sync settled {updated} snapshot row(s) ({pending} pending before)")
+    result["auto_sync"] = True
+    result["pending_before"] = pending
+    return result
+
+
+def recent_logged_results_dict(*, limit: int = 12) -> Dict[str, Any]:
+    """Latest FT-settled engine monitor rows for dashboard / API (deduped per fixture)."""
+    empty: Dict[str, Any] = {
+        "enabled": prediction_log_enabled(),
+        "rows": [],
+        "summary": {"best_pick": {"wins": 0, "losses": 0, "pending": 0}, "value_pick": {"attempts": 0}},
+        "pending_settlement": 0,
+        "n_scored_total": 0,
+    }
+    if not prediction_log_enabled() or not os.path.isfile(_db_path()):
+        return empty
+    init_db()
+    cap = max(1, min(50, int(limit)))
+    conn = sqlite3.connect(_db_path(), timeout=15)
+    conn.row_factory = sqlite3.Row
+    try:
+        n_scored = conn.execute(
+            """
+            SELECT COUNT(DISTINCT fixture_id) FROM prediction_snapshots
+            WHERE result_outcome IS NOT NULL AND result_outcome != ''
+            """
+        ).fetchone()
+        candidates = conn.execute(
+            """
+            SELECT id, fixture_id, league_code, captured_at, kickoff_iso,
+                   home_name, away_name, prediction_json, enrich_summary_json,
+                   result_home, result_away, result_outcome, result_status, result_recorded_at
+            FROM prediction_snapshots
+            WHERE result_outcome IS NOT NULL AND result_outcome != ''
+            ORDER BY result_recorded_at DESC, id DESC
+            LIMIT ?
+            """,
+            (cap * 4,),
+        ).fetchall()
+    finally:
+        conn.close()
+    seen: set[int] = set()
+    rows: List[sqlite3.Row] = []
+    for r in candidates:
+        fid = int(r["fixture_id"])
+        if fid in seen:
+            continue
+        seen.add(fid)
+        rows.append(r)
+        if len(rows) >= cap:
+            break
+    meta, table = _monitor_rows_to_table(rows)
+    pending = pending_settlement_count()
+    return {
+        "enabled": True,
+        "rows": table,
+        "summary": meta,
+        "pending_settlement": pending,
+        "n_scored_total": int(n_scored[0] if n_scored else 0),
     }
 
 
@@ -1478,6 +1924,300 @@ def monitor_summary_dict(*, days: Optional[int] = None) -> Dict[str, Any]:
         league_rows.append(row)
     base["by_league"] = league_rows
     return base
+
+
+def _kickoff_window_cutoff_iso(*, days: int) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=int(days))).isoformat()
+
+
+def _dedupe_latest_pre_kickoff(rows: List[sqlite3.Row]) -> List[sqlite3.Row]:
+    """One row per fixture: latest capture at or before kickoff (+15m grace)."""
+    best: Dict[int, sqlite3.Row] = {}
+    for r in rows:
+        try:
+            fid = int(r["fixture_id"])
+        except (TypeError, ValueError):
+            continue
+        ko = _parse_kickoff_iso(str(r["kickoff_iso"] or ""))
+        cap = _parse_kickoff_iso(str(r["captured_at"] or ""))
+        if ko and cap and cap > ko + timedelta(minutes=15):
+            continue
+        prev = best.get(fid)
+        if prev is None or str(r["captured_at"] or "") >= str(prev["captured_at"] or ""):
+            best[fid] = r
+    return list(best.values())
+
+
+def _metrics_for_rows(rows: List[sqlite3.Row]) -> Dict[str, Any]:
+    """Brier, log loss, pick accuracy, value legs on scored deduped rows."""
+    brier_sum = 0.0
+    logloss_sum = 0.0
+    book_brier_sum = 0.0
+    book_n = 0
+    n = 0
+    pick_correct = 0
+    pick_attempts = 0
+    value_wins = 0
+    value_losses = 0
+    by_league: Dict[str, Dict[str, Any]] = {}
+    by_day: Dict[str, Dict[str, Any]] = {}
+
+    for r in rows:
+        out = (r["result_outcome"] or "").lower()
+        if out not in ("home", "draw", "away"):
+            continue
+        try:
+            pred = json.loads(r["prediction_json"])
+        except Exception:
+            continue
+        probs = pred.get("probabilities") or {}
+        ph = _safe_prob(probs.get("home"))
+        pd = _safe_prob(probs.get("draw"))
+        pa = _safe_prob(probs.get("away"))
+        yh, yd, ya = (1.0, 0.0, 0.0) if out == "home" else ((0.0, 1.0, 0.0) if out == "draw" else (0.0, 0.0, 1.0))
+        brier = (ph - yh) ** 2 + (pd - yd) ** 2 + (pa - ya) ** 2
+        p_correct = ph if out == "home" else (pd if out == "draw" else pa)
+        brier_sum += brier
+        logloss_sum += -math.log(p_correct)
+        n += 1
+
+        bo = pred.get("bookmaker_odds") or {}
+        try:
+            oh = _implied_from_decimal(bo.get("home"))
+            od = _implied_from_decimal(bo.get("draw"))
+            oa = _implied_from_decimal(bo.get("away"))
+        except Exception:
+            oh = od = oa = None
+        if oh and od and oa:
+            tot = oh + od + oa
+            bh, bd, ba = oh / tot, od / tot, oa / tot
+            book_brier_sum += (bh - yh) ** 2 + (bd - yd) ** 2 + (ba - ya) ** 2
+            book_n += 1
+
+        pick = (pred.get("predicted_outcome") or "").lower()
+        if pick in ("home", "draw", "away"):
+            pick_attempts += 1
+            if pick == out:
+                pick_correct += 1
+
+        vr = _value_pick_result_label(r, pred)
+        if vr == "W":
+            value_wins += 1
+        elif vr == "L":
+            value_losses += 1
+
+        lg = str(r["league_code"] or "unknown")
+        bucket = by_league.setdefault(lg, {"n": 0, "brier_sum": 0.0, "pick_ok": 0, "pick_n": 0})
+        bucket["n"] += 1
+        bucket["brier_sum"] += brier
+        if pick in ("home", "draw", "away"):
+            bucket["pick_n"] += 1
+            if pick == out:
+                bucket["pick_ok"] += 1
+
+        day = str(r["kickoff_iso"] or "")[:10] or "unknown"
+        db = by_day.setdefault(day, {"n": 0, "brier_sum": 0.0})
+        db["n"] += 1
+        db["brier_sum"] += brier
+
+    if n == 0:
+        return {"n_scored": 0}
+
+    baseline = _env_float("HIBS_CALIB_BASELINE_BRIER", 0.66)
+    uniform_brier = round(2.0 / 3.0, 5)
+    model_brier = round(brier_sum / n, 5)
+    out_metrics: Dict[str, Any] = {
+        "n_scored": n,
+        "brier_score_1x2": model_brier,
+        "log_loss_1x2": round(logloss_sum / n, 5),
+        "best_pick_accuracy_pct": round(100.0 * pick_correct / pick_attempts, 2) if pick_attempts else None,
+        "best_pick_n": pick_attempts,
+        "best_pick_correct": pick_correct,
+        "baseline_brier": baseline,
+        "uniform_random_brier": uniform_brier,
+        "beats_baseline": model_brier < baseline,
+        "beats_uniform": model_brier < uniform_brier,
+        "value_settled": value_wins + value_losses,
+        "value_wins": value_wins,
+        "value_losses": value_losses,
+    }
+    if value_wins + value_losses:
+        out_metrics["value_hit_rate_pct"] = round(100.0 * value_wins / (value_wins + value_losses), 2)
+    if book_n:
+        out_metrics["book_implied_brier"] = round(book_brier_sum / book_n, 5)
+        out_metrics["book_n"] = book_n
+        out_metrics["model_vs_book_brier_delta"] = round(model_brier - book_brier_sum / book_n, 5)
+
+    league_rows = []
+    for lg, b in sorted(by_league.items(), key=lambda x: -x[1]["n"]):
+        ns = int(b["n"])
+        pn = int(b["pick_n"])
+        league_rows.append(
+            {
+                "league": lg,
+                "n": ns,
+                "brier": round(b["brier_sum"] / ns, 5),
+                "pick_accuracy_pct": round(100.0 * b["pick_ok"] / pn, 2) if pn else None,
+            }
+        )
+    out_metrics["by_league"] = league_rows
+    out_metrics["by_day"] = [
+        {"day": d, "n": int(b["n"]), "brier": round(b["brier_sum"] / b["n"], 5)}
+        for d, b in sorted(by_day.items())
+    ]
+    return out_metrics
+
+
+def backtest_report_dict(*, days: int = 30) -> Dict[str, Any]:
+    """
+    Honest rolling backtest on engine audit log (pre-kickoff snapshots vs FT results).
+
+    Uses kickoff time in the last ``days`` calendar days. Dedupes to one snapshot per fixture.
+    Reports coverage limitations when settlement or history is incomplete.
+    """
+    window_days = max(1, int(days))
+    baseline = _env_float("HIBS_CALIB_BASELINE_BRIER", 0.66)
+    out: Dict[str, Any] = {
+        "ok": True,
+        "requested_window_days": window_days,
+        "baseline_brier": baseline,
+        "db_path": _db_path(),
+        "honest_summary": "",
+        "limitations": [],
+    }
+    if not prediction_log_enabled():
+        out["ok"] = False
+        out["message"] = "HIBS_PREDICTION_LOG_ENABLED=0 — enable audit logging first."
+        return out
+    if not os.path.isfile(_db_path()):
+        out["ok"] = False
+        out["message"] = "No prediction_audit.sqlite — load dashboard to seed snapshots."
+        return out
+
+    init_db()
+    cutoff = _kickoff_window_cutoff_iso(days=window_days)
+    now = datetime.now(timezone.utc)
+    conn = sqlite3.connect(_db_path(), timeout=20)
+    conn.row_factory = sqlite3.Row
+    try:
+        all_rows = list(
+            conn.execute(
+                """
+                SELECT id, fixture_id, league_code, captured_at, kickoff_iso, home_name, away_name,
+                       prediction_json, enrich_summary_json, result_outcome, result_recorded_at,
+                       result_home, result_away, result_status, data_quality_pct
+                FROM prediction_snapshots
+                WHERE kickoff_iso IS NOT NULL AND kickoff_iso != ''
+                  AND kickoff_iso >= ?
+                ORDER BY kickoff_iso
+                """,
+                (cutoff,),
+            ).fetchall()
+        )
+        span = conn.execute(
+            "SELECT MIN(kickoff_iso), MAX(kickoff_iso), MIN(captured_at), MAX(captured_at), COUNT(*) FROM prediction_snapshots"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if span:
+        out["data_span_all_time"] = {
+            "first_kickoff": (span[0] or "")[:10],
+            "last_kickoff": (span[1] or "")[:10],
+            "first_capture": (span[2] or "")[:10],
+            "last_capture": (span[3] or "")[:10],
+            "snapshots_total": int(span[4] or 0),
+        }
+
+    deduped = _dedupe_latest_pre_kickoff(all_rows)
+    future = 0
+    pending = 0
+    scored_rows: List[sqlite3.Row] = []
+    for r in deduped:
+        ko = _parse_kickoff_iso(str(r["kickoff_iso"] or ""))
+        if ko and now < ko + timedelta(hours=2.5):
+            future += 1
+            continue
+        if r["result_outcome"] and str(r["result_outcome"]).strip():
+            scored_rows.append(r)
+        else:
+            pending += 1
+
+    n_dedup = len(deduped)
+    n_scored = len(scored_rows)
+    out["coverage"] = {
+        "snapshots_in_kickoff_window": len(all_rows),
+        "fixtures_deduped_pre_kickoff": n_dedup,
+        "scored_with_ft": n_scored,
+        "pending_kickoff_passed_no_result": pending,
+        "future_or_too_recent": future,
+        "settlement_rate_pct": round(100.0 * n_scored / n_dedup, 2) if n_dedup else None,
+        "window_start_kickoff": cutoff[:10],
+    }
+
+    if deduped:
+        first_ko = str(deduped[0]["kickoff_iso"] or "")[:10]
+        last_ko = str(deduped[-1]["kickoff_iso"] or "")[:10]
+        out["actual_kickoff_span"] = {"first": first_ko, "last": last_ko}
+        try:
+            d0 = datetime.fromisoformat(first_ko)
+            d1 = datetime.fromisoformat(last_ko)
+            out["actual_calendar_days"] = (d1 - d0).days + 1
+        except Exception:
+            out["actual_calendar_days"] = None
+
+    if out.get("actual_calendar_days") is not None and out["actual_calendar_days"] < window_days:
+        out["limitations"].append(
+            f"Audit history covers ~{out['actual_calendar_days']} calendar day(s) of kickoffs, "
+            f"not a full {window_days}-day backtest — metrics are indicative only."
+        )
+    if n_dedup and n_scored < max(10, int(0.5 * n_dedup)):
+        out["limitations"].append(
+            f"Only {n_scored}/{n_dedup} deduped fixtures have FT results — run pred-log-sync; "
+            "check API plan covers your leagues (Nordics/UCL may return empty)."
+        )
+    if len(all_rows) > n_dedup * 3:
+        out["limitations"].append(
+            "High snapshot duplication — bundle re-logging; backtest uses latest pre-kickoff row per fixture."
+        )
+
+    if n_scored == 0:
+        out["ok"] = True
+        out["metrics"] = None
+        out["message"] = "No scored fixtures in window — settlement loop not closed yet."
+        out["honest_summary"] = (
+            f"0/{n_dedup} fixtures in the last {window_days}d kickoff window have FT results in the audit DB."
+        )
+        out["pred_log_sync_cron"] = pred_log_sync_cron_status()
+        return out
+
+    metrics = _metrics_for_rows(scored_rows)
+    out["metrics"] = metrics
+    mb = metrics.get("brier_score_1x2")
+    pick_pct = metrics.get("best_pick_accuracy_pct")
+    out["honest_summary"] = (
+        f"On {n_scored} settled fixtures (deduped pre-kickoff): Brier {mb}, log loss {metrics.get('log_loss_1x2')}, "
+        f"top pick {pick_pct}% correct"
+        + (
+            f", value hit {metrics.get('value_hit_rate_pct')}% ({metrics.get('value_settled')} legs)"
+            if metrics.get("value_settled")
+            else ""
+        )
+        + (
+            f" — {'beats' if metrics.get('beats_baseline') else 'above'} baseline {baseline}"
+        )
+    )
+    if not metrics.get("beats_baseline"):
+        out["limitations"].append(
+            f"Model Brier {mb} is not below sale baseline {baseline} on this sample — do not market as calibrated yet."
+        )
+    if n_scored < _env_float("HIBS_SCALE_READY_MIN_N", 25):
+        out["limitations"].append(
+            f"Sample size {n_scored} < {_env_float('HIBS_SCALE_READY_MIN_N', 25)} — too small for buyer-grade proof."
+        )
+    out["pred_log_sync_cron"] = pred_log_sync_cron_status()
+    out["scale_readiness"] = scale_readiness_dict()
+    return out
 
 
 def report_summary_dict() -> Dict[str, Any]:

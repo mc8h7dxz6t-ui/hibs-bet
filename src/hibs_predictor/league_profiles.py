@@ -1,12 +1,21 @@
 """League-specific model calibration profiles.
 
-These are intentionally small, transparent adjustments. They do not replace the
-model; they nudge outputs for league context and expose the assumption to the UI.
+Transparent, auditable adjustments (not manual per-match tweaks). Coefficients live in
+``config/league_profiles.yaml`` when present; Python ``_PROFILES`` is the fallback catalog.
 """
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any, Dict, Tuple
+
+try:
+    import yaml
+except ImportError:
+    yaml = None  # type: ignore[assignment,misc]
+
+_PROFILES_YAML_PATH = Path(__file__).resolve().parents[2] / "config" / "league_profiles.yaml"
 
 
 _DEFAULT = {
@@ -222,11 +231,44 @@ _PROFILES: Dict[str, Dict[str, Any]] = {
 }
 
 
+def _load_yaml_profiles() -> Dict[str, Dict[str, Any]]:
+    """Optional version-controlled overrides (buyer-facing audit trail)."""
+    if yaml is None or not _PROFILES_YAML_PATH.is_file():
+        return {}
+    try:
+        raw = yaml.safe_load(_PROFILES_YAML_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    default = raw.get("default") if isinstance(raw.get("default"), dict) else {}
+    leagues = raw.get("leagues") if isinstance(raw.get("leagues"), dict) else {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for code, row in leagues.items():
+        if not isinstance(row, dict):
+            continue
+        merged = dict(default)
+        merged.update(row)
+        out[str(code).upper()] = merged
+    return out
+
+
+_YAML_PROFILES = _load_yaml_profiles()
+
+
+def profile_config_source() -> str:
+    if _YAML_PROFILES:
+        return str(_PROFILES_YAML_PATH)
+    return "src/hibs_predictor/league_profiles.py"
+
+
 def get_league_profile(league_code: str) -> Dict[str, Any]:
     code = (league_code or "").upper()
     base = dict(_DEFAULT)
     base.update(_PROFILES.get(code, {}))
+    base.update(_YAML_PROFILES.get(code, {}))
     base["league_code"] = code
+    base["config_source"] = profile_config_source()
     return base
 
 

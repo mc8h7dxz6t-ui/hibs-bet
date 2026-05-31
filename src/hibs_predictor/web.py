@@ -1450,6 +1450,9 @@ def fetch_next_48h_fixtures(league_code: str, *, allow_stale: bool = False) -> L
 
     stale_by_key = _stale_fixture_row_index(stale_rows)
     fixtures = []
+    from hibs_predictor.enrich_chunk import chunked_enrich_enabled, enrich_chunk_pause_seconds, enrich_chunk_size
+
+    enrich_chunk_i = 0
     for fixture in fetched.values():
         fix_key = _fixture_key(fixture)
         if _provider_guard_blocked("api_sports"):
@@ -1458,6 +1461,11 @@ def fetch_next_48h_fixtures(league_code: str, *, allow_stale: bool = False) -> L
                 fixtures.append(dict(stale_row))
                 continue
         enriched = _safe_enrich(fixture, league_code)
+        enrich_chunk_i += 1
+        if chunked_enrich_enabled() and enrich_chunk_i % enrich_chunk_size() == 0:
+            import time
+
+            time.sleep(enrich_chunk_pause_seconds())
         try:
             prediction = betting_engine.predict_with_confidence(enriched)
         except Exception as e:
@@ -2335,6 +2343,14 @@ def _finalize_fixture_bundle(
             print(f"[Prediction log] auto-logged {n_logged} snapshot(s)")
     except Exception as exc:
         print(f"[Prediction log] {exc!r}")
+    try:
+        from hibs_predictor.prediction_log import maybe_auto_sync_prediction_results
+
+        sync_out = maybe_auto_sync_prediction_results()
+        if sync_out.get("updated"):
+            print(f"[Prediction log] results synced: {sync_out.get('message')}")
+    except Exception as exc:
+        print(f"[Prediction log sync] {exc!r}")
     _ensure_fixture_pick_menus(all_fixtures)
     all_fixtures.sort(key=lambda x: x.get("kickoff_sort") or x.get("date") or "")
     league_tables = _build_league_tables(all_fixtures, include_live=False, include_domestic=include_domestic)
@@ -3109,6 +3125,12 @@ def logout():
     return redirect(url_for("index"))
 
 
+def _dashboard_logged_results() -> Dict[str, Any]:
+    from hibs_predictor.prediction_log import recent_logged_results_dict
+
+    return recent_logged_results_dict(limit=10)
+
+
 @app.route("/")
 @login_required
 def index():
@@ -3193,6 +3215,7 @@ def index():
             progressive_load=progressive,
             cold_start=bool(data.get("cold_start")),
             ops_banner=_dashboard_ops_context(data),
+            logged_results=_dashboard_logged_results(),
         )
         body = html.encode("utf-8")
         resp = make_response(body)
@@ -3276,6 +3299,7 @@ def index():
         progressive_load=progressive,
         cold_start=bool(data.get("cold_start")),
         ops_banner=_dashboard_ops_context(data),
+        logged_results=_dashboard_logged_results(),
     )
     body = html.encode("utf-8")
     resp = make_response(body)
@@ -3406,6 +3430,19 @@ def api_monitor_sync_results():
     payload = run_pred_log_sync_for_web(min_after_kickoff_hours=min_after)
     status = 200 if payload.get("ok") else 400
     return jsonify(payload), status
+
+
+@app.route("/api/monitor/recent-results")
+@login_required
+def api_monitor_recent_results():
+    """Latest settled rows from prediction audit log (engine monitor)."""
+    from hibs_predictor.prediction_log import recent_logged_results_dict
+
+    try:
+        limit = max(1, min(50, int(request.args.get("limit", "12"))))
+    except ValueError:
+        return jsonify({"ok": False, "error": "invalid_limit"}), 400
+    return jsonify(recent_logged_results_dict(limit=limit))
 
 
 @app.route("/api/cache/clear", methods=["POST", "GET"])

@@ -1,0 +1,56 @@
+# League profile coefficients — version-controlled, auditable inputs to the engine.
+# Loaded by league_profiles.py (Python fallbacks remain if this file is missing).
+# Fields:
+#   draw_target: long-run draw share anchor for 1X2 blend
+#   upset_risk: extra caution on mismatch longshots
+#   market_anchor: weight pulling model 1X2 toward book implied
+#   value_margin_extra: additional edge required before value flags
+
+version: 1
+default:
+  label: Balanced club profile
+  description: Standard club-league calibration with normal home advantage and market anchoring.
+  draw_target: 0.255
+  upset_risk: 0.08
+  market_anchor: 0.08
+  value_margin_extra: 0.0
+
+leagues:
+  EPL:
+    label: Premier League profile
+    description: Strong market and table signal; longshot value is treated strictly.
+    draw_target: 0.245
+    upset_risk: 0.07
+    market_anchor: 0.10
+    value_margin_extra: 0.004
+  SCOTLAND:
+    label: Scottish Premiership profile
+    draw_target: 0.265
+    upset_risk: 0.10
+    market_anchor: 0.10
+    value_margin_extra: 0.006
+  UCL:
+    label: Elite Europe profile
+    draw_target: 0.25
+    upset_risk: 0.09
+    market_anchor: 0.11
+    value_margin_extra: 0.006
+  INTL_FRIENDLIES:
+    label: International friendlies profile
+    description: High squad rotation; lean on market signal; value needs extra edge.
+    draw_target: 0.28
+    upset_risk: 0.18
+    market_anchor: 0.15
+    value_margin_extra: 0.022
+  NORWAY_ELITESERIEN:
+    label: Eliteserien profile
+    draw_target: 0.265
+    upset_risk: 0.12
+    market_anchor: 0.10
+    value_margin_extra: 0.010
+  FINLAND_VEIKKAUSLIIGA:
+    label: Veikkausliiga profile
+    draw_target: 0.27
+    upset_risk: 0.13
+    market_anchor: 0.10
+    value_margin_extra: 0.011

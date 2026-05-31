@@ -1169,6 +1169,21 @@
         .du-teams{min-width:0;word-break:break-word;}
         .du-vs{color:var(--muted);margin:0 2px;}
         .du-empty,.du-hint{font-size:0.68em;color:var(--muted);margin:8px 0 0;}
+        .dash-logged-results{margin-top:14px;padding-top:12px;border-top:1px solid rgba(148,163,184,0.12);}
+        .dash-logged-sub{font-size:0.66em;color:var(--muted);line-height:1.4;margin:0 0 8px;}
+        .dash-logged-pending{color:#fde68a;}
+        .dash-logged-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;max-height:min(36vh,280px);overflow-y:auto;-webkit-overflow-scrolling:touch;}
+        .dash-logged-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 8px;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,0.1);background:rgba(2,6,23,0.45);font-size:0.68em;line-height:1.3;}
+        .dash-logged-win{border-color:rgba(57,255,20,0.22);background:rgba(57,255,20,0.06);}
+        .dash-logged-loss{border-color:rgba(248,113,113,0.2);background:rgba(220,38,38,0.06);}
+        .dash-logged-score{font-weight:900;font-variant-numeric:tabular-nums;color:var(--text);}
+        .dash-logged-match{grid-column:2;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+        .dash-logged-meta{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:6px;font-size:0.92em;color:var(--muted);}
+        .dash-logged-pick{font-weight:700;color:var(--neon-value);}
+        .dash-logged-res{font-weight:800;padding:1px 5px;border-radius:4px;}
+        .dash-logged-res.res-w{color:#86efac;background:rgba(57,255,20,0.12);}
+        .dash-logged-res.res-l{color:#fca5a5;background:rgba(220,38,38,0.12);}
+        .dash-logged-val{color:var(--gold);font-weight:700;}
         .lg-count{font-weight:600;opacity:0.65;}
         .fixture-card.fixture-highlight{outline:2px solid rgba(57,255,20,0.55);box-shadow:0 0 0 4px rgba(57,255,20,0.12);}
         .dash-side-brand{margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border);}

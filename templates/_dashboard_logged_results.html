@@ -1,0 +1,28 @@
+{% if logged_results and logged_results.enabled %}
+<section class="dash-logged-results" aria-labelledby="dash-logged-results-hd">
+    <h3 class="dash-side-hd" id="dash-logged-results-hd">Logged results</h3>
+    <p class="dash-logged-sub">
+        Engine monitor — pre-kickoff picks joined to FT scores.
+        {% if logged_results.n_scored_total %}<strong>{{ logged_results.n_scored_total }}</strong> settled{% endif %}
+        {% if logged_results.pending_settlement %} · <span class="dash-logged-pending">{{ logged_results.pending_settlement }} awaiting FT</span>{% endif %}
+    </p>
+    {% if logged_results.rows %}
+    <ul class="dash-logged-list">
+        {% for row in logged_results.rows %}
+        <li class="dash-logged-row {% if row.result == 'W' %}dash-logged-win{% elif row.result == 'L' %}dash-logged-loss{% endif %}">
+            <span class="dash-logged-score">{{ row.score or '—' }}</span>
+            <span class="dash-logged-match">{{ row.match }}</span>
+            <span class="dash-logged-meta">
+                {% if row.pick %}<span class="dash-logged-pick">{{ row.pick|upper }}{% if row.model_pct %} {{ row.model_pct }}%{% endif %}</span>{% endif %}
+                {% if row.result %}<span class="dash-logged-res {% if row.result == 'W' %}res-w{% elif row.result == 'L' %}res-l{% endif %}">{{ row.result }}</span>{% endif %}
+                {% if row.value_result %}<span class="dash-logged-val" title="{{ row.value_market or 'Value' }}">V:{{ row.value_result }}</span>{% endif %}
+            </span>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="du-hint">No FT results synced yet — runs automatically after matches (cron + dashboard refresh).</p>
+    {% endif %}
+    <p class="du-hint"><a href="/performance">Full track record →</a> · <a href="/tracker" target="_blank" rel="noopener">Public ledger</a></p>
+</section>
+{% endif %}

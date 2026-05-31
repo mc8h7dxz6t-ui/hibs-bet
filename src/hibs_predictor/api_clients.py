@@ -714,6 +714,23 @@ class ApiSportsFootballClient(BaseApiClient):
         resp = data.get("response", [])
         return resp if isinstance(resp, list) else []
 
+    def fetch_fixtures_by_date(
+        self,
+        date: str,
+        *,
+        league_id: Optional[int] = None,
+        season: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """All fixtures on a calendar day (optional league filter) — used for audit settlement repair."""
+        params: Dict[str, Any] = {"date": date}
+        if league_id is not None:
+            params["league"] = int(league_id)
+        if season is not None:
+            params["season"] = int(season)
+        data = self._get_json("fixtures", params=params)
+        resp = data.get("response", [])
+        return resp if isinstance(resp, list) else []
+
     def resolve_team_id_by_name(self, team_name: str) -> Optional[int]:
         """Map display name → API-Football team id (cached). Used when fixtures carry FotMob/FDO ids."""
         from hibs_predictor.team_aliases import canonical_team_key, team_names_match

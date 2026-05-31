@@ -16,7 +16,9 @@ LOG_DIR="${LOG_DIR:-/var/log/hibs-bet}"
 
 CRON_LINES=(
   "# hibs-bet: backfill FT scores + closing 1X2 for CLV (daily 06:30 UTC)"
-  "30 6 * * * cd ${APP_ROOT} && HOME=${APP_ROOT} PYTHONPATH=src ${PY} -m hibs_predictor.main pred-log-sync >> ${LOG_DIR}/pred-log-sync.log 2>&1"
+  "30 6 * * * cd ${APP_ROOT} && HOME=${APP_ROOT} PYTHONPATH=src ${PY} -m hibs_predictor.main pred-log-sync --verbose >> ${LOG_DIR}/pred-log-sync.log 2>&1"
+  "# hibs-bet: evening settlement pass (23:00 UTC — same day FT)"
+  "0 23 * * * cd ${APP_ROOT} && HOME=${APP_ROOT} PYTHONPATH=src ${PY} -m hibs_predictor.main pred-log-sync --verbose >> ${LOG_DIR}/pred-log-sync-evening.log 2>&1"
   "# hibs-bet: fit league Brier shrink → .cache/calibration_v1.json (Sun 07:00 UTC)"
   "0 7 * * 0 cd ${APP_ROOT} && HOME=${APP_ROOT} PYTHONPATH=src ${PY} -m hibs_predictor.main calibration-fit >> ${LOG_DIR}/calibration-fit.log 2>&1"
 )

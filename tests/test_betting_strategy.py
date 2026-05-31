@@ -412,7 +412,7 @@ def test_clv_enrich_after_sync(tmp_path, monkeypatch):
             }
         ]
 
-    n = pl.sync_finished_results(fetch_fixture, fetch_odds_fn=fetch_odds, min_after_kickoff_hours=0)
+    n = pl.sync_finished_results(fetch_fixture, fetch_odds_fn=fetch_odds, min_after_kickoff_hours=0)["updated"]
     assert n >= 1
 
     conn = sqlite3.connect(str(db))
